@@ -2,11 +2,15 @@
 
 ## Overview
 
-This repository contains code and files to organize information regarding the analysis and visualization of ROV telemetry information. 
-Our overarching objective here is to provide an open-source location in which we store code and resources necessary for other entities or individuals to reproduce our ROV telemetry and sensor file management and AI image analyses. 
+This repository walks interested parties through the sequence for ROV field work, from ROV set-up to extracting relavent telelmetry information from surveys. You can find code to organize information regarding the analysis and visualization of ROV telemetry information. 
+Our overarching objective here is to provide an open-source location where other entities can learn our survey methods and modify them to their intended use. 
+
+## ROV, sensors, modifications 
+### ROV
+* BlueROV2 by BlueRobotics with heavy configuration upgrade 
 
 ## General information; workflows ready to implement
-The following repos contain general information about our work, and specialized repos for ROV telemetry analyses, processing and analyses of ROV-derived benthic abundance and distribution data, and simulating benthic data.  
+The following repos contain general information about our work, and specialized repos for ROV telemetry analyses, processing and analyses of ROV-derived benthic abundance and distribution data.
 
 ```mermaid
 graph TD
@@ -17,7 +21,7 @@ A --> E["<a href='https://github.com/Seattle-Aquarium/CCR_analytical_resources' 
 
 A --> F["<a href='https://github.com/Seattle-Aquarium/CCR_benthic_analyses' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_benthic_analyses</a><br><font color='darkgray'>code to work with ROV-derived benthic community data</font>"]
 
-A --> G["<a href='https://github.com/Seattle-Aquarium/CCR_benthic_taxa_simulation' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_benthic_taxa_simulation</a><br><font color='darkgray'>code to simulate ROV-derived benthic community</font>"]
+
 ```
 
 
