@@ -1,85 +1,94 @@
-# CCR ROV telemetry processing
+# CCR ROV Survey Methods  
 
-## Overview
+## 🌊 Overview  
 
-This repository details from the ROV set-up to extracting relavent telelmetry information from surveys. You can find code to organize information regarding the analysis and visualization of ROV telemetry information. 
-Our overarching objective here is to provide an open-source location where other entities can learn our survey methods and modify them to their intended use. 
+This repository provides an overview of the **Seattle Aquarium’s Coastal Climate Resilience (CCR) team’s ROV survey workflow** — from hardware configuration to data extraction and visualization. It includes code and documentation for processing and organizing ROV telemetry data collected during benthic habitat surveys.  
 
-## Hardware
-### 🤖 ROV
-* [BlueROV2](https://bluerobotics.com/store/rov/bluerov2/) by BlueRobotics with heavy configuration upgrade and 150m tether
-* Raspberry Pi 4 8GB Model B with [Navigator Flight Controller](https://bluerobotics.com/store/comm-control-power/control/navigator/)
-* Modifications: kelp gaurds made with heavy plastic to reduce snagging on kelp stipes while surveying 
+Our goal is to create an **open-source reference** that allows other research groups to understand, replicate, and adapt our methods for their own underwater survey applications.  
 
-### ⚡ Power
-* [Outland Technology Power Supply](https://bluerobotics.com/store/comm-control-power/powersupplies-batteries/otps1kw/) for the BlueROV2 
-* Outland Technology [tether reel](https://www.outlandtech.com/resources/rovtetherresources) for BlueROV2: RL-750-2 
-### :flashlight: Lights 
-* x4 [Kraken Solar Flare Mini 18000](https://krakensports.ca/product/solar-flare-mini-18000/) 
-* x4 [Ultralight AD-1420-IK](https://ulcs.com/product/ad-1420-ik-base-adapter/?srsltid=AfmBOoqhjfKVo0aI3aMI6ZeeyEz2tsy--UoIa0qY0KNQkLEsrkHGSEGb) universal ball adapter attached to ROV frame 
-* Light mounts 
+---
 
-### 𖦏 Additional Sensors
-* Water Linked [doppler velcoty log (DVL)](https://bluerobotics.com/store/the-reef/dvl-a50/) A50
-  * firmware: v1.0.8 updated 7.24.2025
+## ⚙️ Hardware  
 
-### :camera: Cameras
-* [GoPro Hero Black 12/13 ](https://gopro.com/en/us/shop/cameras/buy/hero13black/CHDHX-131-master.html?utm_source=google&utm_medium=paidsearch&utm_campaign=dr&utm_content=websitevisitors&utm_creative_format=pMax&gad_source=1&gad_campaignid=22037678378&gbraid=0AAAAAD76j2AHBF9raMDpYgFuZwoEYm0_o&gclid=CjwKCAiA_dDIBhB6EiwAvzc1cPF1aQaWusdY5SmscSP77gFAdyGCU93zl6fdEFb3VDqMd5RVHKXM1xoCDusQAvD_BwE)
-* [Protective Housing ](https://gopro.com/en/us/shop/mounts-accessories/protective-housing-plus-waterproof-case/ADDIV-001.html?srsltid=AfmBOoo5OwOfbXAGL6kS53kSlPQgWMMVLRcmHy9nGLutxCmRFQ1Ku8qU)
-* [GoPro Labs ](https://gopro.com/en/bn/info/gopro-labs?utm_source=google&utm_medium=paidsearch&utm_campaign=dr&utm_content=websitevisitors&utm_creative_format=rsa&gad_source=1&gad_campaignid=22035106454&gbraid=0AAAAAD76j2DtE7GHehkAfJwhRIS7xKIED&gclid=CjwKCAiA_dDIBhB6EiwAvzc1cE6AFgDXkbaX8yQ576ZY3gDKtNwd4sWPnv204CvuBC8mAfw5_SJ0bBoCk5EQAvD_BwE)
-* Camera time sync: https://gopro.github.io/labs/control/precisiontime/
-* Camera settings for high resolution images:
-  * Camera mode: Photo
-  * Interval: 3s
-  * Lens: wide
-  * Output: RAW
-  * Denoise: low
-  * Color: flat
-  * White balance: native 
+### 🤖 ROV Platform  
+- [**BlueROV2**](https://bluerobotics.com/store/rov/bluerov2/) (Blue Robotics) — Heavy Configuration with 150 m tether  
+- **Navigator Flight Controller** (with Raspberry Pi 4, 8 GB Model B)  
+- **Modifications:** Custom “kelp guards” fabricated from heavy plastic to minimize entanglement with kelp stipes during surveys  
 
-## 🗺️ Positioning 
-* Water Linked [Underwater GPS G2 Standard Kit](https://www.waterlinked.com/shop/underwater-gps-g2-standard-kit-132?hsLang=en&utm_term=3d+sonar&utm_campaign=WL+-+EN+-+G+-+Navigation+-+Sonar&utm_source=adwords&utm_medium=ppc&hsa_acc=5034108088&hsa_cam=21123984177&hsa_grp=161106978238&hsa_ad=694750692647&hsa_src=g&hsa_tgt=kwd-296873283014&hsa_kw=3d+sonar&hsa_mt=b&hsa_net=adwords&hsa_ver=3&gad_source=1&gad_campaignid=21123984177&gbraid=0AAAAACrr5dGrC_E0Dmi2Kw6OhTir2Y4Nb&gclid=CjwKCAiA_dDIBhB6EiwAvzc1cIg1pw5SwXGqtiufAkhsPUeX9ZmazmQNp-RUpyFbC53Go-ZlUWze2hoCBKgQAvD_BwE#attribute_values=59)
-  * Contains Underwater GPS G2 Topside, Locator U1, Antenna
-  * G2 box firmware: v3.3.4 (updated 8/15/2025)
-* [Satellite Compass ](https://landing.advancednavigation.com/inertial-navigation-systems/satellite-compass/gnss-compass/)
-  * v2.47
-* NMEA network 
-   
-## Command Console 
-* Pelican case
-* Rugged laptop with bright screen
-* 19 inch sunlight readable [monitor](https://www.lcdpart.com/products/ms190w1610nt-19-inch-sunlight-readable-open-frame-monitor-1200-nits?srsltid=AfmBOoo7oCJL82KUDJrykjdpIv38Iq-gy-bCiuF3ubEPghvvUVEmp_cA)
-* Ethernet switch 
+### ⚡ Power and Tether Management  
+- [**Outland Technology Power Supply (OTPS-1kW)**](https://bluerobotics.com/store/comm-control-power/powersupplies-batteries/otps1kw/)  
+- [**Outland Technology Tether Reel (RL-750-2)**](https://www.outlandtech.com/resources/rovtetherresources)  
 
-## Firmware/ Software
-### BlueOS  
-* Ardupilot: v4.5.3 (updated 7/24/2025)
-* [DVL extension](https://github.com/bluerobotics/BlueOS-Water-Linked-DVL/): v1.0.8 (updated 7/24/2025)
-* [UGPS extension](https://github.com/waterlinked/blueos-ugps-extension): v1.0.7 (updated 7/24/2025)
-  * modification: add EXTRA_ARGS=--ignore_gps to configuration for sensor fusion 
-* [Surftrack fixit](https://github.com/clydemcqueen/surftrak_fixit): v1.0.0-beta.2 (updated 6/23/2024)
-* [WL UGPS external extension](https://github.com/clydemcqueen/wl_ugps_external_extension)
-  * Provide external (vessel) position and heading information to the Waterlinked Underwater GPS G2 system.
+### 💡 Lighting  
+- 4 × [**Kraken Solar Flare Mini 18,000**](https://krakensports.ca/product/solar-flare-mini-18000/) video lights  
+- 4 × [**Ultralight AD-1420-IK**](https://ulcs.com/product/ad-1420-ik-base-adapter/?srsltid=AfmBOoqhjfKVo0aI3aMI6ZeeyEz2tsy--UoIa0qY0KNQkLEsrkHGSEGb) universal ball adapters mounted to ROV frame  
+- Custom light mounting hardware  
 
+### 📡 Additional Sensors  
+- **Water Linked DVL A50** — Doppler Velocity Log for sub-meter scale positioning  
+  - Firmware: v1.0.8 (updated 2025-07-24)  
 
-## General information; workflows ready to implement
-The following repos contain general information about our work, and specialized repos for ROV telemetry analyses, processing and analyses of ROV-derived benthic abundance and distribution data.
+### 🎥 Cameras  
+- [**GoPro Hero 12 / 13 Black**](https://gopro.com/en/us/shop/cameras/buy/hero13black/CHDHX-131-master.html)  
+- [**Protective Housing**](https://gopro.com/en/us/shop/mounts-accessories/protective-housing-plus-waterproof-case/ADDIV-001.html)  
+- [**GoPro Labs**](https://gopro.com/en/bn/info/gopro-labs) firmware for time synchronization and advanced scripting  
 
-```mermaid
-graph TD
+**Camera configuration (for still-image transects):**  
 
-A["<a href='https://github.com/Seattle-Aquarium/Coastal_Climate_Resilience' target='_blank' style='font-size: 16px; font-weight: bold;'>Coastal_Climate_Resilience</a><br><font color='darkgray'>the main landing pad for the CCR research program</font>"]
+| Setting | Value |
+|----------|--------|
+| Mode | Photo |
+| Interval | 3 s |
+| Lens | Wide |
+| Output | RAW (.GPR) |
+| EV Comp | 0 |
+| White Balance | Native |
+| ISO Min–Max | 100–200 |
+| Sharpness | Low |
+| Color | Flat |
+| Shutter Speed | 1/300 s (`!MEXPX=300` via GoPro Labs) |
 
-A --> E["<a href='https://github.com/Seattle-Aquarium/CCR_analytical_resources' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_ROV_telemetry_processing</a><br><font color='darkgray'>analytical tools for working with ROV telemetry data</font>"]
+**Time synchronization:** [GoPro Precision Time](https://gopro.github.io/labs/control/precisiontime/)  
 
-A --> F["<a href='https://github.com/Seattle-Aquarium/CCR_benthic_analyses' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_benthic_analyses</a><br><font color='darkgray'>code to work with ROV-derived benthic community data</font>"]
+---
 
+## 🗺️ Positioning and Navigation  
 
-```
+- [**Water Linked Underwater GPS G2 Standard Kit**](https://www.waterlinked.com/shop/underwater-gps-g2-standard-kit-132)  
+  - Components: G2 Topside, Locator U1, Antenna  
+  - Firmware: v3.3.4 (updated 2025-08-15)  
 
+- [**Advanced Navigation Satellite Compass**](https://landing.advancednavigation.com/inertial-navigation-systems/satellite-compass/gnss-compass/)  
+  - Firmware: v2.47 (updated 2025-08-08)  
 
+- **NMEA network integration** for synchronized positioning across all sensors  
 
-## Telemetry processing
+---
+
+## 💻 Command Console  
+
+- Custom **Pelican case** housing the surface control system  
+- Ruggedized **laptop** for mission control (BlueOS / QGroundControl)  
+- **19-inch sunlight-readable monitor** ([MS190W1610NT](https://www.lcdpart.com/products/ms190w1610nt-19-inch-sunlight-readable-open-frame-monitor-1200-nits))  
+- **Ethernet switch** for network connectivity between ROV, GPS, DVL, and camera control systems  
+
+---
+
+## 🧠 Firmware and Software  
+
+### BlueOS Configuration  
+- **ArduSub:** v4.5.3 (updated 2025-07-24)  
+- [**DVL Extension**](https://github.com/bluerobotics/BlueOS-Water-Linked-DVL): v1.0.8  
+- [**UGPS Extension**](https://github.com/waterlinked/blueos-ugps-extension): v1.0.7  
+  - Modified configuration with `EXTRA_ARGS=--ignore_gps` for improved sensor fusion  
+- [**Surftrack Fixit**](https://github.com/clydemcqueen/surftrak_fixit): v1.0.0-beta.2  
+- [**Water Linked External UGPS Extension**](https://github.com/clydemcqueen/wl_ugps_external_extension)  
+  - Provides external (vessel) position and heading data to the Water Linked UGPS system  
+
+---
+
+## 🧮 Telemetry Processing  
+
 
 ### Code 
 * `tlog_csv_no_EKF.py`: This script processes telemetry `.tlog` files from BlueOS when there is no fusion between the GPS and Doppler Velocity Log (DVL). It extracts relevant fields (e.g., time, date, GPS latitude/longitude, DVLx, DVLy (`LOCAL_POSITION_NED`), altitude, depth, heading) and averages values per second. Additionally, it calculates DVL-based latitude and longitude (`DVLlat`, `DVLlon`) from DVLx and DVLy movements and estimates the width (m) and area (m²) captured by GoPro images based on the ROV's altitude. If the survey start and end times are known, they can be specified when running the script; otherwise, the entire `.tlog` file will be processed.
@@ -99,6 +108,22 @@ A --> F["<a href='https://github.com/Seattle-Aquarium/CCR_benthic_analyses' targ
 </p>
 
 ---
+## General information; workflows ready to implement
+The following repos contain general information about our work, and specialized repos for ROV telemetry analyses, processing and analyses of ROV-derived benthic abundance and distribution data.
+
+```mermaid
+graph TD
+
+A["<a href='https://github.com/Seattle-Aquarium/Coastal_Climate_Resilience' target='_blank' style='font-size: 16px; font-weight: bold;'>Coastal_Climate_Resilience</a><br><font color='darkgray'>the main landing pad for the CCR research program</font>"]
+
+A --> E["<a href='https://github.com/Seattle-Aquarium/CCR_analytical_resources' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_ROV_telemetry_processing</a><br><font color='darkgray'>analytical tools for working with ROV telemetry data</font>"]
+
+A --> F["<a href='https://github.com/Seattle-Aquarium/CCR_benthic_analyses' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_benthic_analyses</a><br><font color='darkgray'>code to work with ROV-derived benthic community data</font>"]
+
+
+```
+
+
 
 ## Help wanted! 
 The following repos involve active areas of open-source software development, AI/ML implementation, and computer vision challenges; areas where we could use assistance are 🔶 highlighted in orange 🔶
