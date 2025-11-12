@@ -5,19 +5,54 @@
 tlog_to_csv_vector_only.py
 last modified: 2025-11-10
 
-Purpose:
-    Convert BlueROV2 .tlog into per-transect CSVs with robust DVL-based tracks.
+Purpose
+-------
+Converts BlueROV2 `.tlog` files into per-transect CSVs that include time, position,
+depth, altitude, area, and speed. The script produces DVL-based tracks that are
+georeferenced, smoothed, and averaged at one-second intervals for analysis or mapping.
 
-Key design choices:
-    - Direction from LOCAL_POSITION_NED (x=North, y=East) vectors ONLY
-      (compass heading not used for propagation to avoid crab/yaw mismatch)
-    - Correct compass conversion: 0° = North, CW positive
-    - Negative-down depth convention:
-        * Prefer VFR_HUD.alt when < -0.5 m
-        * Else use -LOCAL_POSITION_NED.z
-    - Per-transect seeding at first valid GPS (fallback to EKF)
-    - Detect EKF origin resets (large per-second vector jumps) and re-seed
+Localization sources
+--------------------
+• EKFlat/EKFlon (fused position) – The most accurate source, combining GPS, DVL, and IMU
+  data to produce a stable, drift-corrected position (`GLOBAL_POSITION_INT`). 
+
+• GPS Latitude/Longitude (surface position) – GPS positioning from Water Linked GPS G2 system.
+  Results in noisy tracks.
+
+• DVLlat/DVLlon (LOCAL_POSITION_NED) – Provides precise local movement vectors (x = North,
+  y = East) GPS-anchored. Tracks are built using these vectors rather than compass heading to 
+  avoid yaw drift. DVL movement is converted into geographic coordinates (`DVLlat`, `DVLlon`)
+  using geodesic steps.
+
+Depth handling
+--------------
+Depth follows a negative-down convention:
+• Prefer *VFR_HUD.alt* when it’s below –0.5 m (already negative-down).
+• Otherwise, use *–LOCAL_POSITION_NED.z*.
+The chosen source is noted in the `Depth_Source` column.
+
+Field of view and area
+----------------------
+Altitude (from the rangefinder) is used to estimate:
+• Width (m) – Scales linearly with altitude.  
+• Area (m²) – Scales with the square of altitude.  
+These values represent the approximate camera footprint on the seafloor.
+
+Averaging
+---------
+Each second of data is summarized to reduce noise:
+• Averaged values: altitude, heading, width, area, and velocity.  
+• Last recorded values: DVLx, DVLy, latitude, longitude, depth.  
+• Derived values include `Distance` (per-step motion) and `DVLlat/DVLlon`
+  (georeferenced DVL track seeded by GPS).
+
+Outputs
+-------
+Generates one CSV per transect containing:
+Date, Time, Latitude, Longitude, EKFlat, EKFlon, DVLx, DVLy, DVLlat, DVLlon,
+Altitude, Depth, Depth_Source, Heading, Velocity_mps, Width, Area_m2, Distance.
 """
+
 
 import os
 import glob
