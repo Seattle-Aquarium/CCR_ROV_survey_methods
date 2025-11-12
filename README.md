@@ -2,7 +2,9 @@
 
 ## 🌊 Overview  
 
-This repository provides an overview of the **Seattle Aquarium’s Coastal Climate Resilience (CCR) team’s ROV survey workflow** — from hardware configuration to data extraction and visualization. It includes code and documentation for processing and organizing ROV telemetry data collected during benthic habitat surveys.  
+This repository provides an overview of the Seattle Aquarium’s Coastal Climate Resilience (CCR) team’s remotely operated vehicle (ROV) survey workflow — spanning hardware configuration, field operations, data extraction, and visualization. It includes code and documentation for processing and organizing ROV telemetry data collected during benthic habitat surveys.
+
+Our methods are designed for subtidal monitoring of nearshore habitats in the temperate waters of Puget Sound, where visibility and environmental conditions can be highly variable. Surveys are optimized to collect high-resolution, georeferenced imagery to support analyses of seafloor composition, kelp and algal cover, and associated benthic communities.
 
 Our goal is to create an **open-source reference** that allows other research groups to understand, replicate, and adapt our methods for their own underwater survey applications.  
 
@@ -13,7 +15,7 @@ Our goal is to create an **open-source reference** that allows other research gr
 ### 🤖 ROV Platform  
 - [**BlueROV2**](https://bluerobotics.com/store/rov/bluerov2/) (Blue Robotics) — Heavy Configuration with 150 m tether  
 - **Navigator Flight Controller** (with Raspberry Pi 4, 8 GB Model B)  
-- **Modifications:** Custom “kelp guards” fabricated from heavy plastic to minimize entanglement with kelp stipes during surveys  
+- **Modifications:** Custom “kelp guards” fabricated from HDPE plastic to minimize entanglement with kelp stipes during surveys  
 
 ### ⚡ Power and Tether Management  
 - [**Outland Technology Power Supply (OTPS-1kW)**](https://bluerobotics.com/store/comm-control-power/powersupplies-batteries/otps1kw/)  
@@ -25,7 +27,7 @@ Our goal is to create an **open-source reference** that allows other research gr
 - Custom light mounting hardware  
 
 ### 📡 Additional Sensors  
-- **Water Linked DVL A50** — Doppler Velocity Log for sub-meter scale positioning  
+- **Water Linked DVL A50** — Doppler Velocity Log for local positioning  
   - Firmware: v1.0.8 (updated 2025-07-24)  
 
 ### 🎥 Cameras  
@@ -38,7 +40,7 @@ Our goal is to create an **open-source reference** that allows other research gr
 | Setting | Value |
 |----------|--------|
 | Mode | Photo |
-| Interval | 3 s |
+| Interval | 3s |
 | Lens | Wide |
 | Output | RAW (.GPR) |
 | EV Comp | 0 |
