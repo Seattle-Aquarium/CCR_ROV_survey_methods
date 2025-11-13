@@ -15,7 +15,10 @@ Our goal is to create an **open-source reference** that allows other research gr
 ### 🤖 ROV Platform  
 - [**BlueROV2**](https://bluerobotics.com/store/rov/bluerov2/) (Blue Robotics) — Heavy Configuration with 150 m tether  
 - **Navigator Flight Controller** (with Raspberry Pi 4, 8 GB Model B)  
-- **Modifications:** Custom “kelp guards” fabricated from HDPE plastic to minimize entanglement with kelp stipes during surveys  
+- **Modifications:** Custom “kelp guards” fabricated from HDPE plastic to minimize entanglement with kelp stipes during surveys
+<p align="center">
+  <img src="figures/Lutris_Centennial_Park.PNG" width="300", height="200" /> 
+</p>
 
 ### ⚡ Power and Tether Management  
 - [**Outland Technology Power Supply (OTPS-1kW)**](https://bluerobotics.com/store/comm-control-power/powersupplies-batteries/otps1kw/)  
@@ -23,8 +26,7 @@ Our goal is to create an **open-source reference** that allows other research gr
 
 ### 💡 Lighting  
 - 4 × [**Kraken Solar Flare Mini 18,000**](https://krakensports.ca/product/solar-flare-mini-18000/) video lights  
-- 4 × [**Ultralight AD-1420-IK**](https://ulcs.com/product/ad-1420-ik-base-adapter/?srsltid=AfmBOoqhjfKVo0aI3aMI6ZeeyEz2tsy--UoIa0qY0KNQkLEsrkHGSEGb) universal ball adapters mounted to ROV frame  
-- Custom light mounting hardware  
+- 4 × [**Ultralight AD-1420-IK**](https://ulcs.com/product/ad-1420-ik-base-adapter/?srsltid=AfmBOoqhjfKVo0aI3aMI6ZeeyEz2tsy--UoIa0qY0KNQkLEsrkHGSEGb) universal ball adapters mounted to ROV frame   
 
 ### 📡 Additional Sensors  
 - **Water Linked DVL A50** — Doppler Velocity Log for local positioning  
@@ -73,6 +75,9 @@ Our goal is to create an **open-source reference** that allows other research gr
 - Ruggedized **laptop** for mission control (BlueOS / QGroundControl)  
 - **19-inch sunlight-readable monitor** ([MS190W1610NT](https://www.lcdpart.com/products/ms190w1610nt-19-inch-sunlight-readable-open-frame-monitor-1200-nits))  
 - **Ethernet switch** for network connectivity between ROV, GPS, DVL, and camera control systems  
+<p align="center">
+  <img src="figures/command_console2.jpg" width="400", height="300" /> 
+</p>
 
 ---
 
@@ -93,21 +98,17 @@ Our goal is to create an **open-source reference** that allows other research gr
 
 
 ### Code 
-* `tlog_csv_no_EKF.py`: This script processes telemetry `.tlog` files from BlueOS when there is no fusion between the GPS and Doppler Velocity Log (DVL). It extracts relevant fields (e.g., time, date, GPS latitude/longitude, DVLx, DVLy (`LOCAL_POSITION_NED`), altitude, depth, heading) and averages values per second. Additionally, it calculates DVL-based latitude and longitude (`DVLlat`, `DVLlon`) from DVLx and DVLy movements and estimates the width (m) and area (m²) captured by GoPro images based on the ROV's altitude. If the survey start and end times are known, they can be specified when running the script; otherwise, the entire `.tlog` file will be processed.
 
-* `tlog_to_csv_EKF.py`: This script processes `.tlog` files when GPS and DVL data are fused via an Extended Kalman Filter (EKF), producing more accurate tracks than using GPS or DVL alone. Instead of calculating `DVLlat`/`DVLlon`, this script incorporates the fused position data (`GLOBAL_POSITION_INT`) for improved accuracy.
+* `tlog_to_csv.py`: This script processes `.tlog` files when GPS and DVL data are fused via an Extended Kalman Filter (EKF), producing more accurate tracks than using GPS or DVL alone. Instead of calculating `DVLlat`/`DVLlon`, this script incorporates the fused position data (`GLOBAL_POSITION_INT`) for improved accuracy.
 <p align="center">
   <img src="figures/survey_params.png" width="600", height="200" /> 
 </p>
 
-* `transect_map.py`: This script generates a Leaflet map displaying the ROV tracks as measured by different navigation sources: GPS (black), DVL (blue), and EKF (red), which can then be incorporated into broader maps, as depicted below for the Urban Kelp Research Project with the Port of Seattle 
+* `transect_map.py`: This script generates a Leaflet map displaying the ROV tracks as measured by different navigation sources: GPS (black), DVL (blue), and EKF (red).
 <p align="center">
-  <img src="figures/GPS_EKF_tracks.jpg" width="300", height="300" /> 
+  <img src="figures/ROV_tracks.png" width="300", height="300" /> 
 </p>
 
-<p align="center">
-  <img src="figures/Port_2425_map.png" width="450", height="600"/>
-</p>
 
 ---
 ## General information; workflows ready to implement
