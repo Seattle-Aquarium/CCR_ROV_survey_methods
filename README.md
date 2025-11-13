@@ -17,7 +17,7 @@ Our goal is to create an **open-source reference** that allows other research gr
 - **Navigator Flight Controller** (with Raspberry Pi 4, 8 GB Model B)  
 - **Modifications:** Custom “kelp guards” fabricated from HDPE plastic to minimize entanglement with kelp stipes during surveys
 <p align="center">
-  <img src="figures/Lutris_Centennial_Park.PNG" width="300", height="200" /> 
+  <img src="figures/ROV_GIF_1.gif" width="600", height="500" /> 
 </p>
 
 ### ⚡ Power and Tether Management  
