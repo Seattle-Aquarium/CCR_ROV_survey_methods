@@ -17,7 +17,7 @@ Our goal is to create an **open-source reference** that allows other research gr
 - **Navigator Flight Controller** (with Raspberry Pi 4, 8 GB Model B)  
 - **Modifications:** Custom “kelp guards” fabricated from HDPE plastic to minimize entanglement with kelp stipes during surveys
 <p align="center">
-  <img src="figures/Lutris_Centennial_Park.png" width="600", height="200" /> 
+  <img src="figures/Lutris_Centennial_Park.PNG" width="300", height="200" /> 
 </p>
 
 ### ⚡ Power and Tether Management  
@@ -76,8 +76,9 @@ Our goal is to create an **open-source reference** that allows other research gr
 - **19-inch sunlight-readable monitor** ([MS190W1610NT](https://www.lcdpart.com/products/ms190w1610nt-19-inch-sunlight-readable-open-frame-monitor-1200-nits))  
 - **Ethernet switch** for network connectivity between ROV, GPS, DVL, and camera control systems  
 <p align="center">
-  <img src="figures/command_console2.png" width="600", height="200" /> 
+  <img src="figures/command_console2.jpg" width="400", height="300" /> 
 </p>
+
 ---
 
 ## 🧠 Firmware and Software  
