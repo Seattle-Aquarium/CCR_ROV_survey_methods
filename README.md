@@ -76,7 +76,7 @@ Our goal is to create an **open-source reference** that allows other research gr
 - **19-inch sunlight-readable monitor** ([MS190W1610NT](https://www.lcdpart.com/products/ms190w1610nt-19-inch-sunlight-readable-open-frame-monitor-1200-nits))  
 - **Ethernet switch** for network connectivity between ROV, GPS, DVL, and camera control systems  
 <p align="center">
-  <img src="figures/command_console2.jpg" width="400", height="300" /> 
+  <img src="figures/command_console2.jpg" width="500", height="400" /> 
 </p>
 
 ---
