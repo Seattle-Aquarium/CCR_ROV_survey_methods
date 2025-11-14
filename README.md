@@ -2,7 +2,7 @@
 
 ## 🌊 Overview  
 
-This repository provides an overview of the Seattle Aquarium’s Coastal Climate Resilience (CCR) team’s remotely operated vehicle (ROV) survey workflow — spanning hardware configuration, field operations, data extraction, and visualization. It includes code and documentation for processing and organizing ROV telemetry data collected during benthic habitat surveys.
+This repository provides an overview of the Seattle Aquarium’s Coastal Climate Resilience (CCR) team’s remotely operated vehicle (ROV) survey workflow — spanning hardware configuration, field operations, telemetry data extraction, and visualization. It especially focuses on code and documentation for processing and organizing ROV telemetry data collected during benthic habitat surveys.
 
 Our methods are designed for subtidal monitoring of nearshore habitats in the temperate waters of Puget Sound, where visibility and environmental conditions can be highly variable. Surveys are optimized to collect high-resolution, georeferenced imagery to support analyses of seafloor composition, kelp and algal cover, and associated benthic communities.
 
@@ -37,7 +37,7 @@ Our goal is to create an **open-source reference** that allows other research gr
 - [**Protective Housing**](https://gopro.com/en/us/shop/mounts-accessories/protective-housing-plus-waterproof-case/ADDIV-001.html)  
 - [**GoPro Labs**](https://gopro.com/en/bn/info/gopro-labs) firmware for time synchronization and advanced scripting  
 
-**Camera configuration (for still-image transects):**  
+**Camera configuration (for downward-facing imagery):**  
 
 | Setting | Value |
 |----------|--------|
@@ -72,7 +72,7 @@ Our goal is to create an **open-source reference** that allows other research gr
 ## 💻 Command Console  
 
 - Custom **Pelican case** housing the surface control system  
-- Ruggedized **laptop** for mission control (BlueOS / QGroundControl)  
+- Ruggedized **laptop** for mission control (Cockpit / BlueOS)  
 - **19-inch sunlight-readable monitor** ([MS190W1610NT](https://www.lcdpart.com/products/ms190w1610nt-19-inch-sunlight-readable-open-frame-monitor-1200-nits))  
 - **Ethernet switch** for network connectivity between ROV, GPS, DVL, and camera control systems  
 <p align="center">
