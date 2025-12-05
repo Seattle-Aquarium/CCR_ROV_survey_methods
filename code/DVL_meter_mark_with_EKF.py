@@ -277,7 +277,9 @@ columns = [
 ]
 df = df[columns]
 
-# Write CSV (full precision preserved)
+results.mkdir(parents=True, exist_ok=True)
+
+# Write CSV
 filename = os.path.splitext(os.path.basename(logfile))[0] + "_dvl_ekf_combined.csv"
 csv_path = os.path.join(results, filename)
 df.to_csv(csv_path, index=False)
@@ -309,6 +311,8 @@ if choice in ("dvl", "ekf"):
                 "lat_ekf": None,
                 "lon_ekf": None
             })
+
+    dest_folder.mkdir(parents=True, exist_ok=True)
 
     move_meter_images(meter_records_for_move, jpg_folder, dest_folder, mode=choice)
 
