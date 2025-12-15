@@ -319,6 +319,7 @@ def process_tlog_file():
 
 def main():
     print("Hello.")
+    answer1, answer2 = ask_questions()
     meter_records_for_move, jpg_folder, dest_folder, choice = process_tlog_file()
     move_meter_images(meter_records_for_move, jpg_folder, dest_folder, choice)
 

@@ -58,78 +58,82 @@ def move_images_based_on_markers(meter_records, jpg_folder, dest_folder):
         else:
             print(f"Skipped {closest_file}, already in destination.")
 
-# Prompt user for input/output
-logfile = input("Enter the path to your .tlog file: ").strip()
-save_location = input("Enter the path to save the meter marker CSV: ").strip()
+def main():
+    # Prompt user for input/output
+    logfile = input("Enter the path to your .tlog file: ").strip()
+    save_location = input("Enter the path to save the meter marker CSV: ").strip()
 
-# Connect to the tlog
-try:
-    mav = mavutil.mavlink_connection(logfile)
-except FileNotFoundError:
-    print(f"Error: File '{logfile}' not found.")
-    exit(1)
+    # Connect to the tlog
+    try:
+        mav = mavutil.mavlink_connection(logfile)
+    except FileNotFoundError:
+        print(f"Error: File '{logfile}' not found.")
+        exit(1)
 
-pacific = pytz.timezone("US/Pacific")
+    pacific = pytz.timezone("US/Pacific")
 
-# Tracking variables
-prev_x, prev_y = None, None
-cumulative_distance = 0.0
-previous_distance = 0.0
-next_meter = 1
-meter_records = []
+    # Tracking variables
+    prev_x, prev_y = None, None
+    cumulative_distance = 0.0
+    previous_distance = 0.0
+    next_meter = 1
+    meter_records = []
 
-while True:
-    msg = mav.recv_match(blocking=False)
-    if msg is None:
-        break
+    while True:
+        msg = mav.recv_match(blocking=False)
+        if msg is None:
+            break
 
-    if msg.get_type() == "BAD_DATA":
-        continue
-
-    if msg.get_type() == "LOCAL_POSITION_NED":
-        x, y = msg.x, msg.y
-
-        # Get timestamp (convert to local Pacific time)
-        timestamp = getattr(msg, "_timestamp", 0.0)
-        if timestamp <= 0:
+        if msg.get_type() == "BAD_DATA":
             continue
-        current_time = datetime.fromtimestamp(timestamp, tz=timezone.utc).astimezone(pacific)
 
-        if prev_x is not None and prev_y is not None:
-            # Increment cumulative distance
-            cumulative_distance += step_distance(prev_x, prev_y, x, y)
-            print(f"Cumulative Distance: {cumulative_distance}, {current_time.strftime('%Y_%m_%d_%H-%M-%S')}")
+        if msg.get_type() == "LOCAL_POSITION_NED":
+            x, y = msg.x, msg.y
 
-            # Check if we've passed one or more whole meters
-            while cumulative_distance >= next_meter:
-                delta = cumulative_distance - previous_distance
-                print(f"meter: {next_meter}")
-                meter_records.append({
-                    "meter_number": next_meter,
-                    "timestamp": current_time.strftime("%Y_%m_%d_%H-%M-%S"),
-                    "cumulative_dist": cumulative_distance,
-                    "increment": delta,
-                    "x": x,
-                    "y": y
-                })
-                previous_distance = cumulative_distance
-                next_meter += 1
+            # Get timestamp (convert to local Pacific time)
+            timestamp = getattr(msg, "_timestamp", 0.0)
+            if timestamp <= 0:
+                continue
+            current_time = datetime.fromtimestamp(timestamp, tz=timezone.utc).astimezone(pacific)
 
-        prev_x, prev_y = x, y
+            if prev_x is not None and prev_y is not None:
+                # Increment cumulative distance
+                cumulative_distance += step_distance(prev_x, prev_y, x, y)
+                print(f"Cumulative Distance: {cumulative_distance}, {current_time.strftime('%Y_%m_%d_%H-%M-%S')}")
 
-# Save results
-df = pd.DataFrame(meter_records, columns=["meter_number", "timestamp", "cumulative_dist", "increment", "x", "y"])
-if not df.empty:
-    filename = os.path.splitext(os.path.basename(logfile))[0] + "_meter_markers.csv"
-    csv_path = os.path.join(save_location, filename)
-    df.to_csv(csv_path, index=False)
-    print(f"Meter marker timestamps saved to: {csv_path}")
-else:
-    print("No meter marks detected.")
+                # Check if we've passed one or more whole meters
+                while cumulative_distance >= next_meter:
+                    delta = cumulative_distance - previous_distance
+                    print(f"meter: {next_meter}")
+                    meter_records.append({
+                        "meter_number": next_meter,
+                        "timestamp": current_time.strftime("%Y_%m_%d_%H-%M-%S"),
+                        "cumulative_dist": cumulative_distance,
+                        "increment": delta,
+                        "x": x,
+                        "y": y
+                    })
+                    previous_distance = cumulative_distance
+                    next_meter += 1
 
-# Optional image moving
-choice = input("Move jpgs based on meter marks? (y/n): ").strip().lower()
-if choice == "y" and meter_records:
-    jpg_folder = input("Enter the folder containing jpgs: ").strip()
-    dest_folder = input("Enter the destination folder for jpgs: ").strip()
-    move_images_based_on_markers(meter_records, jpg_folder, dest_folder)
+            prev_x, prev_y = x, y
+
+    # Save results
+    df = pd.DataFrame(meter_records, columns=["meter_number", "timestamp", "cumulative_dist", "increment", "x", "y"])
+    if not df.empty:
+        filename = os.path.splitext(os.path.basename(logfile))[0] + "_meter_markers.csv"
+        csv_path = os.path.join(save_location, filename)
+        df.to_csv(csv_path, index=False)
+        print(f"Meter marker timestamps saved to: {csv_path}")
+    else:
+        print("No meter marks detected.")
+
+    # Optional image moving
+    choice = input("Move jpgs based on meter marks? (y/n): ").strip().lower()
+    if choice == "y" and meter_records:
+        jpg_folder = input("Enter the folder containing jpgs: ").strip()
+        dest_folder = input("Enter the destination folder for jpgs: ").strip()
+        move_images_based_on_markers(meter_records, jpg_folder, dest_folder)
+
+if __name__ == "__main__":
+    main()
