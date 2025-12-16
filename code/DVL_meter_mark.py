@@ -49,8 +49,8 @@ def move_images_based_on_markers(meter_records, jpg_folder, dest_folder):
         closest = min(jpg_timestamps, key=lambda t: abs(t - marker_time))
         closest_file = jpg_times[closest]
 
-        src_path = os.path.join(jpg_folder, closest_file)
-        dst_path = os.path.join(dest_folder, closest_file)
+        src_path = str(os.path.join(jpg_folder, closest_file))
+        dst_path = str(os.path.join(dest_folder, closest_file))
 
         if not os.path.exists(dst_path):  # Avoid overwriting duplicates
             shutil.move(src_path, dst_path)
@@ -58,11 +58,7 @@ def move_images_based_on_markers(meter_records, jpg_folder, dest_folder):
         else:
             print(f"Skipped {closest_file}, already in destination.")
 
-def main():
-    # Prompt user for input/output
-    logfile = input("Enter the path to your .tlog file: ").strip()
-    save_location = input("Enter the path to save the meter marker CSV: ").strip()
-
+def process_tlog(logfile):
     # Connect to the tlog
     try:
         mav = mavutil.mavlink_connection(logfile)
@@ -117,6 +113,16 @@ def main():
                     next_meter += 1
 
             prev_x, prev_y = x, y
+
+    return meter_records
+
+def main():
+    # Prompt user for input/output
+    logfile = input("Enter the path to your .tlog file: ").strip()
+    save_location = input("Enter the path to save the meter marker CSV: ").strip()
+
+    # Process the logfile
+    meter_records = process_tlog(logfile)
 
     # Save results
     df = pd.DataFrame(meter_records, columns=["meter_number", "timestamp", "cumulative_dist", "increment", "x", "y"])
