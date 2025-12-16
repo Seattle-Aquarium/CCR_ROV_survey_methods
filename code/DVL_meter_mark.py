@@ -66,6 +66,24 @@ def process_tlog(logfile):
         print(f"Error: File '{logfile}' not found.")
         exit(1)
 
+    positions = []
+
+    while True:
+        # Look only at LOCAL_POSITION_NED messages, this will go faster
+        msg = mav.recv_match(type="LOCAL_POSITION_NED", blocking=False)
+        if msg is None:
+            break
+
+        timestamp = getattr(msg, "_timestamp", 0.0)
+        if timestamp > 0:
+            positions.append((timestamp, msg.x, msg.y))
+
+    return positions
+
+def positions_to_meter_records(positions):
+    """
+    This is the core algorithm. It takes a list of (timestamp, x, y) tuples and returns a list of meter records.
+    """
     pacific = pytz.timezone("US/Pacific")
 
     # Tracking variables
@@ -75,44 +93,30 @@ def process_tlog(logfile):
     next_meter = 1
     meter_records = []
 
-    while True:
-        msg = mav.recv_match(blocking=False)
-        if msg is None:
-            break
+    for timestamp, x, y in positions:
+        current_time = datetime.fromtimestamp(timestamp, tz=timezone.utc).astimezone(pacific)
 
-        if msg.get_type() == "BAD_DATA":
-            continue
+        if prev_x is not None and prev_y is not None:
+            # Increment cumulative distance
+            cumulative_distance += step_distance(prev_x, prev_y, x, y)
+            print(f"Cumulative Distance: {cumulative_distance}, {current_time.strftime('%Y_%m_%d_%H-%M-%S')}")
 
-        if msg.get_type() == "LOCAL_POSITION_NED":
-            x, y = msg.x, msg.y
+            # Check if we've passed one or more whole meters
+            while cumulative_distance >= next_meter:
+                delta = cumulative_distance - previous_distance
+                print(f"meter: {next_meter}")
+                meter_records.append({
+                    "meter_number": next_meter,
+                    "timestamp": current_time.strftime("%Y_%m_%d_%H-%M-%S"),
+                    "cumulative_dist": cumulative_distance,
+                    "increment": delta,
+                    "x": x,
+                    "y": y
+                })
+                previous_distance = cumulative_distance
+                next_meter += 1
 
-            # Get timestamp (convert to local Pacific time)
-            timestamp = getattr(msg, "_timestamp", 0.0)
-            if timestamp <= 0:
-                continue
-            current_time = datetime.fromtimestamp(timestamp, tz=timezone.utc).astimezone(pacific)
-
-            if prev_x is not None and prev_y is not None:
-                # Increment cumulative distance
-                cumulative_distance += step_distance(prev_x, prev_y, x, y)
-                print(f"Cumulative Distance: {cumulative_distance}, {current_time.strftime('%Y_%m_%d_%H-%M-%S')}")
-
-                # Check if we've passed one or more whole meters
-                while cumulative_distance >= next_meter:
-                    delta = cumulative_distance - previous_distance
-                    print(f"meter: {next_meter}")
-                    meter_records.append({
-                        "meter_number": next_meter,
-                        "timestamp": current_time.strftime("%Y_%m_%d_%H-%M-%S"),
-                        "cumulative_dist": cumulative_distance,
-                        "increment": delta,
-                        "x": x,
-                        "y": y
-                    })
-                    previous_distance = cumulative_distance
-                    next_meter += 1
-
-            prev_x, prev_y = x, y
+        prev_x, prev_y = x, y
 
     return meter_records
 
@@ -122,7 +126,8 @@ def main():
     save_location = input("Enter the path to save the meter marker CSV: ").strip()
 
     # Process the logfile
-    meter_records = process_tlog(logfile)
+    positions = process_tlog(logfile)
+    meter_records = positions_to_meter_records(positions)
 
     # Save results
     df = pd.DataFrame(meter_records, columns=["meter_number", "timestamp", "cumulative_dist", "increment", "x", "y"])
