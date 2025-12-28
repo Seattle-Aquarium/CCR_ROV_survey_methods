@@ -3,3 +3,5 @@
 .RData
 .Ruserdata
 .idea
+.venv/
+__pycache__
