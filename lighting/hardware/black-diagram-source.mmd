@@ -1,0 +1,43 @@
+---
+config:
+  theme: redux
+  layout: elk
+---
+flowchart LR
+ subgraph s1["1 Liter Enclosure"]
+        A@{ label: "<span style=\"color:\">Current Monitor </span>INA238" }
+        B{"Voltage Boost Converter"}
+        C["Screw Terminal Block"]
+        n1["RiPi Pico 2 Microcontroller"]
+        n3["LED 1 Wetlink Penetrator"]
+        n5["LED 3 Wetlink Penetrator"]
+        n4["LED 2 Wetlink Penetrator"]
+        n6["LED 4 Wetlink Penetrator"]
+        n11["Outland Welink Penetrator"]
+        n13["BlueROV Control Wetlink Penetrator"]
+        n15["5V Voltage Converter"]
+  end
+    A -- 15 V --> B
+    B -- 24 V --> C
+    A -- I2C --> n1
+    C -- 24 V --> n3 & n5
+    C -- 24V --> n4 & n6
+    n1 -- Serial Control --> n3 & n4 & n5 & n6
+    n3 --> n7["LED 1"]
+    n5 --> n8["LED 3"]
+    n4 --> n9["LED 2"]
+    n6 --> n10["LED 4"]
+    n11 -- 15V --> A
+    n12["Outland Power"] -- 15V --> n11
+    n13 -- Serial Control --> n1
+    n14["BlueROV Controller"] -- Serial --> n13
+    n15 -- 5V --> n1
+    A -- 15V --> n15
+
+    A@{ shape: rounded}
+    n1@{ shape: rounded}
+    n11@{ shape: rounded}
+    n13@{ shape: rounded}
+    n15@{ shape: rounded}
+    n12@{ shape: rounded}
+    n14@{ shape: rounded}
