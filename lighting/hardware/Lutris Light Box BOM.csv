@@ -1,0 +1,14 @@
+Description,Quantity,MFN Part Number ,Unit Cost ,Total Cost,Vendor,Description,Purchase Link
+Enclosure 1 Liter Box,1,BR-102603,$255,$255,BlueRobotics,1 Liter watertight box,https://bluerobotics.com/store/watertight-enclosures/watertight-boxes/watertight-box/
+Pressure Relief Valve,1,BR-100804,$32,$32,BlueRobotics,Pressure Relief Valve,https://bluerobotics.com/store/watertight-enclosures/enclosure-tools-supplies/prv-m10-asm/
+Wetlink Penetrators,6,?,,0,BlueRobotics,"I wasn't sure what size of cables you have in the pigtails, but need to pick out the correct size based on that.",https://bluerobotics.com/learn/how-to-choose-a-wetlink-penetrator/
+Hole Plug m10 blank,1,BR-100434-010,$6,$6,BlueRobotics,Need this to plug the final hole in the enclosure,https://bluerobotics.com/store/cables-connectors/wlp-blank/
+Voltage Booster Converter,1,ATO-DCDC-1224,$175.45,$175.45,ATO,Make sure to select the 480 W one in the site! ,https://www.ato.com/dc-dc-boost-converter-12v-to-24v?srsltid=AfmBOooKYfjFEHA0ug898WvRiUtnM6yRI-xV_TyuAwJLXkbCVP-9HEEf
+Microcontroller (Ripi Pico 2),1,"	
+SC1631",$5,$5,Raspberry Pi,,https://www.digikey.com/en/products/detail/raspberry-pi/SC1631/24627136?src=raspberrypi
+Microcontroller Connection Board & Converter,1,"	
+DFR0924",$19.90,$19.90,DFRobot,Includes the voltage conversion for the pi and easy to write terminals,https://www.digikey.com/en/products/detail/dfrobot/DFR0924/18069306?gad_source=1&gad_campaignid=20243136172&gbraid=0AAAAADrbLljadOhq0C6Qm3kzuJAxSsWKT&gclid=Cj0KCQiAxonKBhC1ARIsAIHq_ltOoaxqIW1e4hf0CzFWXV50ohy7Oo1QJSCywLpsvmU55MOIPTZkLzMaAkPpEALw_wcB&gclsrc=aw.ds
+Current Monitor ,1,,$11.29,$11.29,,"Tried to find a non amazon link, but couldn't :(",https://www.amazon.com/INA226-Voltage-Current-Monitor-Monitoring/dp/B0DRNG1VKM/ref=sr_1_1?crid=KAIYWI29ABLX&dib=eyJ2IjoiMSJ9.zdDJm2rnhlBL9NwiC0W_YjWYZdNNjXqpo17T6zKEI0W9oaa7qV6rBS5j-fuZBLVm2lJAWX3U4JNqI3XPNLUhZsFR9Lfa7gATtNKMuapxAbEV6Y2_yk0PqmgDS2XZ7bTiGEHPCsw8hUpdFNpCwMUuQ8v7Mg1Jay9K7Vbq_-rnoBAlhzEawvSJInK3x5ApSj3nooH09i5Yt-WJASybqv0lEBbDSRs9AK0wRiCJR_ngMDA.YOsNvfqMDIa509a6XPFWG-6x6BmYubcqhlCZWEzTaO8&dib_tag=se&keywords=el%3Bectronics+current+monitor+i2c+20+amp&qid=1766041907&sprefix=el+ectronics+current+monitor+i2c+20+am%2Caps%2C187&sr=8-1
+Terminal Blocks,1,,,,,Need to have some terminal blocks or wago connectors to connect the power lines from all the LEDs to the output of the converter.,
+,,,,,,,
+,,,Total Cost,$505,,,
