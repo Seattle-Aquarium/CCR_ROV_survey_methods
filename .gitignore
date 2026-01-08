@@ -5,3 +5,6 @@
 .idea
 .venv/
 __pycache__
+
+# OSX Files
+.DS_Store
