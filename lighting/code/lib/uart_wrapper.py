@@ -15,21 +15,21 @@ class UARTWrapper:
     - read_until() -> bytes (reads until newline or timeout)
     """
 
-    def __init__(self, uart_id, baudrate=9600, tx=None, ty=None, timeout=1000):
+    def __init__(self, uart_id, baudrate=9600, tx=None, rx=None, timeout=1000):
         """
         Initialize UART wrapper.
 
         Args:
             uart_id: UART peripheral number (0 or 1 on Pico)
             baudrate: Communication speed (9600, 19200, or 57600 for SeaSense)
-            tx: TX pin number (optional, uses default if not specified)
-            rx: RX pin number (optional, uses default if not specified)
+            tx: TX Pin object (optional, uses default if not specified)
+            rx: RX Pin object (optional, uses default if not specified)
             timeout: Read timeout in milliseconds
         """
         self._timeout = timeout
 
-        if tx is not None and ty is not None:
-            self._uart = UART(uart_id, baudrate=baudrate, tx=tx, rx=ty, timeout=timeout)
+        if tx is not None and rx is not None:
+            self._uart = UART(uart_id, baudrate=baudrate, tx=tx, rx=rx, timeout=timeout)
         else:
             self._uart = UART(uart_id, baudrate=baudrate, timeout=timeout)
 
