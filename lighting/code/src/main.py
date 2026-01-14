@@ -7,7 +7,13 @@ import time
 from machine import Pin, I2C
 
 import sys
-sys.path.append('/lib')
+import os
+
+# Add lib to path - works for both mpremote mount (/remote) and deployed (/)
+if '/remote' in os.getcwd():
+    sys.path.insert(0, '/remote/lib')
+else:
+    sys.path.insert(0, '/lib')
 
 from uart_wrapper import UARTWrapper
 from pio_uart import PioUart
@@ -219,7 +225,7 @@ controller = None
 
 
 def main():
-    """Main entry point."""
+    """Main entry point. Returns controller for REPL use."""
     global controller
 
     print("Lutris Lighting System Starting...")
@@ -228,12 +234,16 @@ def main():
     controller = LightingController()
 
     print("-" * 40)
-    print("System ready. Available commands:")
-    print("  controller.set_all_lights(level)")
-    print("  controller.set_light_level(n, level)")
-    print("  controller.all_off()")
-    print("  controller.read_power()")
-    print("  controller.status()")
+    print("System ready. Commands:")
+    print("  c.set_light_level(0, 50)  # Light 0 to 50%")
+    print("  c.get_light_level(0)      # Read level")
+    print("  c.get_light_temperature(0)")
+    print("  c.set_all_lights(50)")
+    print("  c.all_off()")
+    print("  c.read_power()")
+    print("  c.status()")
+
+    return controller
 
 
 if __name__ == "__main__":

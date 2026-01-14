@@ -1,5 +1,4 @@
 from pydspl_seasense.peripheral_base import PeripheralBase
-import serial
 
 
 # QUESTION(lindzey): Why the two layers of abstraction? Does DSP&L have other
@@ -151,6 +150,7 @@ def cli_set_off(args, sealite, fp):
 
 def main():
     import argparse
+    import serial
 
     parser = argparse.ArgumentParser(description="Sealite command line interface.")
     parser.add_argument(
