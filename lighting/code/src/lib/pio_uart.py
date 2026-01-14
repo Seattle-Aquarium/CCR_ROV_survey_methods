@@ -9,7 +9,7 @@ import time
 
 
 @rp2.asm_pio(
-    out_init=rp2.PIO.OUT_HIGH,
+    sideset_init=rp2.PIO.OUT_HIGH,
     out_shiftdir=rp2.PIO.SHIFT_RIGHT,
     autopull=True,
     pull_thresh=8
