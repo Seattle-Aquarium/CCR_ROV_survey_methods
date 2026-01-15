@@ -80,7 +80,7 @@ class PeripheralBase:
             # NACK
             raise DSPLNackError
 
-        return result.decode(encoding="ascii").strip(WHITESPACE_TO_STRIP)
+        return result.decode("ascii").strip(WHITESPACE_TO_STRIP)
 
     def do_write(self, fp, command, data, verb="="):
         """

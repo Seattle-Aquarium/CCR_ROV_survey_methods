@@ -28,8 +28,7 @@ def build_packet(address, cmd, access, data=None, do_checksum=True):
     if access and access not in "=?+-":  # ['=', '?', '+', '-']:
         raise ValueError
 
-    out = str.format(
-        "!{:03d}:{:4s}{:1s}{:s}",
+    out = "!{:03d}:{:4s}{:1s}{:s}".format(
         address,
         cmd,
         access[0] if access else "",
@@ -40,7 +39,7 @@ def build_packet(address, cmd, access, data=None, do_checksum=True):
         out = out + "*"
         chksum = sum(out.encode("ascii")) % 256
 
-        out = out + str.format("{:02x}", chksum)
+        out = out + "{:02x}".format(chksum)
 
     out = out + "\r\n"
 
