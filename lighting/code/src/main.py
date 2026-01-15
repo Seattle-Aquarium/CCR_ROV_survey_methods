@@ -113,7 +113,8 @@ class LightingController:
         """Initialize SeaLite objects for each light."""
         for _ in range(4):
             # Each light uses address 1 since they're on separate serial lines
-            light = Sealite(address=1, max_level=100)
+            # local_echo=True because UART echoes back transmitted data
+            light = Sealite(address=1, max_level=100, local_echo=True)
             self._lights.append(light)
         print(f"Initialized {len(self._lights)} SeaLite lights")
 
