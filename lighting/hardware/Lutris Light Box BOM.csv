@@ -10,5 +10,6 @@ Microcontroller Connection Board & Converter,1,"
 DFR0924",$19.90,$19.90,DFRobot,Includes the voltage conversion for the pi and easy to write terminals,https://www.digikey.com/en/products/detail/dfrobot/DFR0924/18069306?gad_source=1&gad_campaignid=20243136172&gbraid=0AAAAADrbLljadOhq0C6Qm3kzuJAxSsWKT&gclid=Cj0KCQiAxonKBhC1ARIsAIHq_ltOoaxqIW1e4hf0CzFWXV50ohy7Oo1QJSCywLpsvmU55MOIPTZkLzMaAkPpEALw_wcB&gclsrc=aw.ds
 Current Monitor ,1,,$11.29,$11.29,,"Tried to find a non amazon link, but couldn't :(",https://www.amazon.com/INA226-Voltage-Current-Monitor-Monitoring/dp/B0DRNG1VKM/ref=sr_1_1?crid=KAIYWI29ABLX&dib=eyJ2IjoiMSJ9.zdDJm2rnhlBL9NwiC0W_YjWYZdNNjXqpo17T6zKEI0W9oaa7qV6rBS5j-fuZBLVm2lJAWX3U4JNqI3XPNLUhZsFR9Lfa7gATtNKMuapxAbEV6Y2_yk0PqmgDS2XZ7bTiGEHPCsw8hUpdFNpCwMUuQ8v7Mg1Jay9K7Vbq_-rnoBAlhzEawvSJInK3x5ApSj3nooH09i5Yt-WJASybqv0lEBbDSRs9AK0wRiCJR_ngMDA.YOsNvfqMDIa509a6XPFWG-6x6BmYubcqhlCZWEzTaO8&dib_tag=se&keywords=el%3Bectronics+current+monitor+i2c+20+amp&qid=1766041907&sprefix=el+ectronics+current+monitor+i2c+20+am%2Caps%2C187&sr=8-1
 Terminal Blocks,1,,,,,Need to have some terminal blocks or wago connectors to connect the power lines from all the LEDs to the output of the converter.,
+RS-485 Transceiver,1,BOB-10124,$12.50,$12.50,SparkFun,RS-485 transceiver breakout for UART to RS-485 conversion,https://www.sparkfun.com/sparkfun-transceiver-breakout-rs-485.html
 ,,,,,,,
-,,,Total Cost,$505,,,
+,,,Total Cost,$517.50,,,
