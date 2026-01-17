@@ -27,7 +27,7 @@ code <- "code"
 
 
 ## read in csv 
-dat <- read.csv(file.path(data, "V1_energy_usage.csv"))
+dat <- read.csv(file.path(results, "V1_energy_usage_edited.csv"))
 ## END startup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
@@ -36,15 +36,15 @@ dat <- read.csv(file.path(data, "V1_energy_usage.csv"))
 
 ## minor adjustments ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## create proxy for minutes
-dat$min <- dat$SU/60
+#dat$min <- dat$SU/60
 
 
 ## log transform current
-dat$log_current <- log10(dat$current + 1) 
+#dat$log_current <- log10(dat$current + 1) 
 
 
 ## calculate watts consumed 
-dat$watts <- dat$voltage * dat$current
+#dat$watts <- dat$voltage * dat$current
 
 
 ## set factor
@@ -53,7 +53,7 @@ dat$condition <- factor(dat$condition,
 
 
 ## save csv 
-write.csv(dat, file = file.path("results", "V1_energy_usage_edited.csv"), row.names = FALSE)
+#write.csv(dat, file = file.path("results", "V1_energy_usage_edited.csv"), row.names = FALSE)
 
 
 ## set up custom ggplot theme 
@@ -76,7 +76,7 @@ fill_vals <- c(
 )
 
 fills <- scale_fill_manual(values = fill_vals)
-cols <- scale_color_manual(values=c("#B22222", "#009ACD"))
+cols <- scale_color_manual(values = fill_vals)
 
 
 ## open graphing windows               
