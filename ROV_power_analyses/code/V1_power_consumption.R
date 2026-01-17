@@ -43,6 +43,19 @@ dat$min <- dat$SU/60
 dat$log_current <- log10(dat$current + 1) 
 
 
+## calculate watts consumed 
+dat$watts <- dat$voltage * dat$current
+
+
+## set factor
+dat$condition <- factor(dat$condition,
+                        levels = c("low_current", "high_current"))
+
+
+## save csv 
+write.csv(dat, file = file.path("results", "V1_energy_usage_edited.csv"), row.names = FALSE)
+
+
 ## set up custom ggplot theme 
 my.theme = theme(panel.grid.major = element_blank(), 
                  panel.grid.minor = element_blank(),
@@ -57,8 +70,13 @@ my.theme = theme(panel.grid.major = element_blank(),
 
 
 ## set colors 
+fill_vals <- c(
+  low_current  = "#009ACD",  # blue
+  high_current = "#B22222"   # red
+)
+
+fills <- scale_fill_manual(values = fill_vals)
 cols <- scale_color_manual(values=c("#B22222", "#009ACD"))
-fills <- scale_fill_manual(values=c("#B22222", "#009ACD"))
 
 
 ## open graphing windows               
@@ -96,6 +114,31 @@ p4 <- ggplot(dat, aes(x=current, group=condition)) +
   geom_density(aes(fill=condition), alpha=0.65) + my.theme + fills +
   xlab("Electrical current") + ylab("frequency")
 print(p4)
+
+
+## plot watts consumed  
+p5 <- ggplot(dat, aes(x=current, group=condition)) +
+  geom_density(aes(fill=condition), alpha=0.65) + my.theme + fills +
+  xlab("Electrical current") + ylab("frequency")
+print(p5)
+
+
+## plot watts consumed  
+p6 <- ggplot(dat, aes(x=watts, group=condition)) +
+  geom_density(aes(fill=condition), alpha=0.65) + my.theme + fills +
+  xlab("Watts: Voltage * Current") + ylab("frequency")
+print(p6)
+
+
+## plot low current only 
+p7 <- dat %>%
+  filter(condition == "low_current") %>%
+  ggplot(aes(x = watts, fill = condition)) +
+  geom_density(alpha = 0.65) +
+  xlim(0, 400) +
+  my.theme + fills +
+  xlab("Watts: Voltage * Current") + ylab("frequency")
+print(p7)
 ## END plots ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
