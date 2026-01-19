@@ -27,7 +27,7 @@ code <- "code"
 
 
 ## read in csv 
-dat <- read.csv(file.path(results, "V1_energy_usage_edited.csv"))
+dat <- read.csv(file.path(results, "V1_energy_usage.csv"))
 ## END startup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
@@ -35,28 +35,83 @@ dat <- read.csv(file.path(results, "V1_energy_usage_edited.csv"))
 
 
 ## minor adjustments ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-## create proxy for minutes
-#dat$min <- dat$SU/60
+## filter to low-current 
+dat <- dat %>% filter(condition == "low_current")
 
 
-## log transform current
-#dat$log_current <- log10(dat$current + 1) 
+## function to add log10 Watts at the 6th position 
+log_W <- function(dat, source_col = "W") {
+  
+  dat %>%
+    dplyr::mutate(log_W = log10(.data[[source_col]] + 1)) %>%
+    dplyr::relocate(log_W, .after = dplyr::everything()[5])
+}
 
 
-## calculate watts consumed 
-#dat$watts <- dat$voltage * dat$current
+## invoke function 
+#dat <- log_W(dat)
 
 
-## set factor
-dat$condition <- factor(dat$condition,
-                        levels = c("low_current", "high_current"))
+## function to add transect number to the dataframe
+add_transect_column <- function(dat,
+                                windows,
+                                time_col = "Timestamp",
+                                col_name = "transect") {
+
+  parse_mmss <- function(x) {
+    parts <- strsplit(as.character(x), ":", fixed = TRUE)
+    sapply(parts, function(p) {
+      as.numeric(p[1]) * 60 + as.numeric(p[2])
+    })
+  }
+  
+  # parse times
+  t_vals <- parse_mmss(dat[[time_col]])
+  
+  # initialize as 0 (not on transect)
+  tr <- rep(0L, nrow(dat))
+  
+  # assign transect IDs in the order provided
+  for (i in seq_along(windows)) {
+    start_i <- parse_mmss(windows[[i]][1])
+    end_i   <- parse_mmss(windows[[i]][2])
+    
+    tr[t_vals >= start_i & t_vals <= end_i] <- i
+  }
+  
+  # write factor column (levels 0..max)
+  dat[[col_name]] <- factor(tr, levels = 0:max(tr))
+  
+  # move the new column to the 2nd position
+  idx_new <- which(names(dat) == col_name)
+  dat <- dat[, c(1, idx_new, setdiff(seq_along(dat), c(1, idx_new)))]
+  
+  dat
+}
+
+
+## invoke function to add transect times
+#dat <- add_transect_column(
+#  dat,
+#  windows = list(
+#    c("02:34.7", "15:06.0"),
+#    c("17:01.1", "29:02.4")
+#  )
+#)
 
 
 ## save csv 
-#write.csv(dat, file = file.path("results", "V1_energy_usage_edited.csv"), row.names = FALSE)
+#write.csv(dat, file = file.path("results", "V1_energy_usage.csv"), row.names = FALSE)
+## END data prep ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-## set up custom ggplot theme 
+
+
+
+## set up custom ggplot theme ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+dat$transect <- as.factor(dat$transect)
+
+
 my.theme = theme(panel.grid.major = element_blank(), 
                  panel.grid.minor = element_blank(),
                  panel.background = element_blank(), 
@@ -65,21 +120,38 @@ my.theme = theme(panel.grid.major = element_blank(),
                  axis.title.y=element_text(size=15),
                  axis.text=element_text(size=15),
                  plot.title = element_text(size=15),
-                 legend.title=element_text(size=13), 
-                 legend.text=element_text(size=13))
+                 legend.title=element_text(size=15), 
+                 legend.text=element_text(size=15))
 
 
-## set colors 
-fill_vals <- c(
-  low_current  = "#009ACD",  # blue
-  high_current = "#B22222"   # red
+## transect colors
+transect_fills <- c(
+  "0" = "gray",
+  "1" = "#308014",
+  "2" = "#104E8B",
+  "3" = "#B22222"
 )
 
-fills <- scale_fill_manual(values = fill_vals)
-cols <- scale_color_manual(values = fill_vals)
+
+## linewidth mapping (edit as you like)
+transect_lw_1 <- c(
+  "0" = 0.35,
+  "1" = 0.70,
+  "2" = 0.70,
+  "3" = 0.70
+)
+
+
+transect_lw_2 <- c(
+  "0" = 1,
+  "1" = 1.5,
+  "2" = 1.5,
+  "3" = 1.5
+)
 
 
 ## open graphing windows               
+graphics.off()
 windows(10,5,record = T)
 ## END transformations and graphing set up ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -88,57 +160,70 @@ windows(10,5,record = T)
 
 
 ## create plots ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-## plot mAh consumed 
-p1 <- ggplot(dat, aes(min, mAh, group=condition)) +
-  geom_path(aes(col=condition), lwd=1.2) + my.theme + cols + 
-  xlab("flight time (min)") + ylab("mAh consumed") 
+## plot of watt power consumption through time or Ah consumption through time
+p1 <- ggplot(dat, aes(x = min, y = Ah, 
+    group = 1,                 # single continuous path (time series)
+    color = transect,
+    linewidth = transect)) +
+  geom_path(alpha = 0.95) +
+  scale_color_manual(
+    values = transect_fills,
+    labels = c(
+      "0" = "off transect",
+      "1" = "transect 1",
+      "2" = "transect 2",
+      "3" = "transect 3"
+    )
+  ) +
+  scale_linewidth_manual(
+  values = transect_lw_2,
+  guide = "none"             # keep legend format clean (like your p7)
+  ) +
+  
+  my.theme +
+  xlab("ROV flight time") + ylab("Ah consumed") +
+  theme(
+    legend.position   = c(0.15, 0.80),
+    legend.title      = element_blank(),
+    legend.background = element_rect(fill = "white", colour = "black"),
+    legend.key        = element_rect(fill = NA)
+  )
+
 print(p1)
 
 
-## plot voltage consumed 
-p2 <- ggplot(dat, aes(min, voltage, group=condition)) +
-  geom_path(aes(col=condition)) + my.theme + cols +
-  xlab("flight time (min)") + ylab("voltage") 
- print(p2)
- 
- 
-## plot log10 current consumed  
-p3 <- ggplot(dat, aes(x=log_current, group=condition)) +
-  geom_density(aes(fill=condition), alpha=0.65) + my.theme + fills +
-  xlab("log10(current + 1)") + ylab("frequency")
-print(p3)
 
+## plot of log10(x+1) Watt power consumption 
+p2 <- ggplot(dat, aes(x = log_W, fill = transect)) +
+  geom_density(position = "stack", alpha = 0.85) +
+  
+  scale_fill_manual(
+    values = transect_fills,
+    labels = c(
+      "0" = "off transect",
+      "1" = "transect 1",
+      "2" = "transect 2"
+    )
+  ) +
+  
+  scale_x_continuous(
+    labels = function(x) round(10^x),
+    expand = expansion(mult = c(0.02, 0.08))  # <-- key line
+  ) +
+  
+  my.theme +
+  xlab("Watts consumed") + ylab("Density") +
+  theme(
+    axis.text.y   = element_blank(),
+    axis.ticks.y  = element_blank(),
+    legend.position = c(0.85, 0.80),
+    legend.title    = element_blank(),
+    legend.background = element_rect(fill = "white", colour = "black"),
+    legend.key      = element_rect(fill = NA)
+  )
 
-## plot current consumed 
-p4 <- ggplot(dat, aes(x=current, group=condition)) +
-  geom_density(aes(fill=condition), alpha=0.65) + my.theme + fills +
-  xlab("Electrical current") + ylab("frequency")
-print(p4)
+print(p2)
 
-
-## plot watts consumed  
-p5 <- ggplot(dat, aes(x=current, group=condition)) +
-  geom_density(aes(fill=condition), alpha=0.65) + my.theme + fills +
-  xlab("Electrical current") + ylab("frequency")
-print(p5)
-
-
-## plot watts consumed  
-p6 <- ggplot(dat, aes(x=watts, group=condition)) +
-  geom_density(aes(fill=condition), alpha=0.65) + my.theme + fills +
-  xlab("Watts: Voltage * Current") + ylab("frequency")
-print(p6)
-
-
-## plot low current only 
-p7 <- dat %>%
-  filter(condition == "low_current") %>%
-  ggplot(aes(x = watts, fill = condition)) +
-  geom_density(alpha = 0.65) +
-  xlim(0, 400) +
-  my.theme + fills +
-  xlab("Watts: Voltage * Current") + ylab("frequency")
-print(p7)
 ## END plots ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
