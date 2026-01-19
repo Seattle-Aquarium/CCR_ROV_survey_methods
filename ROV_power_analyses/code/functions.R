@@ -8,12 +8,74 @@
 
 
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## funcion to add Ah column to data 
+add_battery_ah <- function(dat) {
+  Battery_Ah_used <- dat$Battery_mAh_used / 1000
+  dat <- cbind(
+    dat[, 1:7],
+    Battery_Ah_used = Battery_Ah_used,
+    dat[, 8:ncol(dat)]
+  )
+  dat
+}
+
+## add Ah 
+#dat <- add_battery_ah(dat)
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## function to streamline column names
+rename_battery_columns <- function(dat) {
+  dat %>%
+    dplyr::rename(
+      W   = Battery_W,
+      A   = Battery_A,
+      V   = Battery_V,
+      Wh  = Battery_Wh_used,
+      mAh = Battery_mAh_used,
+      Ah  = Battery_Ah_used
+    )
+}
+
+## rename columns
+#dat <- rename_battery_columns(dat)
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## add SU and min cols to beginning to data frame 
+add_su_and_min <- function(dat) {
+  SU  <- seq_len(nrow(dat))
+  min <- round(SU / 60, 2)
+  dat <- cbind(
+    SU  = SU,
+    min = min,
+    dat
+  )
+  dat
+}
+
+## add SU and min columns 
+#dat <- add_su_and_min(dat)
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## function to add log10 Watts at the 6th position 
 log_W <- function(dat, source_col = "W") {
   
   dat %>%
     dplyr::mutate(log_W = log10(.data[[source_col]] + 1)) %>%
-    dplyr::relocate(log_W, .after = dplyr::everything()[5])
+    dplyr::relocate(log_W, .after = dplyr::everything()[9])
 }
 
 ## invoke function 
@@ -25,29 +87,68 @@ log_W <- function(dat, source_col = "W") {
 
 
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## delete rows at the beginning when the ROV is powered on deck 
+preflight_trim <- function(dat, threshold = 50) {
+  idx <- which(dat$W >= threshold)[1]
+  if (is.na(idx)) {
+    return(dat)  
+  }
+  dat[idx:nrow(dat), ]
+}
+
+## remove rows while ROV on deck 
+#dat <- preflight_trim(dat, threshold = 50)
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## function to add transect numbers as a column to the data frame
 ## function to add transect numbers as a column to the data frame
 add_transect_column <- function(dat,
                                 windows,
-                                time_col = "Timestamp",
+                                time_col = "Time",
                                 col_name = "transect") {
   
-  parse_mmss <- function(x) {
+  # Parse time strings of the form:
+  # "MM:SS", "MM:SS.ss", "HH:MM:SS", "HH:MM:SS.ss"
+  parse_time_to_sec <- function(x) {
     parts <- strsplit(as.character(x), ":", fixed = TRUE)
+    
     sapply(parts, function(p) {
-      as.numeric(p[1]) * 60 + as.numeric(p[2])
+      nums <- as.numeric(p)
+      
+      if (length(nums) == 2) {
+        # MM:SS
+        mins <- nums[1]
+        secs <- nums[2]
+        mins * 60 + secs
+        
+      } else if (length(nums) == 3) {
+        # HH:MM:SS
+        hrs  <- nums[1]
+        mins <- nums[2]
+        secs <- nums[3]
+        hrs * 3600 + mins * 60 + secs
+        
+      } else {
+        stop("Time format must be MM:SS or HH:MM:SS (optionally with decimals).")
+      }
     })
   }
   
-  # parse times
-  t_vals <- parse_mmss(dat[[time_col]])
+  # parse timestamps in the dataframe
+  t_vals <- parse_time_to_sec(dat[[time_col]])
   
   # initialize as 0 (not on transect)
   tr <- rep(0L, nrow(dat))
   
   # assign transect IDs in the order provided
   for (i in seq_along(windows)) {
-    start_i <- parse_mmss(windows[[i]][1])
-    end_i   <- parse_mmss(windows[[i]][2])
+    start_i <- parse_time_to_sec(windows[[i]][1])
+    end_i   <- parse_time_to_sec(windows[[i]][2])
     
     tr[t_vals >= start_i & t_vals <= end_i] <- i
   }
