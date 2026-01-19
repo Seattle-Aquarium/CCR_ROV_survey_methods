@@ -31,7 +31,7 @@ source(file.path(code, "functions.R"))
 
 
 ## read in csv 
-dat <- read.csv(file.path(results, "V1_energy_usage.csv"))
+dat <- read.csv(file.path(results, "V3_power_consumption.csv"))
 #write.csv(dat, file = file.path("results", "V1_energy_usage.csv"), row.names = FALSE)
 ## END startup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -55,10 +55,10 @@ windows(10,5,record = T)
 ## create plots ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## plot of Ah consumed through time 
 p1 <- power_over_time(dat = dat,
-  y_col = Ah,
+  y_col = Wh,
   legend_pos = c(0.15, 0.80),
   lw_values = transect_lw_2,
-  ylab = "Power consumption (Ah)"
+  ylab = "Power consumption (Wh)"
 )
 
 print(p1)
