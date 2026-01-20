@@ -31,7 +31,7 @@ source(file.path(code, "functions.R"))
 
 
 ## read in csv 
-dat <- read.csv(file.path(results, "V3_power_consumption.csv"))
+dat <- read.csv(file.path(results, "V1_power_consumption.csv"))
 #write.csv(dat, file = file.path("results", "V1_energy_usage.csv"), row.names = FALSE)
 ## END startup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -92,6 +92,17 @@ print(p3)
 
 
 
+## calculate total Wh consumed, Wh per 10min, Wh per min ~~~~~~~~~~~~~~~~~~~~~~~
+tabulate_transect_wh(dat)
+## END Wh calculations ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## END of script ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
