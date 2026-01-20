@@ -27,6 +27,7 @@ add_battery_ah <- function(dat) {
 
 
 
+
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## function to streamline column names
 rename_battery_columns <- function(dat) {
@@ -172,6 +173,196 @@ add_transect_column <- function(dat,
 #  )
 #)
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
+## function to calculate Wh cumulative consumption ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+tabulate_transect_wh <- function(dat,
+                                 wh_col = "Wh",
+                                 time_col = "Time",         # HH:MM:SS
+                                 transect_col = "transect",
+                                 off_value = 0,
+                                 window_min = 60,
+                                 out_dir = "results",
+                                 out_file = "Wh_consumption.txt",
+                                 print_output = TRUE) {
+  
+  # ---- helpers ----
+  parse_time_to_seconds_hhmmss <- function(x) {
+    # Accepts "HH:MM:SS" and allows fractional seconds (SS can be "06.5")
+    x <- trimws(as.character(x))
+    parts <- strsplit(x, ":", fixed = TRUE)
+    
+    vapply(parts, function(p) {
+      p <- p[p != ""]
+      if (length(p) != 3L) return(NA_real_)
+      hh <- suppressWarnings(as.numeric(p[1]))
+      mm <- suppressWarnings(as.numeric(p[2]))
+      ss <- suppressWarnings(as.numeric(p[3]))  # may be fractional
+      if (anyNA(c(hh, mm, ss))) return(NA_real_)
+      hh * 3600 + mm * 60 + ss
+    }, numeric(1))
+  }
+  
+  fmt_num <- function(x, digits = 3) if (is.finite(x)) sprintf(paste0("%.", digits, "f"), x) else "NA"
+  
+  elapsed_minutes <- function(t_start, t_end) {
+    if (!is.finite(t_start) || !is.finite(t_end)) return(NA_real_)
+    dt <- t_end - t_start
+    if (is.finite(dt) && dt < 0) dt <- dt + 24 * 3600  # midnight rollover
+    dt / 60
+  }
+  
+  # ---- validate columns ----
+  needed <- c(wh_col, time_col, transect_col)
+  missing_cols <- setdiff(needed, names(dat))
+  if (length(missing_cols) > 0) stop("Missing required column(s): ", paste(missing_cols, collapse = ", "))
+  
+  dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+  
+  # Parse time once; preserve row order
+  dat$.t_seconds <- parse_time_to_seconds_hhmmss(dat[[time_col]])
+  
+  # ---- output header ----
+  lines <- character(0)
+  lines <- c(lines, "Wh cumulative consumption summary")
+  lines <- c(lines, paste0("Generated: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
+  lines <- c(lines, paste0("Time column: ", time_col, " (HH:MM:SS)"))
+  lines <- c(lines, paste0("Window for normalized energy: ", window_min, " min"))
+  lines <- c(lines, "")
+  
+  tr <- dat[[transect_col]]
+  
+  # ============================================================
+  # A) On-transect summaries by transect ID (transect != 0)
+  # ============================================================
+  on_idx <- !is.na(tr) & tr != off_value
+  dat_on <- dat[on_idx, , drop = FALSE]
+  
+  if (nrow(dat_on) == 0) {
+    lines <- c(lines, "No on-transect rows found (transect != off_value).", "")
+  } else {
+    transect_ids <- unique(dat_on[[transect_col]])
+    transect_ids <- transect_ids[order(as.character(transect_ids))]
+    
+    lines <- c(lines, "On-transect (by transect ID)")
+    lines <- c(lines, "----------------------------------------")
+    
+    for (tid in transect_ids) {
+      d <- dat_on[dat_on[[transect_col]] == tid, , drop = FALSE]
+      
+      wh_vec <- as.numeric(d[[wh_col]])
+      wh_vec <- wh_vec[!is.na(wh_vec)]
+      total_wh <- if (length(wh_vec) >= 2) tail(wh_vec, 1) - wh_vec[1] else NA_real_
+      
+      tvec <- d$.t_seconds
+      tvec <- tvec[!is.na(tvec)]
+      el_min <- if (length(tvec) >= 2) elapsed_minutes(tvec[1], tvec[length(tvec)]) else NA_real_
+      
+      wh_per_min <- if (is.finite(total_wh) && is.finite(el_min) && el_min > 0) total_wh / el_min else NA_real_
+      wh_per_window <- if (is.finite(wh_per_min)) wh_per_min * window_min else NA_real_
+      
+      start_time <- as.character(d[[time_col]][1])
+      end_time   <- as.character(d[[time_col]][nrow(d)])
+      
+      lines <- c(lines, paste0("Transect: transect ", as.character(tid)))
+      lines <- c(lines, paste0("  Segment start time: ", start_time))
+      lines <- c(lines, paste0("  Segment end time:   ", end_time))
+      lines <- c(lines, paste0("  Rows: ", nrow(d)))
+      lines <- c(lines, paste0("  Total Wh (end - start): ", fmt_num(total_wh, 3)))
+      lines <- c(lines, paste0("  Elapsed time (min): ", fmt_num(el_min, 2)))
+      lines <- c(lines, paste0("  Wh per min: ", fmt_num(wh_per_min, 4)))
+      lines <- c(lines, paste0("  Wh per ", window_min, " min: ", fmt_num(wh_per_window, 3)))
+      lines <- c(lines, "")
+    }
+  }
+  
+  # ============================================================
+  # B) Off-transect summaries by contiguous segment (transect == 0)
+  # ============================================================
+  off_idx <- !is.na(tr) & tr == off_value
+  
+  lines <- c(lines, "")
+  lines <- c(lines, "Off-transect (transect == 0) by contiguous segment")
+  lines <- c(lines, "----------------------------------------")
+  
+  if (!any(off_idx, na.rm = TRUE)) {
+    lines <- c(lines, "No off-transect rows found (transect == off_value).", "")
+  } else {
+    rle_off <- rle(off_idx)
+    run_lengths <- rle_off$lengths
+    run_values  <- rle_off$values
+    
+    run_ends <- cumsum(run_lengths)
+    run_starts <- run_ends - run_lengths + 1
+    off_runs <- which(run_values)  # TRUE runs
+    
+    seg_tot_wh <- numeric(0)
+    seg_tot_min <- numeric(0)
+    
+    seg_n <- 0L
+    for (k in off_runs) {
+      seg_n <- seg_n + 1L
+      idx <- run_starts[k]:run_ends[k]
+      d <- dat[idx, , drop = FALSE]
+      
+      wh_vec <- as.numeric(d[[wh_col]])
+      wh_vec <- wh_vec[!is.na(wh_vec)]
+      total_wh <- if (length(wh_vec) >= 2) tail(wh_vec, 1) - wh_vec[1] else NA_real_
+      
+      tvec <- d$.t_seconds
+      tvec <- tvec[!is.na(tvec)]
+      el_min <- if (length(tvec) >= 2) elapsed_minutes(tvec[1], tvec[length(tvec)]) else NA_real_
+      
+      wh_per_min <- if (is.finite(total_wh) && is.finite(el_min) && el_min > 0) total_wh / el_min else NA_real_
+      wh_per_window <- if (is.finite(wh_per_min)) wh_per_min * window_min else NA_real_
+      
+      start_time <- as.character(d[[time_col]][1])
+      end_time   <- as.character(d[[time_col]][nrow(d)])
+      
+      seg_tot_wh <- c(seg_tot_wh, total_wh)
+      seg_tot_min <- c(seg_tot_min, el_min)
+      
+      lines <- c(lines, paste0("Off segment ", seg_n))
+      lines <- c(lines, paste0("  Segment start time: ", start_time))
+      lines <- c(lines, paste0("  Segment end time:   ", end_time))
+      lines <- c(lines, paste0("  Rows: ", nrow(d)))
+      lines <- c(lines, paste0("  Total Wh (end - start): ", fmt_num(total_wh, 3)))
+      lines <- c(lines, paste0("  Elapsed time (min): ", fmt_num(el_min, 2)))
+      lines <- c(lines, paste0("  Wh per min: ", fmt_num(wh_per_min, 4)))
+      lines <- c(lines, paste0("  Wh per ", window_min, " min: ", fmt_num(wh_per_window, 3)))
+      lines <- c(lines, "")
+    }
+    
+    # Combined off-transect (sum across segments)
+    total_off_wh <- sum(seg_tot_wh, na.rm = TRUE)
+    total_off_min <- sum(seg_tot_min, na.rm = TRUE)
+    
+    off_wh_per_min <- if (is.finite(total_off_wh) && is.finite(total_off_min) && total_off_min > 0) {
+      total_off_wh / total_off_min
+    } else NA_real_
+    
+    off_wh_per_window <- if (is.finite(off_wh_per_min)) off_wh_per_min * window_min else NA_real_
+    
+    lines <- c(lines, "Off-transect combined (all off segments)")
+    lines <- c(lines, paste0("  Segments: ", length(off_runs)))
+    lines <- c(lines, paste0("  Total Wh (sum of segments): ", fmt_num(total_off_wh, 3)))
+    lines <- c(lines, paste0("  Total time (min, sum of segments): ", fmt_num(total_off_min, 2)))
+    lines <- c(lines, paste0("  Wh per min: ", fmt_num(off_wh_per_min, 4)))
+    lines <- c(lines, paste0("  Wh per ", window_min, " min: ", fmt_num(off_wh_per_window, 3)))
+    lines <- c(lines, "")
+  }
+  
+  # ---- write to disk ----
+  txt <- paste(lines, collapse = "\n")
+  writeLines(txt, file.path(out_dir, out_file))
+  if (print_output) cat(txt, "\n")
+  invisible(txt)
+}
+
+## END functino to calculate cumulative Wh consumption ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 
