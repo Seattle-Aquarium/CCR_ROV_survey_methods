@@ -107,7 +107,6 @@ preflight_trim <- function(dat, threshold = 50) {
 
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## function to add transect numbers as a column to the data frame
-## function to add transect numbers as a column to the data frame
 add_transect_column <- function(dat,
                                 windows,
                                 time_col = "Time",
@@ -179,15 +178,15 @@ add_transect_column <- function(dat,
 
 
 ## function to calculate Wh cumulative consumption ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-tabulate_transect_wh <- function(dat,
-                                 wh_col = "Wh",
-                                 time_col = "Time",         # HH:MM:SS
-                                 transect_col = "transect",
-                                 off_value = 0,
-                                 window_min = 60,
-                                 out_dir = "results",
-                                 out_file = "Wh_consumption.txt",
-                                 print_output = TRUE) {
+tabulate_wh <- function(dat,
+                        wh_col = "Wh",
+                        time_col = "Time",         
+                        transect_col = "transect",
+                        off_value = 0,
+                        window_min = 60,
+                        out_dir = "results",
+                        out_file = "Wh_consumption.txt",
+                        print_output = TRUE) {
   
   # ---- helpers ----
   parse_time_to_seconds_hhmmss <- function(x) {
@@ -361,7 +360,6 @@ tabulate_transect_wh <- function(dat,
   if (print_output) cat(txt, "\n")
   invisible(txt)
 }
-
 ## END functino to calculate cumulative Wh consumption ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 

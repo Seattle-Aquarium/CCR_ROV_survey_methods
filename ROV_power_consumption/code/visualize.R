@@ -93,7 +93,7 @@ print(p3)
 
 
 ## calculate total Wh consumed, Wh per 10min, Wh per min ~~~~~~~~~~~~~~~~~~~~~~~
-tabulate_transect_wh(dat)
+tabulate_wh(dat)
 ## END Wh calculations ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
