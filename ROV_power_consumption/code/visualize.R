@@ -31,7 +31,7 @@ source(file.path(code, "functions.R"))
 
 
 ## read in csv 
-dat <- read.csv(file.path(results, "V1_power_consumption.csv"))
+dat <- read.csv(file.path(results, "V3_power_consumption.csv"))
 #write.csv(dat, file = file.path("results", "V1_energy_usage.csv"), row.names = FALSE)
 ## END startup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -67,7 +67,7 @@ print(p1)
 ## plot of watts conusmed through time
 p2 <- power_over_time(dat = dat,
   y_col = W,
-  legend_pos = c(0.60, 0.80),
+  legend_pos = c(0.15, 0.80),
   lw_values = transect_lw_1,
   ylab = "Power consumption (W)"
 )
@@ -87,6 +87,41 @@ p3 <- density_stack(
 
 print(p3)
 ## END plots ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
+## save plots ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## Wh through time - cumulative power consumption
+save_fig(
+  p1, 
+  filename = "Wh_across_time", 
+  subfolder = "V3", 
+  width = 10, 
+  height = 5, 
+  dpi = 600)
+
+
+## Watts across time - instantaneous power consumption 
+save_fig(
+  p2, 
+  filename = "W_across_time", 
+  subfolder = "V3", 
+  width = 10, 
+  height = 5, 
+  dpi = 600)
+
+
+## log10(watts) stacked kernel density
+save_fig(
+  p3, 
+  filename = "log_W_density", 
+  subfolder = "V3", 
+  width = 10, 
+  height = 5, 
+  dpi = 600)
+## END plot save ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 
