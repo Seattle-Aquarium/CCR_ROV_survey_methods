@@ -1,0 +1,80 @@
+Wh cumulative consumption summary
+Generated: 2026-01-23 12:25:57
+Time column: Time (HH:MM:SS)
+Window for normalized energy: 60 min
+
+On-transect (by transect ID)
+----------------------------------------
+Transect: transect 1
+  Segment start time: 10:22:41
+  Segment end time:   10:31:06
+  Rows: 506
+  Total Wh (end - start): 5.694
+  Elapsed time (min): 8.42
+  Wh per min: 0.6766
+  Wh per 60 min: 40.594
+
+Transect: transect 2
+  Segment start time: 11:08:03
+  Segment end time:   11:16:12
+  Rows: 490
+  Total Wh (end - start): 6.361
+  Elapsed time (min): 8.15
+  Wh per min: 0.7805
+  Wh per 60 min: 46.830
+
+Transect: transect 3
+  Segment start time: 11:23:39
+  Segment end time:   11:34:03
+  Rows: 625
+  Total Wh (end - start): 8.806
+  Elapsed time (min): 10.40
+  Wh per min: 0.8467
+  Wh per 60 min: 50.801
+
+
+Off-transect (transect == 0) by contiguous segment
+----------------------------------------
+Off segment 1
+  Segment start time: 10:13:24
+  Segment end time:   10:22:40
+  Rows: 557
+  Total Wh (end - start): 15.444
+  Elapsed time (min): 9.27
+  Wh per min: 1.6667
+  Wh per 60 min: 100.000
+
+Off segment 2
+  Segment start time: 10:31:07
+  Segment end time:   11:08:02
+  Rows: 727
+  Total Wh (end - start): 22.139
+  Elapsed time (min): 36.92
+  Wh per min: 0.5997
+  Wh per 60 min: 35.982
+
+Off segment 3
+  Segment start time: 11:16:13
+  Segment end time:   11:23:38
+  Rows: 446
+  Total Wh (end - start): 26.917
+  Elapsed time (min): 7.42
+  Wh per min: 3.6292
+  Wh per 60 min: 217.753
+
+Off segment 4
+  Segment start time: 11:34:04
+  Segment end time:   11:42:31
+  Rows: 508
+  Total Wh (end - start): 31.333
+  Elapsed time (min): 8.45
+  Wh per min: 3.7081
+  Wh per 60 min: 222.485
+
+Off-transect combined (all off segments)
+  Segments: 4
+  Total Wh (sum of segments): 95.833
+  Total time (min, sum of segments): 62.05
+  Wh per min: 1.5445
+  Wh per 60 min: 92.667
+
