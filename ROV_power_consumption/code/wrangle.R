@@ -32,13 +32,18 @@ source(file.path(code, "functions.R"))
 
 ## read in csv 
 dat <- read.csv(file.path(data, "2025_10_08_T1.csv"))
+dat2 <- read.csv(file.path(data, "2025_10_08_T2.csv"))
 ## END startup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 
 
 
-## invoke functions to wrange data ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## invoke functions to wrangle data ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## combine multiple tlogs
+dat <- append_tlogs(dat, dat2)
+
+
 ## add Ah column 
 dat <- add_battery_ah(dat)
 
@@ -61,8 +66,9 @@ dat <- preflight_trim(dat, threshold = 50)
 
 ## add column for transects based on real-world survey flight times
 dat <- add_transect_column(dat, windows = list(
-    c("10:22:41", "10:31:06")#,
-    #c("17:01.1", "29:02.4")
+    c("10:22:41", "10:31:06"),
+    c("11:08:03", "11:16:12"),
+    c("11:23:39", "11:34:03")
   )
 )
 ## END data wrangling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -72,7 +78,7 @@ dat <- add_transect_column(dat, windows = list(
 
 
 ## save and close ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-write.csv(dat, file = file.path("results", "V3_T1_power_consumption.csv"), row.names = FALSE)
+write.csv(dat, file = file.path("results", "V3_power_consumption.csv"), row.names = FALSE)
 ## END csv file creation ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
