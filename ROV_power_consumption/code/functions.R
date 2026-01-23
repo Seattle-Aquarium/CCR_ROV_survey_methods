@@ -7,6 +7,22 @@
 
 
 
+
+
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## function to append multiple tlogs, maintain cumulative Wh 
+append_tlogs <- function(dat1, dat2, wh_col = "Battery_Wh_used") {
+  wh_end <- dat1[[wh_col]][max(which(!is.na(dat1[[wh_col]])))]
+  dat2[[wh_col]] <- dat2[[wh_col]] + wh_end
+  rbind(dat1, dat2)
+}
+#dat <- append_tlogs(dat, dat2)
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## funcion to add Ah column to data 
 add_battery_ah <- function(dat) {
@@ -494,7 +510,8 @@ density_stack <- function(dat,
                           labels = c(
                             "0" = "off transect",
                             "1" = "transect 1",
-                            "2" = "transect 2"),
+                            "2" = "transect 2",
+                            "3" = "transect 3"),
                           alpha = 0.85,
                           legend_pos = c(0.85, 0.80),
                           xlab = "Watts consumed",
@@ -504,7 +521,7 @@ density_stack <- function(dat,
                           bw = NULL,
                           # x-axis formatting
                           back_transform = TRUE,
-                          expand_mult = c(0.02, 0.08)) {
+                          expand_mult = c(0.02, 0.15)) {
   x_col <- rlang::as_name(rlang::ensym(x_col))
   transect_col <- rlang::as_name(rlang::ensym(transect_col))
   
@@ -551,6 +568,61 @@ density_stack <- function(dat,
 #)
 #print(p2)
 ## END function to plot kernel density ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## function to save figure ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+save_fig <- function(plot,
+                     filename,
+                     subfolder,
+                     width  = 8,
+                     height = 5,
+                     dpi    = 300,
+                     bg     = "white") {
+  
+  out_dir <- file.path("figs", subfolder)
+  if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+  
+  pdf_file <- file.path(out_dir, paste0(filename, ".pdf"))
+  png_file <- file.path(out_dir, paste0(filename, ".png"))
+  
+  safe_off <- function() {
+    if (grDevices::dev.cur() > 1) grDevices::dev.off()
+  }
+  
+  ## PDF (vector)
+  grDevices::cairo_pdf(pdf_file, width = width, height = height, bg = bg)
+  on.exit(safe_off(), add = TRUE)
+  print(plot)
+  safe_off()
+  
+  ## PNG (raster)
+  grDevices::png(png_file,
+                 width = width, height = height,
+                 units = "in", res = dpi,
+                 type = "cairo-png",
+                 bg = bg)
+  on.exit(safe_off(), add = TRUE)
+  print(plot)
+  safe_off()
+  
+  invisible(list(pdf = pdf_file, png = png_file))
+}
+
+
+#save_fig(
+#  p7, 
+#  filename = "Wh_across_time", 
+#  subfolder = "V3", 
+#  width = 9, 
+#  height = 4, 
+#  dpi = 600)
+
+## END function to save figs ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 
