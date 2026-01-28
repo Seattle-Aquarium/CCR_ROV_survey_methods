@@ -1,5 +1,5 @@
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-## Species richness curves for CCR analysis of Urban Kelp data  
+## code to wrange ROV telemetry data   
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
@@ -31,8 +31,7 @@ source(file.path(code, "functions.R"))
 
 
 ## read in csv 
-dat <- read.csv(file.path(data, "2025_10_08_T1.csv"))
-dat2 <- read.csv(file.path(data, "2025_10_08_T2.csv"))
+dat <- read.csv(file.path(results, "V3_power_consumption.csv"))
 ## END startup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
