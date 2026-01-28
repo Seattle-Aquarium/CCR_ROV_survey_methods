@@ -628,6 +628,274 @@ save_fig <- function(plot,
 
 
 
+## quick function to check surftrak data ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+quick_plot <- function(dat){
+  p1 <- ggplot(data=t3) + 
+    geom_path(aes(x=min, y=seafloor)) +
+    geom_path(aes(x=min, y=Depth), color="blue") + 
+    geom_path(aes(x=min, y=range_set), color="green") + 
+    my.theme
+  return(p1)
+}
+
+#p1 <- quick_plot(dat)
+#print(p1)
+## END quick plotting function ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
+## full function to plot surftrak telemetry ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+plot_surftrak_insets <- function(dat,
+                                 x_col = "min",
+                                 depth_col = "Depth",
+                                 seafloor_col = "seafloor",
+                                 range_set_col = "range_set",
+                                 fill_alpha = 0.35,
+                                 zoom1 = c(52, 53),
+                                 zoom2 = c(60, 61),
+                                 pad_m = 1,
+                                 main_lwd = 1,
+                                 inset_lwd = 0.45,
+                                 rect_color = "grey30",
+                                 rect_lwd = 0.6,
+                                 rect_lty = 2,
+                                 inset1_box = c(left = 0.40, bottom = 0.025, right = 0.69, top = 0.55),
+                                 inset2_box = c(left = 0.70, bottom = 0.025, right = 0.98, top = 0.55),
+                                 inset_title_height = 0.03,
+                                 inset_axis_text_size = 10,
+                                 inset_title_size = 12,
+                                 legend_pos = c(0.12, 0.88)) {
+  
+  df <- dat %>%
+    mutate(
+      x = .data[[x_col]],
+      depth = .data[[depth_col]],
+      seafloor = .data[[seafloor_col]],
+      range_set = .data[[range_set_col]],
+      ymin_rib = pmin(seafloor, range_set),
+      ymax_rib = pmax(seafloor, range_set)
+    ) %>%
+    arrange(x)
+  
+  y_lim_main <- range(c(df$seafloor, df$range_set, df$depth), finite = TRUE)
+  
+  window_bounds <- function(xwin) {
+    d <- df %>% filter(x >= xwin[1], x <= xwin[2])
+    
+    shallow_depth <- max(d$depth, na.rm = TRUE)
+    deep_seafloor <- min(d$seafloor, na.rm = TRUE)
+    
+    tibble::tibble(
+      xmin = xwin[1],
+      xmax = xwin[2],
+      ymin = deep_seafloor - pad_m,
+      ymax = shallow_depth + pad_m
+    )
+  }
+  
+  rects <- bind_rows(window_bounds(zoom1), window_bounds(zoom2))
+  
+  rect_labels <- rects %>%
+    mutate(
+      label = paste0("Inset #", row_number()),
+      xlab = xmin,
+      ylab = ymax
+    )
+  
+  # --- define scales ONCE so main + insets match exactly ---
+  col_scale <- scale_color_manual(
+    values = c("Range set" = "darkgreen",
+               "ROV depth" = "steelblue",
+               "Seafloor"  = "black"),
+    breaks = c("Range set", "ROV depth", "Seafloor")
+  )
+  
+  fill_scale <- scale_fill_manual(
+    values = c("range hold to seafloor" = "lightgreen"),
+    breaks = "range hold to seafloor"
+  )
+  
+  # Base plot (legend labels come from these strings)
+  base_plot <- function(linewidth = 1) {
+    ggplot(df, aes(x = x)) +
+      geom_ribbon(
+        aes(ymin = ymin_rib, ymax = ymax_rib, fill = "range hold to seafloor"),
+        alpha = fill_alpha, colour = NA
+      ) +
+      geom_line(aes(y = range_set, color = "Range set"), linewidth = linewidth) +
+      geom_line(aes(y = depth,     color = "ROV depth"), linewidth = linewidth) +
+      geom_line(aes(y = seafloor,  color = "Seafloor"),  linewidth = linewidth) +
+      col_scale +
+      fill_scale
+  }
+  
+  # Main plot
+  p_main <- base_plot(main_lwd) +
+    geom_rect(
+      data = rects,
+      aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+      inherit.aes = FALSE,
+      fill = NA,
+      color = rect_color,
+      linewidth = rect_lwd,
+      linetype = rect_lty
+    ) +
+    geom_text(
+      data = rect_labels,
+      aes(x = xlab, y = ylab, label = label),
+      inherit.aes = FALSE,
+      hjust = 0,
+      vjust = -0.6,
+      size = 3.5,
+      color = rect_color
+    ) +
+    coord_cartesian(ylim = y_lim_main, clip = "off") +
+    guides(
+      # order: lines first, fill second
+      color = guide_legend(order = 1),
+      fill  = guide_legend(order = 2, override.aes = list(alpha = fill_alpha))
+    ) +
+    labs(
+      x = "Time (min)",
+      y = "Depth (m)",
+      title = "ROV depth relative to seafloor and surftrak setpoint"
+    ) +
+    my.theme +
+    theme(
+      plot.margin = margin(10, 10, 10, 10),
+      legend.position = legend_pos,
+      legend.background = element_rect(fill = "white", color = NA),
+      legend.key = element_rect(fill = "white", color = NA),
+      # remove legend titles "fill" and "colour"
+      legend.title = element_blank()
+    )
+  
+  # Insets: same colors/scales already included via base_plot()
+  inset_theme <- theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    axis.line = element_line(colour = "black"),
+    axis.title = element_blank(),
+    axis.text = element_text(size = inset_axis_text_size),
+    axis.ticks = element_line(colour = "black", linewidth = 0.3),
+    axis.ticks.length = unit(2, "pt"),
+    panel.border = element_rect(colour = "grey40", fill = NA, linewidth = 0.6),
+    plot.background = element_blank(),
+    plot.margin = margin(8, 10, 10, 10),
+    legend.position = "none"
+  )
+  
+  p_zoom1 <- base_plot(inset_lwd) +
+    coord_cartesian(xlim = zoom1, ylim = c(rects$ymin[1], rects$ymax[1]), expand = FALSE) +
+    inset_theme
+  
+  p_zoom2 <- base_plot(inset_lwd) +
+    coord_cartesian(xlim = zoom2, ylim = c(rects$ymin[2], rects$ymax[2]), expand = FALSE) +
+    inset_theme
+  
+  inset_title_grob <- function(txt) {
+    grid::textGrob(
+      txt, x = 0, y = 0.5, just = "left",
+      gp = grid::gpar(col = "black", fontsize = inset_title_size)
+    )
+  }
+  
+  p_main +
+    inset_element(p_zoom1,
+                  left = inset1_box["left"], bottom = inset1_box["bottom"],
+                  right = inset1_box["right"], top = inset1_box["top"],
+                  align_to = "panel") +
+    inset_element(inset_title_grob("Inset #1"),
+                  left = inset1_box["left"], bottom = inset1_box["top"],
+                  right = inset1_box["right"], top = inset1_box["top"] + inset_title_height,
+                  align_to = "panel") +
+    inset_element(p_zoom2,
+                  left = inset2_box["left"], bottom = inset2_box["bottom"],
+                  right = inset2_box["right"], top = inset2_box["top"],
+                  align_to = "panel") +
+    inset_element(inset_title_grob("Inset #2"),
+                  left = inset2_box["left"], bottom = inset2_box["top"],
+                  right = inset2_box["right"], top = inset2_box["top"] + inset_title_height,
+                  align_to = "panel")
+}
+
+
+
+plot_surftrak_insets(
+  t3,
+  zoom1 = c(52.5, 53.5),
+  zoom2 = c(60, 61),
+  inset_lwd = 0.45,
+  pad_m = 1,
+  legend_pos = c(0.13, 0.75)  # upper-left inside panel
+)
+## END surftrak graphing function ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
+## create a kernel density of ROV altitude ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+surftrak_density <- function(dat,
+                             alt_col = "Altitude",
+                             setpoint = 0.8,
+                             adjust = 1,
+                             alt_break_by = 0.05,
+                             fill_color = "steelblue",
+                             line_color = "black") {
+  
+  ggplot(dat, aes(x = .data[[alt_col]])) +
+    
+    geom_density(
+      fill = fill_color,
+      color = line_color,
+      linewidth = 1,
+      adjust = adjust,
+      alpha = 0.6
+    ) +
+    
+    # Vertical line before flip → horizontal line after flip
+    geom_vline(xintercept = setpoint, color = "black", linewidth = 2) +
+    geom_vline(xintercept = setpoint, color = "white", linewidth = 1.25) +
+    
+    coord_flip() +
+    
+    # Controls the vertical axis AFTER flipping (Altitude axis)
+    scale_x_continuous(
+      breaks = function(lims) {
+        seq(floor(lims[1] / alt_break_by) * alt_break_by,
+            ceiling(lims[2] / alt_break_by) * alt_break_by,
+            by = alt_break_by)
+      }
+    ) +
+    
+    labs(
+      x = "ROV altitude above seafloor (m)",
+      y = "Density"
+    ) +
+    
+    my.theme +
+    
+    theme(
+      # Remove density tick marks and labels (horizontal axis)
+      axis.text.x = element_blank(),
+      axis.ticks.x = element_blank(),
+      axis.title.x = element_text(size = 15),
+      axis.title.y = element_text(size = 15)
+    )
+}
+
+
+# suftrak_density(t3)
+## END surftrak kernel density function ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## END of script ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
