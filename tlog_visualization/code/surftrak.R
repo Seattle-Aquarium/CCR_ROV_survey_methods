@@ -12,6 +12,7 @@ rm(list = ls())
 
 ## read in libraries 
 library(tidyverse)
+library(patchwork)
 
 
 ## set working directory
@@ -27,7 +28,7 @@ code <- "code"
 
 
 ## read in functions from source file 
-#source(file.path(code, "functions.R"))
+source(file.path(code, "functions.R"))
 
 
 ## read in csv 
@@ -61,30 +62,12 @@ t3 <- dat %>% filter(transect == 3)
 
 
 
-## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-## graphing parameters
-my.theme = theme(panel.grid.major = element_blank(), 
-                 panel.grid.minor = element_blank(),
-                 panel.background = element_blank(), 
-                 axis.line = element_line(colour = "black"),
-                 axis.title.x=element_text(size=15),
-                 axis.title.y=element_text(size=15),
-                 axis.text=element_text(size=15),
-                 plot.title = element_text(size=15),
-                 legend.title=element_text(size=15), 
-                 legend.text=element_text(size=15))
-
-
+## create figures ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## open separate visualization 
 graphics.off()
 windows(10, 5, record=T)
-## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-
-
-
-## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## quick plot to check surftrak data
 p1 <- quick_plot(t3)
 print(p1)
