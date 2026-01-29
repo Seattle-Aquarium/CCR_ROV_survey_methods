@@ -824,14 +824,14 @@ plot_surftrak_insets <- function(dat,
 
 
 
-plot_surftrak_insets(
-  t3,
-  zoom1 = c(52.5, 53.5),
-  zoom2 = c(60, 61),
-  inset_lwd = 0.45,
-  pad_m = 1,
-  legend_pos = c(0.13, 0.75)  # upper-left inside panel
-)
+#plot_surftrak_insets(
+#  t3,
+#  zoom1 = c(52.5, 53.5),
+#  zoom2 = c(60, 61),
+#  inset_lwd = 0.45,
+#  pad_m = 1,
+#  legend_pos = c(0.13, 0.75)  # upper-left inside panel
+#)
 ## END surftrak graphing function ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
