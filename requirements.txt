@@ -6,3 +6,4 @@ pytz
 pymavlink
 pyserial
 pytest
+matplotlib
