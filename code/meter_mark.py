@@ -120,7 +120,8 @@ def positions_to_meter_records(positions):
 
                 meter_records.append({
                     "meter_number": next_meter,
-                    "timestamp": interp_time.strftime("%Y_%m_%d_%H-%M-%S"),
+                    "timestamp": interp_time.timestamp(),
+                    "strftime": interp_time.strftime("%Y_%m_%d_%H-%M-%S"),
                     "cumulative_dist": round(cumulative_distance, 4),
                     "step_distance_m": round(step_dist_m, 4),
                     "gap_seconds": round(gap_seconds, 2),
@@ -148,6 +149,7 @@ def main():
         columns=[
             "meter_number",
             "timestamp",
+            "strftime",
             "cumulative_dist",
             "step_distance_m",
             "gap_seconds",
