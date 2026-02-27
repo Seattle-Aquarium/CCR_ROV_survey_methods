@@ -12,7 +12,7 @@ def build_packet(address, cmd, access, data=None, do_checksum=True):
     """
 
     # Validation
-    if not address:
+    if address is None:
         raise ValueError
 
     # Address must be integer between 0 and 999
