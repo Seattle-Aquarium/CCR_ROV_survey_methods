@@ -72,7 +72,7 @@ class LightingController:
     def _init_lights(self):
         """Initialize SeaLite objects for each light."""
         for addr in self.LIGHT_ADDRESSES:
-            light = Sealite(address=addr, max_level=100, local_echo=True)
+            light = Sealite(address=addr, max_level=100, local_echo=False)
             self._lights.append(light)
         print(f"Initialized {len(self._lights)} SeaLite lights (addresses {self.LIGHT_ADDRESSES})")
 
