@@ -1,6 +1,6 @@
 """
 Main application for the Lutris Lighting System.
-Controls 4 SeaLite LED lights (each on separate serial) and monitors power via INA238.
+Controls 4 SeaLite LED lights on a shared serial bus and monitors power via INA238.
 """
 
 import time
@@ -16,7 +16,6 @@ else:
     sys.path.insert(0, '/lib')
 
 from uart_wrapper import UARTWrapper
-from pio_uart import PioUart
 from ina238 import INA238
 from pydspl_seasense.sealite import Sealite
 
@@ -25,22 +24,13 @@ class LightingController:
     """
     Main controller for the Lutris lighting system.
 
-    Manages 4 SeaLite LED lights, each on its own serial connection:
-    - Lights 0-1: Hardware UART0 and UART1
-    - Lights 2-3: PIO-based software UARTs
+    Manages 4 SeaLite LED lights on a shared UART0 bus,
+    addressed individually (1-4) via the SeaSense protocol.
     """
 
     # Hardware UART pin assignments
-    UART0_TX_PIN = 0   # GP0
-    UART0_RX_PIN = 1   # GP1
-    UART1_TX_PIN = 4   # GP4
-    UART1_RX_PIN = 5   # GP5
-
-    # PIO UART pin assignments
-    PIO_UART2_TX_PIN = 8   # GP8
-    PIO_UART2_RX_PIN = 9   # GP9
-    PIO_UART3_TX_PIN = 10  # GP10
-    PIO_UART3_RX_PIN = 11  # GP11
+    UART_TX_PIN = 0   # GP0
+    UART_RX_PIN = 1   # GP1
 
     # I2C for INA238
     I2C_ID = 1
@@ -55,68 +45,36 @@ class LightingController:
     # Serial configuration
     BAUDRATE = 9600
 
+    # Light addresses on the shared bus
+    LIGHT_ADDRESSES = [1, 2, 3, 4]
+
     def __init__(self):
         """Initialize the lighting controller."""
-        self._uarts = []
+        self._uart = None
         self._lights = []
         self._power_monitor = None
 
-        self._init_uarts()
+        self._init_uart()
         self._init_lights()
         self._init_power_monitor()
 
-    def _init_uarts(self):
-        """Initialize 4 UART connections (2 hardware + 2 PIO)."""
-        # Hardware UART 0
-        uart0 = UARTWrapper(
+    def _init_uart(self):
+        """Initialize shared UART0 connection."""
+        self._uart = UARTWrapper(
             uart_id=0,
             baudrate=self.BAUDRATE,
-            tx=Pin(self.UART0_TX_PIN),
-            rx=Pin(self.UART0_RX_PIN),
+            tx=Pin(self.UART_TX_PIN),
+            rx=Pin(self.UART_RX_PIN),
             timeout=1000
         )
-        self._uarts.append(uart0)
-        print(f"UART0 initialized: TX=GP{self.UART0_TX_PIN}, RX=GP{self.UART0_RX_PIN}")
-
-        # Hardware UART 1
-        uart1 = UARTWrapper(
-            uart_id=1,
-            baudrate=self.BAUDRATE,
-            tx=Pin(self.UART1_TX_PIN),
-            rx=Pin(self.UART1_RX_PIN),
-            timeout=1000
-        )
-        self._uarts.append(uart1)
-        print(f"UART1 initialized: TX=GP{self.UART1_TX_PIN}, RX=GP{self.UART1_RX_PIN}")
-
-        # PIO UART 2
-        uart2 = PioUart(
-            tx_pin=self.PIO_UART2_TX_PIN,
-            rx_pin=self.PIO_UART2_RX_PIN,
-            baudrate=self.BAUDRATE,
-            timeout=1000
-        )
-        self._uarts.append(uart2)
-        print(f"PIO UART2 initialized: TX=GP{self.PIO_UART2_TX_PIN}, RX=GP{self.PIO_UART2_RX_PIN}")
-
-        # PIO UART 3
-        uart3 = PioUart(
-            tx_pin=self.PIO_UART3_TX_PIN,
-            rx_pin=self.PIO_UART3_RX_PIN,
-            baudrate=self.BAUDRATE,
-            timeout=1000
-        )
-        self._uarts.append(uart3)
-        print(f"PIO UART3 initialized: TX=GP{self.PIO_UART3_TX_PIN}, RX=GP{self.PIO_UART3_RX_PIN}")
+        print(f"UART0 initialized: TX=GP{self.UART_TX_PIN}, RX=GP{self.UART_RX_PIN}")
 
     def _init_lights(self):
         """Initialize SeaLite objects for each light."""
-        for _ in range(4):
-            # Each light uses address 1 since they're on separate serial lines
-            # local_echo=True because UART echoes back transmitted data
-            light = Sealite(address=1, max_level=100, local_echo=True)
+        for addr in self.LIGHT_ADDRESSES:
+            light = Sealite(address=addr, max_level=100, local_echo=True)
             self._lights.append(light)
-        print(f"Initialized {len(self._lights)} SeaLite lights")
+        print(f"Initialized {len(self._lights)} SeaLite lights (addresses {self.LIGHT_ADDRESSES})")
 
     def _init_power_monitor(self):
         """Initialize I2C and INA238 power monitor."""
@@ -158,8 +116,7 @@ class LightingController:
             return False
 
         try:
-            uart = self._uarts[light_index]
-            return self._lights[light_index].set_level(uart, level)
+            return self._lights[light_index].set_level(self._uart, level)
         except Exception as e:
             print(f"Error setting light {light_index}: {e}")
             return False
@@ -178,8 +135,7 @@ class LightingController:
             return None
 
         try:
-            uart = self._uarts[light_index]
-            return self._lights[light_index].read_level(uart)
+            return self._lights[light_index].read_level(self._uart)
         except Exception as e:
             print(f"Error reading light {light_index}: {e}")
             return None
@@ -190,8 +146,7 @@ class LightingController:
             return None
 
         try:
-            uart = self._uarts[light_index]
-            return self._lights[light_index].read_temperature(uart)
+            return self._lights[light_index].read_temperature(self._uart)
         except Exception as e:
             print(f"Error reading temp from light {light_index}: {e}")
             return None
