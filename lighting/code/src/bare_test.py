@@ -2,9 +2,9 @@ from machine import UART, Pin
 import time
 
 uart1 = UART(0, baudrate=9600, tx=Pin(0), rx=Pin(1))
-uart1.write('!001:lout=1\r\n')  # write 5 bytes
+uart1.write('!001:lout=0\r\n')  # write 5 bytes
 
-time.sleep(1)
+time.sleep(0.1)
 
 uart1.write('!001:INFO?\r\n')
 
