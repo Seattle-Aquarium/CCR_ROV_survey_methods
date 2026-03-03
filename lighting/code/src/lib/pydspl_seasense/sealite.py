@@ -24,8 +24,10 @@ class Sealite(PeripheralBase):
     to allow the "{increment,decrement}_light functions.
     """
 
-    def __init__(self, address, fp=None, max_level=100, local_echo=False):
-        super().__init__(address, local_echo=local_echo)
+    def __init__(self, address, fp=None, max_level=100, local_echo=False,
+                 expect_response=True):
+        super().__init__(address, local_echo=local_echo,
+                         expect_response=expect_response)
 
         self._level = 0
 
