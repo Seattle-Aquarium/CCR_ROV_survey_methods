@@ -65,14 +65,14 @@ class LightingController:
             baudrate=self.BAUDRATE,
             tx=Pin(self.UART_TX_PIN),
             rx=Pin(self.UART_RX_PIN),
-            timeout=1000
+            timeout=2000
         )
         print(f"UART0 initialized: TX=GP{self.UART_TX_PIN}, RX=GP{self.UART_RX_PIN}")
 
     def _init_lights(self):
         """Initialize SeaLite objects for each light."""
         for addr in self.LIGHT_ADDRESSES:
-            light = Sealite(address=addr, max_level=100, local_echo=False)
+            light = Sealite(address=addr, max_level=100, expect_response=False)
             self._lights.append(light)
         print(f"Initialized {len(self._lights)} SeaLite lights (addresses {self.LIGHT_ADDRESSES})")
 
