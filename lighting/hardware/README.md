@@ -50,3 +50,9 @@ Then the connections are made to the RS-485 converter:
 
 Orange of lights goes <-----> D+ / A screw block
 Blue of lights goes   <-----> D- / B screw block
+
+## Full bench setup
+
+The full wiring is shown, quite messily here for reference later. 
+
+![IMG_1438](https://github.com/user-attachments/assets/2d80da1f-6499-4dc4-bfd2-97bd916c8631)
