@@ -31,7 +31,8 @@ class PeripheralBase:
     DSPL_VERB_TEMPERATURE = "temp"
     DSPL_VERB_HUMIDITY = "rhum"
 
-    def __init__(self, address: int, local_echo: bool = False) -> None:
+    def __init__(self, address: int, local_echo: bool = False,
+                 expect_response: bool = True) -> None:
         """
         Address is the device ID programmed into the unit
 
@@ -39,10 +40,14 @@ class PeripheralBase:
         (to the device) to be echoed back before any response.  This is
         the case with some half-duplex RS485 architectures where the
         transceiver's RX "hears" its own TX.
+
+        If expect_response is False, write commands will not wait for
+        ACK/NAK from the device (fire-and-forget).
         """
 
         self._address = address
         self._local_echo = local_echo
+        self._expect_response = expect_response
 
     @property
     def address(self) -> None:
@@ -65,6 +70,10 @@ class PeripheralBase:
         * "rhum" -- relative humidity
         * "info" -- information string
         """
+
+        # Drain any stale data from the RX buffer
+        if hasattr(fp, 'any') and fp.any():
+            fp.read(fp.any())
 
         fp.write(seasense.build_packet(self.address, command, "?").encode("ascii"))
         if self._local_echo:
@@ -96,6 +105,9 @@ class PeripheralBase:
         fp.write(
             seasense.build_packet(self.address, command, verb, data).encode("ascii")
         )
+        if not self._expect_response:
+            return True
+
         if self._local_echo:
             result = fp.read_until()
 

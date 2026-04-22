@@ -1,6 +1,7 @@
 """
 Main application for the Lutris Lighting System.
-Controls 4 SeaLite LED lights (each on separate serial) and monitors power via INA238.
+Controls 4 SeaLite LED lights via PWM input from BlueROV servo output.
+Monitors power via INA238.
 """
 
 import time
@@ -16,31 +17,85 @@ else:
     sys.path.insert(0, '/lib')
 
 from uart_wrapper import UARTWrapper
-from pio_uart import PioUart
 from ina238 import INA238
 from pydspl_seasense.sealite import Sealite
+
+
+class PWMReader:
+    """Reads PWM pulse width using pin edge interrupts.
+
+    Designed for measuring ArduSub servo output signals (~50 Hz, 1100-1900 us).
+    Tracks last edge time for signal-loss detection.
+    """
+
+    def __init__(self, pin_num):
+        self._rise_us = 0
+        self._pulse_width_us = 0
+        self._last_edge_us = 0
+
+        self._pin = Pin(pin_num, Pin.IN, Pin.PULL_DOWN)
+        self._pin.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING,
+                       handler=self._irq_handler)
+
+    def _irq_handler(self, pin):
+        now = time.ticks_us()
+        self._last_edge_us = now
+        if pin.value():
+            # Rising edge
+            self._rise_us = now
+        else:
+            # Falling edge - measure pulse width
+            if self._rise_us:
+                self._pulse_width_us = time.ticks_diff(now, self._rise_us)
+
+    @property
+    def pulse_width_us(self):
+        """Pulse width (high time) in microseconds."""
+        return self._pulse_width_us
+
+    @property
+    def signal_age_ms(self):
+        """Milliseconds since last edge. Returns -1 if no edge received yet."""
+        if self._last_edge_us == 0:
+            return -1
+        return time.ticks_diff(time.ticks_us(), self._last_edge_us) // 1000
+
+    def deinit(self):
+        """Disable the interrupt."""
+        self._pin.irq(handler=None)
 
 
 class LightingController:
     """
     Main controller for the Lutris lighting system.
 
-    Manages 4 SeaLite LED lights, each on its own serial connection:
-    - Lights 0-1: Hardware UART0 and UART1
-    - Lights 2-3: PIO-based software UARTs
+    Manages 4 SeaLite LED lights on a shared UART0 bus,
+    addressed individually (1-4) via the SeaSense protocol.
+    Light brightness is controlled by a PWM input from the BlueROV.
     """
 
     # Hardware UART pin assignments
-    UART0_TX_PIN = 0   # GP0
-    UART0_RX_PIN = 1   # GP1
-    UART1_TX_PIN = 4   # GP4
-    UART1_RX_PIN = 5   # GP5
+    UART_TX_PIN = 0   # GP0
+    UART_RX_PIN = 1   # GP1
 
-    # PIO UART pin assignments
-    PIO_UART2_TX_PIN = 8   # GP8
-    PIO_UART2_RX_PIN = 9   # GP9
-    PIO_UART3_TX_PIN = 10  # GP10
-    PIO_UART3_RX_PIN = 11  # GP11
+    # PWM input from BlueROV servo output
+    PWM_INPUT_PIN = 16  # GP16
+
+    # ArduSub servo PWM range (microseconds)
+    PWM_MIN_US = 1100
+    PWM_MAX_US = 1900
+
+    # Signal loss timeout - lights off if no PWM edges for this long
+    SIGNAL_TIMEOUT_MS = 1000
+
+    # Minimum brightness change (%) before updating lights (deadband)
+    LEVEL_DEADBAND = 2
+
+    # Control loop interval
+    LOOP_INTERVAL_MS = 50
+
+    # Status print interval
+    STATUS_INTERVAL_MS = 2000
 
     # I2C for INA238
     I2C_ID = 1
@@ -55,68 +110,39 @@ class LightingController:
     # Serial configuration
     BAUDRATE = 9600
 
+    # Light addresses on the shared bus
+    LIGHT_ADDRESSES = [1, 2, 3, 4]
+
     def __init__(self):
         """Initialize the lighting controller."""
-        self._uarts = []
+        self._uart = None
         self._lights = []
         self._power_monitor = None
+        self._pwm_reader = None
+        self._current_level = 0
 
-        self._init_uarts()
+        self._init_uart()
         self._init_lights()
         self._init_power_monitor()
+        self._init_pwm_reader()
 
-    def _init_uarts(self):
-        """Initialize 4 UART connections (2 hardware + 2 PIO)."""
-        # Hardware UART 0
-        uart0 = UARTWrapper(
+    def _init_uart(self):
+        """Initialize shared UART0 connection."""
+        self._uart = UARTWrapper(
             uart_id=0,
             baudrate=self.BAUDRATE,
-            tx=Pin(self.UART0_TX_PIN),
-            rx=Pin(self.UART0_RX_PIN),
-            timeout=1000
+            tx=Pin(self.UART_TX_PIN),
+            rx=Pin(self.UART_RX_PIN),
+            timeout=2000
         )
-        self._uarts.append(uart0)
-        print(f"UART0 initialized: TX=GP{self.UART0_TX_PIN}, RX=GP{self.UART0_RX_PIN}")
-
-        # Hardware UART 1
-        uart1 = UARTWrapper(
-            uart_id=1,
-            baudrate=self.BAUDRATE,
-            tx=Pin(self.UART1_TX_PIN),
-            rx=Pin(self.UART1_RX_PIN),
-            timeout=1000
-        )
-        self._uarts.append(uart1)
-        print(f"UART1 initialized: TX=GP{self.UART1_TX_PIN}, RX=GP{self.UART1_RX_PIN}")
-
-        # PIO UART 2
-        uart2 = PioUart(
-            tx_pin=self.PIO_UART2_TX_PIN,
-            rx_pin=self.PIO_UART2_RX_PIN,
-            baudrate=self.BAUDRATE,
-            timeout=1000
-        )
-        self._uarts.append(uart2)
-        print(f"PIO UART2 initialized: TX=GP{self.PIO_UART2_TX_PIN}, RX=GP{self.PIO_UART2_RX_PIN}")
-
-        # PIO UART 3
-        uart3 = PioUart(
-            tx_pin=self.PIO_UART3_TX_PIN,
-            rx_pin=self.PIO_UART3_RX_PIN,
-            baudrate=self.BAUDRATE,
-            timeout=1000
-        )
-        self._uarts.append(uart3)
-        print(f"PIO UART3 initialized: TX=GP{self.PIO_UART3_TX_PIN}, RX=GP{self.PIO_UART3_RX_PIN}")
+        print(f"UART0 initialized: TX=GP{self.UART_TX_PIN}, RX=GP{self.UART_RX_PIN}")
 
     def _init_lights(self):
         """Initialize SeaLite objects for each light."""
-        for _ in range(4):
-            # Each light uses address 1 since they're on separate serial lines
-            # local_echo=True because UART echoes back transmitted data
-            light = Sealite(address=1, max_level=100, local_echo=True)
+        for addr in self.LIGHT_ADDRESSES:
+            light = Sealite(address=addr, max_level=100, expect_response=False)
             self._lights.append(light)
-        print(f"Initialized {len(self._lights)} SeaLite lights")
+        print(f"Initialized {len(self._lights)} SeaLite lights (addresses {self.LIGHT_ADDRESSES})")
 
     def _init_power_monitor(self):
         """Initialize I2C and INA238 power monitor."""
@@ -142,6 +168,21 @@ class LightingController:
             print(f"Warning: INA238 not found: {e}")
             self._power_monitor = None
 
+    def _init_pwm_reader(self):
+        """Initialize PWM input reader."""
+        self._pwm_reader = PWMReader(self.PWM_INPUT_PIN)
+        print(f"PWM input initialized: GP{self.PWM_INPUT_PIN}")
+        print(f"  PWM range: {self.PWM_MIN_US}-{self.PWM_MAX_US} us -> 0-100% brightness")
+
+    def pwm_to_level(self, pulse_width_us):
+        """Map PWM pulse width (us) to light level (0-100)."""
+        if pulse_width_us <= self.PWM_MIN_US:
+            return 0
+        if pulse_width_us >= self.PWM_MAX_US:
+            return 100
+        return int((pulse_width_us - self.PWM_MIN_US) * 100
+                    / (self.PWM_MAX_US - self.PWM_MIN_US))
+
     def set_light_level(self, light_index, level):
         """
         Set brightness level for a specific light.
@@ -158,8 +199,7 @@ class LightingController:
             return False
 
         try:
-            uart = self._uarts[light_index]
-            return self._lights[light_index].set_level(uart, level)
+            return self._lights[light_index].set_level(self._uart, level)
         except Exception as e:
             print(f"Error setting light {light_index}: {e}")
             return False
@@ -178,8 +218,7 @@ class LightingController:
             return None
 
         try:
-            uart = self._uarts[light_index]
-            return self._lights[light_index].read_level(uart)
+            return self._lights[light_index].read_level(self._uart)
         except Exception as e:
             print(f"Error reading light {light_index}: {e}")
             return None
@@ -190,8 +229,7 @@ class LightingController:
             return None
 
         try:
-            uart = self._uarts[light_index]
-            return self._lights[light_index].read_temperature(uart)
+            return self._lights[light_index].read_temperature(self._uart)
         except Exception as e:
             print(f"Error reading temp from light {light_index}: {e}")
             return None
@@ -221,12 +259,57 @@ class LightingController:
             'power': self.read_power()
         }
 
+    def run(self):
+        """Main control loop. Reads PWM input and updates light brightness.
+
+        Runs until KeyboardInterrupt (Ctrl-C). Turns lights off on exit.
+        """
+        print("PWM control loop running (Ctrl-C to stop)")
+
+        last_status_ms = time.ticks_ms()
+
+        try:
+            while True:
+                signal_age = self._pwm_reader.signal_age_ms
+                signal_lost = (signal_age < 0 or
+                               signal_age > self.SIGNAL_TIMEOUT_MS)
+
+                if signal_lost:
+                    target_level = 0
+                else:
+                    target_level = self.pwm_to_level(
+                        self._pwm_reader.pulse_width_us)
+
+                # Only update lights if level changed beyond deadband
+                if abs(target_level - self._current_level) >= self.LEVEL_DEADBAND:
+                    self.set_all_lights(target_level)
+                    self._current_level = target_level
+
+                # Periodic status output
+                now_ms = time.ticks_ms()
+                if time.ticks_diff(now_ms, last_status_ms) >= self.STATUS_INTERVAL_MS:
+                    pw = self._pwm_reader.pulse_width_us
+                    if signal_lost:
+                        print(f"PWM: NO SIGNAL | Level: {self._current_level}%")
+                    else:
+                        print(f"PWM: {pw} us | Level: {self._current_level}%")
+                    last_status_ms = now_ms
+
+                time.sleep_ms(self.LOOP_INTERVAL_MS)
+
+        except KeyboardInterrupt:
+            print("\nStopping...")
+        finally:
+            self.all_off()
+            self._pwm_reader.deinit()
+            print("Lights off. PWM reader disabled.")
+
 
 controller = None
 
 
 def main():
-    """Main entry point. Returns controller for REPL use."""
+    """Main entry point. Initializes controller and starts PWM control loop."""
     global controller
 
     print("Lutris Lighting System Starting...")
@@ -235,14 +318,14 @@ def main():
     controller = LightingController()
 
     print("-" * 40)
-    print("System ready. Commands:")
-    print("  c.set_light_level(0, 50)  # Light 0 to 50%")
-    print("  c.get_light_level(0)      # Read level")
-    print("  c.get_light_temperature(0)")
-    print("  c.set_all_lights(50)")
+    print("REPL commands (if loop is stopped):")
+    print("  c.set_all_lights(50)  # Manual override")
     print("  c.all_off()")
     print("  c.read_power()")
     print("  c.status()")
+    print("-" * 40)
+
+    controller.run()
 
     return controller
 

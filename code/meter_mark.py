@@ -41,7 +41,7 @@ def move_images_based_on_markers(meter_records, jpg_folder, dest_folder):
     jpg_timestamps = sorted(jpg_times.keys())
 
     for record in meter_records:
-        marker_time = datetime.strptime(record["timestamp"], "%Y_%m_%d_%H-%M-%S")
+        marker_time = datetime.strptime(record["strftime"], "%Y_%m_%d_%H-%M-%S") # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         closest = min(jpg_timestamps, key=lambda t: abs(t - marker_time))
         closest_file = jpg_times[closest]
 
