@@ -25,10 +25,14 @@ class PWMReader:
     """Reads PWM pulse width using pin edge interrupts.
 
     Designed for measuring ArduSub servo output signals (~50 Hz, 1100-1900 us).
-    Tracks last edge time for signal-loss detection.
+    Tracks last edge time for signal-loss detection. Pulses outside
+    [valid_min_us, valid_max_us] are dropped as EMI glitches; the prior
+    good measurement is retained.
     """
 
-    def __init__(self, pin_num):
+    def __init__(self, pin_num, valid_min_us=900, valid_max_us=2100):
+        self._valid_min_us = valid_min_us
+        self._valid_max_us = valid_max_us
         self._rise_us = 0
         self._pulse_width_us = 0
         self._last_edge_us = 0
@@ -46,7 +50,10 @@ class PWMReader:
         else:
             # Falling edge - measure pulse width
             if self._rise_us:
-                self._pulse_width_us = time.ticks_diff(now, self._rise_us)
+                width = time.ticks_diff(now, self._rise_us)
+                # Reject EMI glitches outside the valid PWM range.
+                if self._valid_min_us <= width <= self._valid_max_us:
+                    self._pulse_width_us = width
 
     @property
     def pulse_width_us(self):
@@ -84,6 +91,15 @@ class LightingController:
     # ArduSub servo PWM range (microseconds)
     PWM_MIN_US = 1100
     PWM_MAX_US = 1900
+
+    # Accept-range for raw pulse samples. Pulses outside this are treated
+    # as EMI glitches and dropped by the PWM reader's ISR.
+    PWM_VALID_MIN_US = 900
+    PWM_VALID_MAX_US = 2100
+
+    # Median filter window over raw samples, to reject single-sample
+    # outliers that pass the ISR range gate.
+    MEDIAN_WINDOW = 5
 
     # Signal loss timeout - lights off if no PWM edges for this long
     SIGNAL_TIMEOUT_MS = 1000
@@ -170,9 +186,14 @@ class LightingController:
 
     def _init_pwm_reader(self):
         """Initialize PWM input reader."""
-        self._pwm_reader = PWMReader(self.PWM_INPUT_PIN)
+        self._pwm_reader = PWMReader(
+            self.PWM_INPUT_PIN,
+            valid_min_us=self.PWM_VALID_MIN_US,
+            valid_max_us=self.PWM_VALID_MAX_US,
+        )
         print(f"PWM input initialized: GP{self.PWM_INPUT_PIN}")
         print(f"  PWM range: {self.PWM_MIN_US}-{self.PWM_MAX_US} us -> 0-100% brightness")
+        print(f"  Accept range: {self.PWM_VALID_MIN_US}-{self.PWM_VALID_MAX_US} us, median window: {self.MEDIAN_WINDOW}")
 
     def pwm_to_level(self, pulse_width_us):
         """Map PWM pulse width (us) to light level (0-100)."""
@@ -267,6 +288,7 @@ class LightingController:
         print("PWM control loop running (Ctrl-C to stop)")
 
         last_status_ms = time.ticks_ms()
+        pw_samples = []
 
         try:
             while True:
@@ -275,10 +297,15 @@ class LightingController:
                                signal_age > self.SIGNAL_TIMEOUT_MS)
 
                 if signal_lost:
+                    pw_samples = []
+                    pw_filtered = 0
                     target_level = 0
                 else:
-                    target_level = self.pwm_to_level(
-                        self._pwm_reader.pulse_width_us)
+                    pw_samples.append(self._pwm_reader.pulse_width_us)
+                    if len(pw_samples) > self.MEDIAN_WINDOW:
+                        pw_samples.pop(0)
+                    pw_filtered = sorted(pw_samples)[len(pw_samples) // 2]
+                    target_level = self.pwm_to_level(pw_filtered)
 
                 # Only update lights if level changed beyond deadband
                 if abs(target_level - self._current_level) >= self.LEVEL_DEADBAND:
@@ -288,11 +315,10 @@ class LightingController:
                 # Periodic status output
                 now_ms = time.ticks_ms()
                 if time.ticks_diff(now_ms, last_status_ms) >= self.STATUS_INTERVAL_MS:
-                    pw = self._pwm_reader.pulse_width_us
                     if signal_lost:
                         print(f"PWM: NO SIGNAL | Level: {self._current_level}%")
                     else:
-                        print(f"PWM: {pw} us | Level: {self._current_level}%")
+                        print(f"PWM: {pw_filtered} us | Level: {self._current_level}%")
                     last_status_ms = now_ms
 
                 time.sleep_ms(self.LOOP_INTERVAL_MS)
