@@ -99,13 +99,13 @@ class LightingController:
 
     # Median filter window over raw samples, to reject single-sample
     # outliers that pass the ISR range gate.
-    MEDIAN_WINDOW = 5
+    MEDIAN_WINDOW = 9
 
     # Signal loss timeout - lights off if no PWM edges for this long
     SIGNAL_TIMEOUT_MS = 1000
 
     # Minimum brightness change (%) before updating lights (deadband)
-    LEVEL_DEADBAND = 2
+    LEVEL_DEADBAND = 5
 
     # Control loop interval
     LOOP_INTERVAL_MS = 50
