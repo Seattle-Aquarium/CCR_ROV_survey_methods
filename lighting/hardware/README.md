@@ -56,3 +56,8 @@ Blue of lights goes   <-----> D- / B screw block
 The full wiring is shown, quite messily here for reference later. 
 
 ![IMG_1438](https://github.com/user-attachments/assets/2d80da1f-6499-4dc4-bfd2-97bd916c8631)
+
+
+## Other assets in this directory
+
+* [2026-05-04-connect-pico-to-navigator.drawio](2026-05-04-connect-pico-to-navigator.drawio) is the [draw.io](https://www.drawio.com) file used to generate the drawing in the [CCR_development#34](https://github.com/Seattle-Aquarium/CCR_development/issues/34) thread [here](https://github.com/Seattle-Aquarium/CCR_development/issues/34#issuecomment-4383756606)
