@@ -31,7 +31,7 @@ source(file.path(code, "functions.R"))
 
 
 ## read in csv 
-dat <- read.csv(file.path(results, "V3_power_consumption.csv"))
+dat <- read.csv(file.path(data, "Lutris_V4.csv"))
 ## END startup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
@@ -60,14 +60,16 @@ dat <- log_W(dat)
 
 
 ## remove rows while ROV on deck - minimum Watts = 50 power draw 
-dat <- preflight_trim(dat, threshold = 50)
+dat <- preflight_trim(dat, threshold = 0)
 
 
 ## add column for transects based on real-world survey flight times
 dat <- add_transect_column(dat, windows = list(
-    c("10:22:41", "10:31:06"),
-    c("11:08:03", "11:16:12"),
-    c("11:23:39", "11:34:03")
+    c("09:21:52", "09:23:40"),
+    c("09:24:50", "09:26:52"),
+    c("09:27:31", "09:31:31"),
+    c("09:34:16", "09:39:16"),
+    c("09:40:12", "09:45:12")
   )
 )
 ## END data wrangling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -77,7 +79,7 @@ dat <- add_transect_column(dat, windows = list(
 
 
 ## save and close ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-write.csv(dat, file = file.path("results", "V3_power_consumption.csv"), row.names = FALSE)
+write.csv(dat, file = file.path("results", "V4_power_consumption.csv"), row.names = FALSE)
 ## END csv file creation ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 

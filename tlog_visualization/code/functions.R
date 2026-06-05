@@ -401,7 +401,9 @@ transect_fills <- c(
   "0" = "gray",
   "1" = "#308014",
   "2" = "#104E8B",
-  "3" = "#B22222"
+  "3" = "#B22222",
+  "4" = "#FF5721",
+  "5" = "#7D26CD"
 )
 
 
@@ -410,7 +412,9 @@ transect_lw_1 <- c(
   "0" = 0.35,
   "1" = 0.70,
   "2" = 0.70,
-  "3" = 0.70
+  "3" = 0.70,
+  "4" = 0.70,
+  "5" = 0.70
 )
 
 
@@ -419,7 +423,9 @@ transect_lw_2 <- c(
   "0" = 1,
   "1" = 1.5,
   "2" = 1.5,
-  "3" = 1.5
+  "3" = 1.5,
+  "4" = 1.5,
+  "5" = 1.5
 )
 ## END graphing parameters ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~-
 
@@ -466,9 +472,11 @@ power_over_time <- function(dat,
       values = fills,
       labels = c(
         "0" = "off transect",
-        "1" = "transect 1",
-        "2" = "transect 2",
-        "3" = "transect 3"
+        "1" = "gain = 20%",
+        "2" = "gain = 30%",
+        "3" = "gain = 30%",
+        "4" = "gain = 40%",
+        "5" = "gain = 50%"
       )
     ) +
     guides(
@@ -511,17 +519,23 @@ density_stack <- function(dat,
                             "0" = "off transect",
                             "1" = "transect 1",
                             "2" = "transect 2",
-                            "3" = "transect 3"),
+                            "3" = "transect 3",
+                            "4" = "gain = 40%",
+                            "5" = "gain = 50%"),
                           alpha = 0.85,
                           legend_pos = c(0.85, 0.80),
                           xlab = "Watts consumed",
                           ylab = "Density",
-                          # KDE smoothing controls (histogram-binwidth analogue)
+                          # KDE smoothing controls
                           adjust = 1,
                           bw = NULL,
                           # x-axis formatting
                           back_transform = TRUE,
-                          expand_mult = c(0.02, 0.15)) {
+                          expand_mult = c(0.02, 0.15),
+                          # optional x-axis zoom in raw watt units
+                          xlim_watts = NULL,
+                          breaks_watts = NULL) {
+  
   x_col <- rlang::as_name(rlang::ensym(x_col))
   transect_col <- rlang::as_name(rlang::ensym(transect_col))
   
@@ -532,30 +546,43 @@ density_stack <- function(dat,
     do.call(geom_density, dens_args) +
     scale_fill_manual(values = fills, labels = labels) +
     my.theme +
-    xlab(xlab) + ylab(ylab) +
+    xlab(xlab) + 
+    ylab(ylab) +
     theme(
       axis.text.y   = element_blank(),
       axis.ticks.y  = element_blank(),
       legend.position   = legend_pos,
       legend.title      = element_blank(),
       legend.background = element_rect(fill = "white", colour = "black"),
-      legend.key        = element_rect(fill = NA, colour = NA)  # no black boxes
+      legend.key        = element_rect(fill = NA, colour = NA)
     )
   
   if (back_transform) {
-    p <- p + scale_x_continuous(
+    
+    scale_args <- list(
       labels = function(x) round(10^x),
       expand = expansion(mult = expand_mult)
     )
+    
+    if (!is.null(breaks_watts)) {
+      scale_args$breaks <- log10(breaks_watts)
+    }
+    
+    p <- p + do.call(scale_x_continuous, scale_args)
+    
   } else {
     p <- p + scale_x_continuous(
       expand = expansion(mult = expand_mult)
     )
   }
   
+  # Zoom the plot without changing the KDE calculation
+  if (!is.null(xlim_watts)) {
+    p <- p + coord_cartesian(xlim = log10(xlim_watts))
+  }
+  
   p
 }
-
 
 ## invoke function to plot kernel density stack
 #p2 <- density_stack(
