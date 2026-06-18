@@ -1,5 +1,9 @@
 # A script that uses tlogs to identify when the ROV moved by one meter and collect the associated image
 
+# Note from 4/23/26 -> If the script only moves one image successfully and no others, you likely have the wrong transect-images pairing
+# The script is successfully finding the closest match to the start which happens to be whichever image is closest to the start despite
+# being from a separate transect, hence why no other closest match images can be found
+
 import math
 from datetime import datetime, timezone
 import pytz
@@ -14,38 +18,38 @@ def step_distance(prev_x, prev_y, x, y):
     dy = y - prev_y
     return math.sqrt(dx**2 + dy**2)
 
-# Function to parse jpg filenames into datetime objects
-def parse_jpg_timestamp(filename):
+# Function to parse gpr filenames into datetime objects
+def parse_gpr_timestamp(filename):
     try:
         base = os.path.splitext(filename)[0]
         return datetime.strptime(base, "%Y_%m_%d_%H-%M-%S")
     except ValueError:
         return None
 
-# Function to move jpgs based on meter marker timestamps
-def move_images_based_on_markers(meter_records, jpg_folder, dest_folder):
+# Function to move gprs based on meter marker timestamps
+def move_images_based_on_markers(meter_records, gpr_folder, dest_folder):
     if not os.path.exists(dest_folder):
         os.makedirs(dest_folder)
 
-    jpg_times = {}
-    for fname in os.listdir(jpg_folder):
+    gpr_times = {}
+    for fname in os.listdir(gpr_folder):
         if fname.lower().endswith(".jpg"):
-            ts = parse_jpg_timestamp(fname)
+            ts = parse_gpr_timestamp(fname)
             if ts:
-                jpg_times[ts] = fname
+                gpr_times[ts] = fname
 
-    if not jpg_times:
-        print("No valid jpgs found in source folder.")
+    if not gpr_times:
+        print("No valid gprs found in source folder.")
         return
 
-    jpg_timestamps = sorted(jpg_times.keys())
+    gpr_timestamps = sorted(gpr_times.keys())
 
     for record in meter_records:
-        marker_time = datetime.strptime(record["strftime"], "%Y_%m_%d_%H-%M-%S") # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        closest = min(jpg_timestamps, key=lambda t: abs(t - marker_time))
-        closest_file = jpg_times[closest]
+        marker_time = datetime.strptime(record["strftime"], "%Y_%m_%d_%H-%M-%S")
+        closest = min(gpr_timestamps, key=lambda t: abs(t - marker_time))
+        closest_file = gpr_times[closest]
 
-        src_path = os.path.join(jpg_folder, closest_file)
+        src_path = os.path.join(gpr_folder, closest_file)
         dst_path = os.path.join(dest_folder, closest_file)
 
         if not os.path.exists(dst_path):
@@ -167,11 +171,11 @@ def main():
     else:
         print("No meter marks detected.")
 
-    choice = input("Move jpgs based on meter marks? (y/n): ").strip().lower()
+    choice = input("Move gprs based on meter marks? (y/n): ").strip().lower()
     if choice == "y" and meter_records:
-        jpg_folder = input("Enter the folder containing jpgs: ").strip()
-        dest_folder = input("Enter the destination folder for jpgs: ").strip()
-        move_images_based_on_markers(meter_records, jpg_folder, dest_folder)
+        gpr_folder = input("Enter the folder containing gprs: ").strip()
+        dest_folder = input("Enter the destination folder for gprs: ").strip()
+        move_images_based_on_markers(meter_records, gpr_folder, dest_folder)
 
 if __name__ == "__main__":
     main()

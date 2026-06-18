@@ -13,6 +13,9 @@ In both modes you can add options:
 
     --csv: save the optimized path to a CSV file
     --plot: create a plot comparing the original and optimized paths
+    --move-images: moves images to matching/closest timestamps
+        --gpr-folder: origin directory to move images from
+        --dest_folder: destination directory to move images into
 """
 
 import argparse
@@ -159,7 +162,7 @@ def create_plot(original_path, optimized_path, meter_records, output_filename):
 
 def optimize_path(
     logfile, known_length=None, window_size=None,
-    save_csv=False, plot=False, move_images=False, jpg_folder=False, dest_folder=False # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    save_csv=False, plot=False, move_images=False, gpr_folder=False, dest_folder=False # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ):
     """Find window size, and apply to generate meter markers."""
     original_positions = meter_mark.process_tlog(logfile)
@@ -293,12 +296,12 @@ def optimize_path(
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     if move_images:
-        if not jpg_folder or not dest_folder:
-            print("Error: --jpg-folder and --dest-folder are required when using --move-images.")
+        if not gpr_folder or not dest_folder:
+            print("Error: --gpr-folder and --dest-folder are required when using --move-images.")
             return
         if meter_records:
             meter_mark.move_images_based_on_markers(
-                meter_records, jpg_folder, dest_folder
+                meter_records, gpr_folder, dest_folder
             )
         else:
             print("No meter records available to move images.")
@@ -333,12 +336,12 @@ def main():
         help='Move images associated with the transect'
     )
     parser.add_argument(
-        '--jpg-folder', type=str,
-        help='Folder containing JPG images'
+        '--gpr-folder', type=str,
+        help='Folder containing gpr images'
     )
     parser.add_argument(
         '--dest-folder', type=str,
-        help='Destination folder for moved JPG images'
+        help='Destination folder for moved gpr images'
     )
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -352,12 +355,12 @@ def main():
     if args.path_length is not None:
         optimize_path(
             args.logfile, known_length=args.path_length,
-            save_csv=args.csv, plot=args.plot, move_images=args.move_images, jpg_folder=args.jpg_folder, dest_folder=args.dest_folder # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            save_csv=args.csv, plot=args.plot, move_images=args.move_images, gpr_folder=args.gpr_folder, dest_folder=args.dest_folder # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         )
     else:
         optimize_path(
             args.logfile, window_size=args.window_size,
-            save_csv=args.csv, plot=args.plot, move_images=args.move_images, jpg_folder=args.jpg_folder, dest_folder=args.dest_folder # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            save_csv=args.csv, plot=args.plot, move_images=args.move_images, gpr_folder=args.gpr_folder, dest_folder=args.dest_folder # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         )
 
 
