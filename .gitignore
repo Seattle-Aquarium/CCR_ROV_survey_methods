@@ -8,3 +8,6 @@ __pycache__
 
 # OSX Files
 .DS_Store
+
+# manuscript files until submitted to journal
+manuscript/
