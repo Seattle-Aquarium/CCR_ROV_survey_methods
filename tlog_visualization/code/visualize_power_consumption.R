@@ -31,7 +31,19 @@ source(file.path(code, "functions.R"))
 
 
 ## read in csv 
+<<<<<<< Updated upstream
 dat <- read.csv(file.path(results, "V4_power_consumption.csv"))
+=======
+dat <- read.csv(file.path(results, "V3_power_consumption.csv"))
+dat <- read.csv(file.path(data, "V1_power_consumption.csv"))
+dat <- read.csv(file.path(data, "2026_04_02_LightTest_T1.csv"))
+
+
+
+dat_low <- read.csv(file.path(data, "low_water_current.csv"))
+dat_high <- read.csv(file.path(data, "high_water_current.csv"))
+
+>>>>>>> Stashed changes
 #write.csv(dat, file = file.path("results", "V1_energy_usage.csv"), row.names = FALSE)
 ## END startup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -102,7 +114,28 @@ p3 <- density_stack(
 )
 
 print(p3)
-## END plots ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## end of V3 figs ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
+## plot V1 functions ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+plot_V1(dat = dat,
+        y_col = Wh,
+        x_col = min,
+        transect_col = transect,
+        flight_col = water_current,
+        lw_values = transect_lw_1,
+        ylab = "Power consumption (Wh)")
+
+
+## plot V1 side-by-side density stack
+V1_density_stack(dat = dat,
+                 x_col = log_W,
+                 flight_col = water_current,
+                 back_transform = TRUE)
+## END of V1 visualizations ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 
@@ -122,8 +155,13 @@ save_fig(
 ## Watts across time - instantaneous power consumption 
 save_fig(
   p2, 
+<<<<<<< Updated upstream
   filename = "W_across_time", 
   subfolder = "V4", 
+=======
+  filename = "W_across_time_test", 
+  subfolder = "V3", 
+>>>>>>> Stashed changes
   width = 10, 
   height = 5, 
   dpi = 600)
@@ -143,8 +181,16 @@ save_fig(
 
 
 
-## calculate total Wh consumed, Wh per 10min, Wh per min ~~~~~~~~~~~~~~~~~~~~~~~
-tabulate_wh(dat)
+## calculate V3 total Wh consumed, Wh per 10min, Wh per min ~~~~~~~~~~~~~~~~~~~~
+tabulate_wh(dat_low)
+
+
+## tabulate V1 metrics of power consumption
+V1_tabulate_wh(dat_high,
+               wh_col = "Wh",
+               time_col = "min",
+               time_format = "minutes",
+               transect_col = "transect")
 ## END Wh calculations ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
@@ -154,6 +200,4 @@ tabulate_wh(dat)
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## END of script ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-
 

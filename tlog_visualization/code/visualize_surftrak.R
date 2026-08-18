@@ -42,7 +42,7 @@ dat <- read.csv(file.path(results, "V3_power_consumption.csv"))
 
 
 ## wrangle data ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-## set surftrak to 0,8m
+## set surftrak to desired altitude s
 dat$range_finder <- 0.8
 
 

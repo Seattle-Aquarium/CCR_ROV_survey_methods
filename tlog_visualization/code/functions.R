@@ -196,7 +196,7 @@ add_transect_column <- function(dat,
 ## function to calculate Wh cumulative consumption ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 tabulate_wh <- function(dat,
                         wh_col = "Wh",
-                        time_col = "Time",         
+                        time_col = "time",         
                         transect_col = "transect",
                         off_value = 0,
                         window_min = 60,
@@ -512,7 +512,7 @@ power_over_time <- function(dat,
 
 ## plot kernel densities on log10 scale ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 density_stack <- function(dat,
-                          x_col = "log_W",
+                          x_col = "W",
                           transect_col = "transect",
                           fills = transect_fills,
                           labels = c(
@@ -557,9 +557,14 @@ density_stack <- function(dat,
       legend.key        = element_rect(fill = NA, colour = NA)
     )
   
+<<<<<<< Updated upstream
   if (back_transform) {
     
     scale_args <- list(
+=======
+ if (back_transform) {
+    p <- p + scale_x_continuous(
+>>>>>>> Stashed changes
       labels = function(x) round(10^x),
       expand = expansion(mult = expand_mult)
     )
@@ -574,7 +579,7 @@ density_stack <- function(dat,
     p <- p + scale_x_continuous(
       expand = expansion(mult = expand_mult)
     )
-  }
+ }
   
   # Zoom the plot without changing the KDE calculation
   if (!is.null(xlim_watts)) {
@@ -595,6 +600,33 @@ density_stack <- function(dat,
 #)
 #print(p2)
 ## END function to plot kernel density ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## quick plot to visualize un-transformed W consumed
+#ggplot(dat, aes(x = W, fill = factor(transect))) +
+#  geom_histogram(position = "stack", bins = 40, color = "black") +
+#  scale_fill_manual(
+#    values = transect_fills,
+#    labels = c(
+#      "0" = "off transect",
+#      "1" = "transect 1",
+#      "2" = "transect 2",
+#      "3" = "transect 3"
+#    )
+#  ) +
+#  xlab("Power consumption (W)") +
+#  ylab("Frequency") +
+#  my.theme +
+#  theme(
+#    legend.position = c(0.85, 0.80),
+#    legend.title = element_blank(),
+#    legend.background = element_rect(fill = "white", colour = "black")
+#  )
+## END quick plot ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 
@@ -918,6 +950,411 @@ surftrak_density <- function(dat,
 
 # suftrak_density(t3)
 ## END surftrak kernel density function ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
+## function to plot x2 side-by-side V1 figures ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+plot_V1 <- function(dat,
+                    y_col,
+                    x_col = "min",
+                    transect_col = "transect",
+                    flight_col = "water_current",
+                    fills = transect_fills,
+                    lw_values = transect_lw_2,
+                    legend_pos = c(0.1, 0.85),
+                    xlab = "ROV flight time",
+                    ylab = NULL,
+                    alpha = 0.95,
+                    order_by_x = TRUE,
+                    ncol = 2) {
+  
+  y_col <- rlang::as_name(rlang::ensym(y_col))
+  x_col <- rlang::as_name(rlang::ensym(x_col))
+  transect_col <- rlang::as_name(rlang::ensym(transect_col))
+  flight_col <- rlang::as_name(rlang::ensym(flight_col))
+  
+  dat[[flight_col]] <- factor(
+    dat[[flight_col]],
+    levels = c("low", "high"),
+    labels = c("0-1 kt water current", "1-2.5 kt water current")
+  )
+  
+  if (order_by_x && all(c(flight_col, x_col) %in% names(dat))) {
+    dat <- dat[order(dat[[flight_col]], dat[[x_col]]), ]
+  }
+  
+  if (is.null(ylab)) ylab <- y_col
+  
+  ggplot(
+    dat,
+    aes(
+      x = .data[[x_col]],
+      y = .data[[y_col]],
+      group = 1,
+      color = factor(.data[[transect_col]]),
+      linewidth = factor(.data[[transect_col]])
+    )
+  ) +
+    geom_path(alpha = alpha) +
+    facet_wrap(vars(.data[[flight_col]]), ncol = ncol, scales = "free_x") +
+    scale_x_continuous(expand = expansion(mult = c(0.01, 0.03))) +
+    scale_color_manual(
+      values = fills,
+      labels = c(
+        "0" = "off transect",
+        "1" = "transect 1",
+        "2" = "transect 2",
+        "3" = "transect 3"
+      ),
+      drop = FALSE
+    ) +
+    guides(
+      color = guide_legend(
+        override.aes = list(linewidth = 1.5)
+      )
+    ) +
+    scale_linewidth_manual(
+      values = lw_values,
+      guide = "none",
+      drop = FALSE
+    ) +
+    my.theme +
+    xlab(xlab) + ylab(ylab) +
+    theme(
+      legend.position   = legend_pos,
+      legend.title      = element_blank(),
+      legend.background = element_rect(fill = "white", colour = "black"),
+      legend.key        = element_rect(fill = NA, colour = NA),
+      strip.background  = element_blank(),
+      strip.text        = element_text(size = 17),
+      plot.margin       = margin(t = 5.5, r = 18, b = 5.5, l = 5.5),
+      panel.spacing.x   = unit(1.2, "lines")
+    )
+}
+
+
+## invoke
+#plot_V1(dat = dat,
+#        y_col = Wh,
+#        x_col = min,
+#        transect_col = transect,
+#        flight_col = water_current,
+#        lw_values = transect_lw_1,
+#        ylab = "Power consumption (Wh)")
+## END function ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
+## function to plot V1 figs side-by-side - kernel density ~~~~~~~~~~~~~~~~~~~~~~
+V1_density_stack <- function(dat,
+                             x_col = "W",
+                             transect_col = "transect",
+                             flight_col = "water_current",
+                             fills = transect_fills,
+                             labels = c(
+                               "0" = "off transect",
+                               "1" = "transect 1",
+                               "2" = "transect 2",
+                               "3" = "transect 3"),
+                             alpha = 0.85,
+                             legend_pos = c(0.85, 0.80),
+                             xlab = "Watts consumed",
+                             ylab = "Density",
+                             adjust = 1,
+                             bw = NULL,
+                             back_transform = TRUE,
+                             expand_mult = c(0.02, 0.15),
+                             ncol = 2) {
+  
+  x_col <- rlang::as_name(rlang::ensym(x_col))
+  transect_col <- rlang::as_name(rlang::ensym(transect_col))
+  flight_col <- rlang::as_name(rlang::ensym(flight_col))
+  
+  dat[[flight_col]] <- factor(
+    dat[[flight_col]],
+    levels = c("low", "high"),
+    labels = c("0-1 kt water current", "1-2.5 kt water current")
+  )
+  
+  dens_args <- list(position = "stack", alpha = alpha, adjust = adjust)
+  if (!is.null(bw)) dens_args$bw <- bw
+  
+  p <- ggplot(
+    dat,
+    aes(
+      x = .data[[x_col]],
+      fill = factor(.data[[transect_col]])
+    )
+  ) +
+    do.call(geom_density, dens_args) +
+    facet_wrap(vars(.data[[flight_col]]), ncol = ncol, scales = "free_x") +
+    scale_fill_manual(
+      values = fills,
+      labels = labels,
+      drop = FALSE
+    ) +
+    my.theme +
+    xlab(xlab) + ylab(ylab) +
+    theme(
+      axis.text.y        = element_blank(),
+      axis.ticks.y       = element_blank(),
+      legend.position    = legend_pos,
+      legend.title       = element_blank(),
+      legend.background  = element_rect(fill = "white", colour = "black"),
+      legend.key         = element_rect(fill = NA, colour = NA),
+      strip.background   = element_blank(),
+      strip.text         = element_text(size = 17),
+      panel.spacing.x    = unit(1.2, "lines"),
+      plot.margin        = margin(t = 5.5, r = 18, b = 5.5, l = 5.5)
+    )
+  
+  if (back_transform) {
+    p <- p + scale_x_continuous(
+      labels = function(x) round(10^x),
+      expand = expansion(mult = expand_mult)
+    )
+  } else {
+    p <- p + scale_x_continuous(
+      expand = expansion(mult = expand_mult)
+    )
+  }
+  
+  p
+}
+
+
+## invoke function 
+# V1_density_stack(dat = dat,
+#              x_col = log_W,
+#              flight_col = water_current,
+#              back_transform = TRUE)
+## END function ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+
+
+## function for V1 tabulation that handles min in percent of minutes ~~~~~~~~~~~
+V1_tabulate_wh <- function(dat,
+                           wh_col = "Wh",
+                           time_col = "time",
+                           time_format = c("hhmmss", "minutes"),
+                           transect_col = "transect",
+                           off_value = 0,
+                           window_min = 60,
+                           out_dir = "results",
+                           out_file = "Wh_consumption.txt",
+                           print_output = TRUE) {
+  
+  time_format <- match.arg(time_format)
+  
+  # ---- helpers ----
+  parse_time_to_seconds_hhmmss <- function(x) {
+    x <- trimws(as.character(x))
+    parts <- strsplit(x, ":", fixed = TRUE)
+    
+    vapply(parts, function(p) {
+      p <- p[p != ""]
+      if (length(p) != 3L) return(NA_real_)
+      hh <- suppressWarnings(as.numeric(p[1]))
+      mm <- suppressWarnings(as.numeric(p[2]))
+      ss <- suppressWarnings(as.numeric(p[3]))
+      if (anyNA(c(hh, mm, ss))) return(NA_real_)
+      hh * 3600 + mm * 60 + ss
+    }, numeric(1))
+  }
+  
+  fmt_num <- function(x, digits = 3) {
+    if (is.finite(x)) sprintf(paste0("%.", digits, "f"), x) else "NA"
+  }
+  
+  elapsed_minutes_hhmmss <- function(t_start, t_end) {
+    if (!is.finite(t_start) || !is.finite(t_end)) return(NA_real_)
+    dt <- t_end - t_start
+    if (is.finite(dt) && dt < 0) dt <- dt + 24 * 3600
+    dt / 60
+  }
+  
+  elapsed_minutes_numeric <- function(t_start, t_end) {
+    if (!is.finite(t_start) || !is.finite(t_end)) return(NA_real_)
+    t_end - t_start
+  }
+  
+  # ---- validate columns ----
+  needed <- c(wh_col, time_col, transect_col)
+  missing_cols <- setdiff(needed, names(dat))
+  if (length(missing_cols) > 0) {
+    stop("Missing required column(s): ", paste(missing_cols, collapse = ", "))
+  }
+  
+  dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+  
+  # Preserve row order
+  if (time_format == "hhmmss") {
+    dat$.t_internal <- parse_time_to_seconds_hhmmss(dat[[time_col]])
+    elapsed_minutes <- elapsed_minutes_hhmmss
+    time_format_label <- "HH:MM:SS"
+  } else {
+    dat$.t_internal <- suppressWarnings(as.numeric(dat[[time_col]]))
+    elapsed_minutes <- elapsed_minutes_numeric
+    time_format_label <- "elapsed minutes"
+  }
+  
+  # ---- output header ----
+  lines <- character(0)
+  lines <- c(lines, "Wh cumulative consumption summary")
+  lines <- c(lines, paste0("Generated: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
+  lines <- c(lines, paste0("Time column: ", time_col, " (", time_format_label, ")"))
+  lines <- c(lines, paste0("Window for normalized energy: ", window_min, " min"))
+  lines <- c(lines, "")
+  
+  tr <- dat[[transect_col]]
+  
+  # ============================================================
+  # A) On-transect summaries by transect ID (transect != 0)
+  # ============================================================
+  on_idx <- !is.na(tr) & tr != off_value
+  dat_on <- dat[on_idx, , drop = FALSE]
+  
+  if (nrow(dat_on) == 0) {
+    lines <- c(lines, "No on-transect rows found (transect != off_value).", "")
+  } else {
+    transect_ids <- unique(dat_on[[transect_col]])
+    transect_ids <- transect_ids[order(as.character(transect_ids))]
+    
+    lines <- c(lines, "On-transect (by transect ID)")
+    lines <- c(lines, "----------------------------------------")
+    
+    for (tid in transect_ids) {
+      d <- dat_on[dat_on[[transect_col]] == tid, , drop = FALSE]
+      
+      wh_vec <- as.numeric(d[[wh_col]])
+      wh_vec <- wh_vec[!is.na(wh_vec)]
+      total_wh <- if (length(wh_vec) >= 2) tail(wh_vec, 1) - wh_vec[1] else NA_real_
+      
+      tvec <- d$.t_internal
+      tvec <- tvec[!is.na(tvec)]
+      el_min <- if (length(tvec) >= 2) elapsed_minutes(tvec[1], tvec[length(tvec)]) else NA_real_
+      
+      wh_per_min <- if (is.finite(total_wh) && is.finite(el_min) && el_min > 0) {
+        total_wh / el_min
+      } else NA_real_
+      
+      wh_per_window <- if (is.finite(wh_per_min)) wh_per_min * window_min else NA_real_
+      
+      start_time <- as.character(d[[time_col]][1])
+      end_time   <- as.character(d[[time_col]][nrow(d)])
+      
+      lines <- c(lines, paste0("Transect: transect ", as.character(tid)))
+      lines <- c(lines, paste0("  Segment start time: ", start_time))
+      lines <- c(lines, paste0("  Segment end time:   ", end_time))
+      lines <- c(lines, paste0("  Rows: ", nrow(d)))
+      lines <- c(lines, paste0("  Total Wh (end - start): ", fmt_num(total_wh, 3)))
+      lines <- c(lines, paste0("  Elapsed time (min): ", fmt_num(el_min, 2)))
+      lines <- c(lines, paste0("  Wh per min: ", fmt_num(wh_per_min, 4)))
+      lines <- c(lines, paste0("  Wh per ", window_min, " min: ", fmt_num(wh_per_window, 3)))
+      lines <- c(lines, "")
+    }
+  }
+  
+  # ============================================================
+  # B) Off-transect summaries by contiguous segment (transect == 0)
+  # ============================================================
+  off_idx <- !is.na(tr) & tr == off_value
+  
+  lines <- c(lines, "")
+  lines <- c(lines, "Off-transect (transect == 0) by contiguous segment")
+  lines <- c(lines, "----------------------------------------")
+  
+  if (!any(off_idx, na.rm = TRUE)) {
+    lines <- c(lines, "No off-transect rows found (transect == off_value).", "")
+  } else {
+    rle_off <- rle(off_idx)
+    run_lengths <- rle_off$lengths
+    run_values  <- rle_off$values
+    
+    run_ends <- cumsum(run_lengths)
+    run_starts <- run_ends - run_lengths + 1
+    off_runs <- which(run_values)
+    
+    seg_tot_wh <- numeric(0)
+    seg_tot_min <- numeric(0)
+    
+    seg_n <- 0L
+    for (k in off_runs) {
+      seg_n <- seg_n + 1L
+      idx <- run_starts[k]:run_ends[k]
+      d <- dat[idx, , drop = FALSE]
+      
+      wh_vec <- as.numeric(d[[wh_col]])
+      wh_vec <- wh_vec[!is.na(wh_vec)]
+      total_wh <- if (length(wh_vec) >= 2) tail(wh_vec, 1) - wh_vec[1] else NA_real_
+      
+      tvec <- d$.t_internal
+      tvec <- tvec[!is.na(tvec)]
+      el_min <- if (length(tvec) >= 2) elapsed_minutes(tvec[1], tvec[length(tvec)]) else NA_real_
+      
+      wh_per_min <- if (is.finite(total_wh) && is.finite(el_min) && el_min > 0) {
+        total_wh / el_min
+      } else NA_real_
+      
+      wh_per_window <- if (is.finite(wh_per_min)) wh_per_min * window_min else NA_real_
+      
+      start_time <- as.character(d[[time_col]][1])
+      end_time   <- as.character(d[[time_col]][nrow(d)])
+      
+      seg_tot_wh <- c(seg_tot_wh, total_wh)
+      seg_tot_min <- c(seg_tot_min, el_min)
+      
+      lines <- c(lines, paste0("Off segment ", seg_n))
+      lines <- c(lines, paste0("  Segment start time: ", start_time))
+      lines <- c(lines, paste0("  Segment end time:   ", end_time))
+      lines <- c(lines, paste0("  Rows: ", nrow(d)))
+      lines <- c(lines, paste0("  Total Wh (end - start): ", fmt_num(total_wh, 3)))
+      lines <- c(lines, paste0("  Elapsed time (min): ", fmt_num(el_min, 2)))
+      lines <- c(lines, paste0("  Wh per min: ", fmt_num(wh_per_min, 4)))
+      lines <- c(lines, paste0("  Wh per ", window_min, " min: ", fmt_num(wh_per_window, 3)))
+      lines <- c(lines, "")
+    }
+    
+    total_off_wh <- sum(seg_tot_wh, na.rm = TRUE)
+    total_off_min <- sum(seg_tot_min, na.rm = TRUE)
+    
+    off_wh_per_min <- if (is.finite(total_off_wh) && is.finite(total_off_min) && total_off_min > 0) {
+      total_off_wh / total_off_min
+    } else NA_real_
+    
+    off_wh_per_window <- if (is.finite(off_wh_per_min)) off_wh_per_min * window_min else NA_real_
+    
+    lines <- c(lines, "Off-transect combined (all off segments)")
+    lines <- c(lines, paste0("  Segments: ", length(off_runs)))
+    lines <- c(lines, paste0("  Total Wh (sum of segments): ", fmt_num(total_off_wh, 3)))
+    lines <- c(lines, paste0("  Total time (min, sum of segments): ", fmt_num(total_off_min, 2)))
+    lines <- c(lines, paste0("  Wh per min: ", fmt_num(off_wh_per_min, 4)))
+    lines <- c(lines, paste0("  Wh per ", window_min, " min: ", fmt_num(off_wh_per_window, 3)))
+    lines <- c(lines, "")
+  }
+  
+  # ---- write to disk ----
+  txt <- paste(lines, collapse = "\n")
+  writeLines(txt, file.path(out_dir, out_file))
+  if (print_output) cat(txt, "\n")
+  invisible(txt)
+}
+
+
+## invoke function
+## tabulate V1 metrics of power consumption
+#V1_tabulate_wh(dat_high,
+#               wh_col = "Wh",
+#               time_col = "min",
+#               time_format = "minutes",
+#               transect_col = "transect")
+## END function ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 
