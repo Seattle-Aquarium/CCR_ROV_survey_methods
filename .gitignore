@@ -11,3 +11,6 @@ __pycache__
 
 # manuscript files until submitted to journal
 manuscript/
+
+# avoid pushing numerous survey images
+data/Satellite
