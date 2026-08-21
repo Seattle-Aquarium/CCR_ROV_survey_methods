@@ -236,7 +236,7 @@ class LightingController:
             # This could either be tuned to better match the
             # actual time to respond, or the code to catch
             # replies from the lights could be made more robust.
-            time.sleep_us(100000)
+            time.sleep_us(50000)
         return success
 
     def get_light_level(self, light_index):
