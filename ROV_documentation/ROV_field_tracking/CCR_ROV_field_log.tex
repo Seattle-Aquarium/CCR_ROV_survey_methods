@@ -1,0 +1,203 @@
+%=======================================================================
+%  CCR ROV FIELD LOG -- day-of flight record
+%  Coastal Climate Resilience (CCR) | Seattle Aquarium
+%
+%  One page = one field day. Print, fill in by hand on deck, then use the
+%  recorded transect start/end times to subset .mcap telemetry and to
+%  isolate the corresponding survey imagery in post-processing.
+%
+%  Build:  pdflatex CCR_ROV_field_log.tex
+%
+%  Colors and typeface follow SAQ-001 Visual ID Guidelines (V1), p.18 & p.22.
+%=======================================================================
+\documentclass[10pt]{extarticle}
+
+\usepackage[letterpaper,left=0.45in,right=0.45in,top=0.40in,bottom=0.35in]{geometry}
+\usepackage[lining,tabular]{montserrat}  % SAQ primary typeface
+\usepackage[T1]{fontenc}
+\usepackage[table]{xcolor}
+\usepackage{array,tabularx}
+\usepackage{graphicx}
+\usepackage[most]{tcolorbox}
+\usepackage{tikz}
+\usepackage{microtype}
+\renewcommand{\familydefault}{\sfdefault}
+\pagestyle{empty}
+
+%----------------------------------------------------------------------
+%  Seattle Aquarium palette -- SAQ-001 Visual ID Guidelines, p.18
+%----------------------------------------------------------------------
+\definecolor{Salish}{HTML}{004346}         % PMS 316   primary
+\definecolor{Fathom}{HTML}{0C2340}         % PMS 289   primary
+\definecolor{Mediterranean}{HTML}{1963B0}  % PMS 2132  primary
+\definecolor{Algae}{HTML}{00C389}          % PMS 2414  secondary
+\definecolor{Seafoam}{HTML}{3CCBDA}        % PMS 2226  secondary
+\definecolor{Pumice}{HTML}{EEEEEE}         % Cool Gray 1/50%  neutral
+\definecolor{Stone}{HTML}{575757}          % Cool Gray 11     neutral
+
+%----------------------------------------------------------------------
+%  Grid geometry
+%  Widths resolve exactly to \textwidth, rule thicknesses included:
+%      \tabw + \rulew + 6*\datw + 5*\rulew  ==  \textwidth
+%----------------------------------------------------------------------
+\setlength{\tabcolsep}{0pt}
+\setlength{\parindent}{0pt}
+
+\newlength{\rulew}\setlength{\rulew}{0.4pt}          % vertical hairline
+\newlength{\datw}\setlength{\datw}{\dimexpr(\textwidth-0.34in-6\rulew)/6\relax}
+\newlength{\notew}\setlength{\notew}{\dimexpr 6\datw+5\rulew\relax}
+\newlength{\notewb}\setlength{\notewb}{\dimexpr\notew+\rulew\relax}
+\newlength{\tabw}\setlength{\tabw}{\dimexpr\textwidth-\notewb\relax}
+
+\newcolumntype{T}{>{\centering\arraybackslash\columncolor{Salish}}p{\tabw}}
+\newcolumntype{D}{>{\centering\arraybackslash}p{\datw}}
+
+% Row struts: total row height = strut height + strut depth.
+% Sized so six transect blocks fill the page down to the footer rule.
+% The notes strut is nearly all depth, which pins the NOTES label to the top
+% of the cell and opens the space below it for several lines of writing.
+\newcommand{\datastrut}{\rule[-10.5pt]{0pt}{26pt}}    % 36.5pt of writing room
+\newcommand{\notestrut}{\rule[-40pt]{0pt}{14pt}}      % 54pt
+
+%----------------------------------------------------------------------
+%  Small building blocks
+%----------------------------------------------------------------------
+% Empty check box, drawn in Salish
+\newcommand{\cb}{\tikz[baseline=-0.55ex]{%
+  \draw[Salish,line width=0.7pt,rounded corners=0.7pt]
+    (0,-0.40em) rectangle (1.00em,0.60em);}}
+
+% Field label sitting to the left of a write-on rule
+\newcommand{\lbl}[1]{{\fontsize{7.4}{8.4}\selectfont\bfseries\color{Salish}%
+  \MakeUppercase{#1}}\hspace{5pt}}
+
+% One pre-dive checklist item
+\newcommand{\pdi}[1]{{\fontsize{8.6}{10}\selectfont #1}}
+
+% Stacked column heading: name over a Seafoam unit hint
+\newcommand{\hd}[2]{%
+  \begin{tabular}{@{}c@{}}
+    {\fontsize{7.6}{8.6}\selectfont\bfseries\color{white}\MakeUppercase{#1}}\\[0.6pt]
+    {\fontsize{5.6}{6.2}\selectfont\color{Seafoam}#2}
+  \end{tabular}}
+
+% One transect block: a data row above a full-width notes row.
+% \cline{2-7} leaves column 1 untouched so the Salish number rail runs
+% unbroken through the pair; the closing \hline then separates transects.
+\newcommand{\transect}[1]{%
+  \textcolor{white}{\bfseries\fontsize{9}{10}\selectfont #1}\datastrut
+    & & & & & & \\
+  \arrayrulecolor{Stone!25}\cline{2-7}
+  & \multicolumn{6}{@{}>{\columncolor{Pumice}}p{\notew}@{}}{%
+      \notestrut\hspace{5pt}%
+      {\fontsize{6}{7}\selectfont\color{Stone}\MakeUppercase{notes}}} \\
+  \arrayrulecolor{Stone!45}\hline
+}
+
+\begin{document}
+
+%======================================================================
+%  MASTHEAD
+%======================================================================
+\begin{minipage}[b]{\dimexpr\textwidth-0.95in\relax}
+  {\fontsize{21}{23}\selectfont\bfseries\color{Salish}CCR ROV FIELD LOG}\\[3.5pt]
+  {\fontsize{8.4}{10}\selectfont\color{Stone}%
+   Coastal Climate Resilience\, \textcolor{Seafoam}{\textbf{/}}\, Seattle
+   Aquarium \textcolor{Seafoam}{\textbf{/}}\, day-of flight record}
+\end{minipage}\hfill
+\begin{minipage}[b]{0.90in}
+  \raggedleft\includegraphics[width=0.72in]{SAQ_PrimaryLogo_MedBlue.pdf}
+\end{minipage}
+
+\vspace{5pt}
+{\color{Salish}\rule{\textwidth}{2.2pt}}\\[1.2pt]
+{\color{Seafoam}\rule{\textwidth}{0.9pt}}
+
+\vspace{12pt}
+
+%======================================================================
+%  DAY METADATA
+%======================================================================
+\begin{tabularx}{\textwidth}{@{}lX@{\hspace{16pt}}lX@{\hspace{16pt}}lX@{}}
+  \lbl{Date} & \hrulefill &
+  \lbl{Project} & \hrulefill &
+  \lbl{Site} & \hrulefill \\
+\end{tabularx}
+
+\vspace{14pt}
+
+\begin{tabularx}{\textwidth}{@{}l>{\hsize=1.5\hsize}X@{\hspace{16pt}}l>{\hsize=0.75\hsize}X@{\hspace{16pt}}l>{\hsize=0.75\hsize}X@{}}
+  \lbl{Personnel} & \hrulefill &
+  \lbl{ROV / vessel} & \hrulefill &
+  \lbl{Data entry lead} & \hrulefill \\
+\end{tabularx}
+
+\vspace{12pt}
+
+%======================================================================
+%  PRE-DIVE GATE
+%======================================================================
+\begin{tcolorbox}[
+  enhanced, sharp corners, rounded corners=west, arc=3pt,
+  colback=Pumice!45, colframe=Algae, boxrule=0.9pt,
+  left=8pt, right=8pt, top=5.5pt, bottom=5.5pt, boxsep=0pt]
+  \begin{minipage}[c]{0.62in}
+    {\fontsize{7.4}{8.4}\selectfont\bfseries\color{Salish}PRE-DIVE}
+  \end{minipage}%
+  \begin{minipage}[c]{\dimexpr\linewidth-0.62in\relax}
+    \begin{tabularx}{\linewidth}{@{}XX@{}}
+      \pdi{Sync cameras GoPro Labs?~\cb} &
+      \pdi{TC25 pulled up on screen?~\cb} \\[4.5pt]
+      \pdi{Camera / housing cleaned?~\cb} &
+      \pdi{Cameras recording?~\cb} \\
+    \end{tabularx}
+  \end{minipage}
+\end{tcolorbox}
+
+\vspace{12pt}
+
+%======================================================================
+%  TRANSECT RECORD
+%======================================================================
+\begin{tabular}{@{}T
+  !{\color{Stone!25}\vrule width \rulew}D
+  !{\color{Stone!25}\vrule width \rulew}D
+  !{\color{Stone!25}\vrule width \rulew}D
+  !{\color{Stone!25}\vrule width \rulew}D
+  !{\color{Stone!25}\vrule width \rulew}D
+  !{\color{Stone!25}\vrule width \rulew}D@{}}
+
+\rowcolor{Salish}
+  \hd{\#}{}\rule[-6pt]{0pt}{17pt} &
+  \hd{start}{TC25 hh:mm:ss} & \hd{end}{TC25 hh:mm:ss} &
+  \hd{tgt alt}{m}      & \hd{tgt speed}{m/s} &
+  \hd{tgt light}{\%}   & \hd{tgt mode}{alt-hold / man} \\
+\arrayrulecolor{Salish}\hline
+
+\transect{T1}
+\transect{T2}
+\transect{T3}
+\transect{T4}
+\transect{T5}
+\transect{T6}
+
+\end{tabular}
+
+\vfill
+
+%======================================================================
+%  FOOTER
+%======================================================================
+{\color{Stone!35}\rule{\textwidth}{0.5pt}}\\[4pt]
+\begin{minipage}[t]{0.70\textwidth}
+  {\fontsize{6.8}{8.2}\selectfont\color{Stone}%
+   Transect start/end times are the join key for post-processing: they subset
+   the \texttt{.mcap} telemetry record and isolate the matching survey imagery.
+   Record times to the second, from the TC25 clock.}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.28\textwidth}
+  \raggedleft{\fontsize{6.8}{8.2}\selectfont\color{Stone}%
+   Sheet \rule[-1pt]{22pt}{0.5pt} of \rule[-1pt]{22pt}{0.5pt}}
+\end{minipage}
+
+\end{document}

@@ -1,0 +1,7 @@
+# LaTeX build artifacts -- the .tex and the built .pdf are tracked, these are not
+*.aux
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
