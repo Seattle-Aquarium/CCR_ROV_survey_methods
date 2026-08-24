@@ -1,0 +1,9 @@
+# build artefacts -- the packaged exe is ~300 MB, never commit it
+build/
+dist/
+*.spec.bak
+__pycache__/
+*.pyc
+
+# per-run scratch
+.pytest_cache/
