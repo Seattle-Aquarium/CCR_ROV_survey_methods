@@ -1,4 +1,4 @@
-# CCR ROV Composite
+# Underwater Telemetry Compositing (UTC)
 
 Combines the **downward-facing GoPro** from an ROV transect with telemetry from
 the BlueOS `.mcap` recording, and writes one video per transect.
@@ -20,10 +20,10 @@ flight data.
 
 ## Running it
 
-Double-click **`run_composite.bat`**, or from a terminal:
+Double-click **`run_UTC.bat`**, or from a terminal:
 
 ```
-python -m composite.gui.app
+python -m utc.gui.app
 ```
 
 First time only:
@@ -39,10 +39,10 @@ a static build. A real ffmpeg on `PATH` is used in preference if present.
 
 ```
 python -m pip install pyinstaller
-pyinstaller composite.spec
+pyinstaller utc.spec
 ```
 
-Produces `dist/CCR-ROV-Composite.exe` (~87 MB), which needs no Python install
+Produces `dist/Underwater-Telemetry-Compositing.exe` (~87 MB), which needs no Python install
 and can be handed to a colleague directly. Windows SmartScreen will warn about
 an unsigned executable the first time: *More info* → *Run anyway*.
 
@@ -50,7 +50,7 @@ The build output is **git-ignored**; do not commit it.
 
 Two things about the build worth knowing:
 
-* The spec targets `launch.py`, not `composite/gui/app.py`. PyInstaller runs its
+* The spec targets `launch.py`, not `utc/gui/app.py`. PyInstaller runs its
   target as `__main__`, so aiming it at the module breaks that module's relative
   imports (`attempted relative import with no known parent package`). A
   top-level script that imports the package keeps the package context intact.
@@ -59,8 +59,8 @@ Two things about the build worth knowing:
 
   ```
   set COMPOSITE_DEBUG=1
-  pyinstaller composite.spec
-  dist\CCR-ROV-Composite-debug.exe
+  pyinstaller utc.spec
+  dist\Underwater-Telemetry-Compositing-debug.exe
   ```
 
 ---
@@ -195,7 +195,7 @@ The GUI follows the Seattle Aquarium visual identity (v1, Aug 2023): Montserrat
 throughout, with a dark scheme on Fathom and a light scheme on White/Pumice with
 Stone body copy. Both respect the guidelines' contrast rules. Toggle top-right.
 
-Overlay geometry and colours live in `composite/config.py` (`Layout`), and the
+Overlay geometry and colours live in `utc/config.py` (`Layout`), and the
 panel contents in `PANEL_ROWS`.
 
 ---
@@ -222,12 +222,12 @@ panel contents in `PANEL_ROWS`.
 ## Layout of this folder
 
 ```
-composite/
-    run_composite.bat       double-click launcher
-    composite.spec          PyInstaller build
+UTC/
+    run_UTC.bat             double-click launcher
+    utc.spec                PyInstaller build
     requirements.txt
     assets/                 logos, app icon
-    composite/
+    utc/
         brand.py            Seattle Aquarium palette, fonts, logos
         config.py           layout, encoding, panel contents
         discovery.py        finding inputs in a flight folder
@@ -240,6 +240,7 @@ composite/
         overlay.py          telemetry panel and overlay sequences
         compose.py          ffmpeg composition
         csv_export.py       1 Hz CSV
+        photos.py           telemetry stamped onto flight stills
         pipeline.py         orchestration
         fsutil.py           lock-tolerant publishing of finished files
         power.py            keeps the machine awake during a run
@@ -248,7 +249,7 @@ composite/
 ```
 
 Caching: intermediates (~4 GB per flight) go to
-`%LOCALAPPDATA%\ccr_composite_cache\`, deliberately **outside** the flight
+`%LOCALAPPDATA%\utc_cache\` (an existing `ccr_composite_cache\` from before the rename is reused rather than rebuilt), deliberately **outside** the flight
 folder so Dropbox does not sync disposable working files to the whole team. A
 second run skips straight to compositing. Delete that folder to force a rebuild.
 

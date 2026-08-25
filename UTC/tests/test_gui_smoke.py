@@ -16,8 +16,8 @@ OUT = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
 OUT.mkdir(parents=True, exist_ok=True)
 
 import customtkinter as ctk  # noqa: E402
-from composite.gui.app import App  # noqa: E402
-from composite.survey import Site, SurveyPlan, Transect  # noqa: E402
+from utc.gui.app import App  # noqa: E402
+from utc.survey import Site, SurveyPlan, Transect  # noqa: E402
 
 
 def shot(app: App, name: str) -> None:

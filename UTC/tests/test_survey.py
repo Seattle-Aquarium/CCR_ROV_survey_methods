@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from composite.survey import (  # noqa: E402
+from utc.survey import (  # noqa: E402
     Chapter, Site, SurveyPlan, SurveyError, Transect,
     format_hhmmss, local_midnight_epoch, parse_hhmmss, resolve_transect,
     utc_offset_hours,

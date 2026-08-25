@@ -10,7 +10,7 @@ whoever is driving.
 
 - **Brand source of truth:** `SAQ-001_Visual-ID-Guidelines_FINAL_V1-0823` (v1, Aug 2023).
   All colour and type values below were transcribed from it directly and verified.
-- **Reference implementation:** `CCR_ROV_survey_methods/composite/` — a
+- **Reference implementation:** `CCR_ROV_survey_methods/UTC/` — a
   CustomTkinter app that runs multi-hour ffmpeg jobs. Every architectural
   pattern below is lifted from working code, not proposed in the abstract.
 
@@ -662,12 +662,12 @@ Copy these from the reference implementation and adapt:
 
 | File | What it gives you |
 |---|---|
-| `composite/brand.py` | palette, `Theme`, font + logo discovery — copy as-is |
-| `composite/gui/theme.py` | `(light, dark)` pairs, type scale — copy as-is |
-| `composite/gui/widgets.py` | `Card`, `entry`, `label`, `button` — copy, then add domain widgets |
-| `composite/gui/app.py` | window assembly, worker/queue orchestration — read, then adapt |
-| `composite/fsutil.py` | lock-tolerant publishing |
-| `composite/power.py` | keeping the machine awake |
+| `UTC/utc/brand.py` | palette, `Theme`, font + logo discovery — copy as-is |
+| `UTC/utc/gui/theme.py` | `(light, dark)` pairs, type scale — copy as-is |
+| `UTC/utc/gui/widgets.py` | `Card`, `entry`, `label`, `button` — copy, then add domain widgets |
+| `UTC/utc/gui/app.py` | window assembly, worker/queue orchestration — read, then adapt |
+| `UTC/utc/fsutil.py` | lock-tolerant publishing |
+| `UTC/utc/power.py` | keeping the machine awake |
 
 `brand.py` and `theme.py` carry no ROV-specific content and should be copied
 unchanged, so a fix to a colour propagates rather than diverging per app.
@@ -680,6 +680,6 @@ enough for the GUI** — register them at startup, as described under Typography
 
 ---
 
-*Maintained alongside `CCR_ROV_survey_methods/composite/`. Brand values from
+*Maintained alongside `CCR_ROV_survey_methods/UTC/`. Brand values from
 SAQ-001_Visual-ID-Guidelines_FINAL_V1-0823 (v1, Aug 2023). When the guidelines
 are revised, `brand.py` is the file to update first.*

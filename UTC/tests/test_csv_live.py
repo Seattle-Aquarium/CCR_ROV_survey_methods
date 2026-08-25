@@ -2,8 +2,8 @@
 import sys, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from composite.telemetry import TelemetryStore
-from composite.csv_export import export_1hz
+from utc.telemetry import TelemetryStore
+from utc.csv_export import export_1hz
 
 CACHE = Path(r"C:\Users\randellz\AppData\Local\ccr_composite_cache\_smoketest")
 t0 = time.time()

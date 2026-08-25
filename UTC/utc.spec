@@ -1,6 +1,6 @@
-# PyInstaller spec for CCR ROV Composite.
-#   pyinstaller composite.spec
-# Produces dist/CCR-ROV-Composite.exe -- a single file that needs no Python
+# PyInstaller spec for Underwater Telemetry Compositing (UTC).
+#   pyinstaller utc.spec
+# Produces dist/Underwater-Telemetry-Compositing.exe -- a single file that needs no Python
 # install, so it can be handed to teammates directly.
 import sys
 from pathlib import Path
@@ -24,7 +24,7 @@ a = Analysis(
     pathex=[str(ROOT)],
     datas=datas,
     hiddenimports=["PIL._tkinter_finder", "av", "mcap",
-                   "composite.gui.app", "composite.cli"],
+                   "utc.gui.app", "utc.cli"],
     excludes=["matplotlib", "pandas", "scipy", "pytest"],
     noarchive=False,
 )
@@ -37,7 +37,8 @@ _debug = bool(_os.environ.get("COMPOSITE_DEBUG"))
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz, a.scripts, a.binaries, a.datas, [],
-    name="CCR-ROV-Composite-debug" if _debug else "CCR-ROV-Composite",
+    name=("Underwater-Telemetry-Compositing-debug" if _debug
+          else "Underwater-Telemetry-Compositing"),
     console=_debug,
     icon=str(ROOT / "assets" / "app.ico"),
     upx=False,

@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from composite.fsutil import _is_lock_error, _numbered, publish  # noqa: E402
+from utc.fsutil import _is_lock_error, _numbered, publish  # noqa: E402
 
 ON_WINDOWS = os.name == "nt"
 

@@ -2,7 +2,7 @@
 import sys, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from composite.mcap_extract import extract
+from utc.mcap_extract import extract
 
 LOGS = Path(r"C:\Users\randellz\Seattle Aquarium Dropbox\Coastal_Climate_Resilience\flights\testing\2026_06_12_C3-cam-testing\logs")
 CACHE = Path(r"C:\Users\randellz\AppData\Local\ccr_composite_cache\_smoketest")

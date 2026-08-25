@@ -13,10 +13,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from composite import ffmpeg_tools as ff
-from composite.config import AppConfig
-from composite.pipeline import RunRequest, run
-from composite.survey import Site, SurveyPlan, Transect
+from utc import ffmpeg_tools as ff
+from utc.config import AppConfig
+from utc.pipeline import RunRequest, run
+from utc.survey import Site, SurveyPlan, Transect
 
 FLIGHT = Path(r"C:\Users\randellz\Seattle Aquarium Dropbox\Coastal_Climate_Resilience"
               r"\flights\testing\2026_08_21_DeepSea_light_testing")

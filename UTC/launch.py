@@ -2,12 +2,12 @@
 Entry point for the packaged application.
 
 PyInstaller runs its target script as ``__main__``, so pointing it straight at
-``composite/gui/app.py`` breaks that module's relative imports ("attempted
+``utc/gui/app.py`` breaks that module's relative imports ("attempted
 relative import with no known parent package"). Importing the package from a
 top-level script keeps the normal package context intact.
 """
 
-from composite.gui.app import main
+from utc.gui.app import main
 
 if __name__ == "__main__":
     main()

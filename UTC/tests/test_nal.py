@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from composite.mcap_extract import _nal_iter, has_idr, sps_resolution  # noqa: E402
+from utc.mcap_extract import _nal_iter, has_idr, sps_resolution  # noqa: E402
 
 SC3 = b"\x00\x00\x01"
 SC4 = b"\x00\x00\x00\x01"

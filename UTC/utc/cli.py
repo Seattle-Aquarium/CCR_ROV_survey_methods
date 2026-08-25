@@ -4,7 +4,7 @@ Headless runner.
 The GUI is the intended way in, but a command line is useful for batch work, for
 re-running a flight after correcting times, and for testing without a display::
 
-    python -m composite.cli "D:/flights/2026_08_24_Centennial" \
+    python -m utc.cli "D:/flights/2026_08_24_Centennial" \
         --site Centennial --project HSIL --date 2026-08-24 \
         --transect T1 13:12:00 13:27:30 \
         --transect T2 13:35:00 13:50:00 \
@@ -12,7 +12,7 @@ re-running a flight after correcting times, and for testing without a display::
 
 Or reuse the plan the GUI saved::
 
-    python -m composite.cli "D:/flights/2026_08_24_Centennial" --plan
+    python -m utc.cli "D:/flights/2026_08_24_Centennial" --plan
 """
 
 from __future__ import annotations
@@ -24,14 +24,17 @@ from pathlib import Path
 from . import discovery
 from .config import AppConfig, RENDITIONS
 from .pipeline import RunRequest, run
-from .survey import Site, SurveyPlan, Transect
+from .survey import (
+    PLAN_FILENAME, Site, SurveyPlan, Transect, plan_path,
+)
 
-PLAN_FILENAME = "composite_plan.json"
+# Plan filename and legacy fallback live in survey.py, so the CLI and the
+# GUI cannot drift apart on which file they read.
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="composite",
+        prog="utc",
         description="Build ROV telemetry composites for a flight folder.",
     )
     p.add_argument("flight_dir", type=Path, help="the folder for one dive")
@@ -51,6 +54,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="ignore the cache and re-read the mcap")
     p.add_argument("--scan-only", action="store_true",
                    help="report what was found and exit")
+    p.add_argument("--photos", action="store_true",
+                   help="stamp telemetry onto the flight's stills too")
+    p.add_argument("--off-transect", choices=("keep", "move", "delete"),
+                   default="keep",
+                   help="what to do with stills outside every transect "
+                        "(default: keep)")
     return p
 
 
@@ -65,11 +74,11 @@ def main(argv: list[str] | None = None) -> int:
     print()
 
     if args.plan:
-        plan_path = flight / PLAN_FILENAME
-        if not plan_path.is_file():
+        saved = plan_path(flight)
+        if not saved.is_file():
             print(f"error: no {PLAN_FILENAME} in {flight}", file=sys.stderr)
             return 2
-        plan = SurveyPlan.load(plan_path)
+        plan = SurveyPlan.load(saved)
     else:
         missing = [n for n in ("site", "project", "date")
                    if not getattr(args, n)]
@@ -99,7 +108,9 @@ def main(argv: list[str] | None = None) -> int:
     res = run(
         RunRequest(flight_dir=flight, plan=plan, renditions=rends,
                    app=AppConfig(), write_csv=not args.no_csv,
-                   force_extract=args.force_extract),
+                   force_extract=args.force_extract,
+                   process_photos=args.photos,
+                   off_transect=args.off_transect),
         progress=progress,
     )
     print("\n")

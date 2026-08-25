@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from composite.discovery import discover, output_dirs  # noqa: E402
+from utc.discovery import discover, output_dirs  # noqa: E402
 
 
 def _make(root: Path, files: list[str]) -> None:

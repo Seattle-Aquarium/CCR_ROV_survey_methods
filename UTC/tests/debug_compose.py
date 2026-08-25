@@ -7,11 +7,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from composite import compose as C, ffmpeg_tools as ff, overlay, rov_video
-from composite.config import AppConfig, RENDITIONS
-from composite.pipeline import cache_dir_for, describe_chapters
-from composite.survey import Site, SurveyPlan, Transect, resolve_plan
-from composite.telemetry import TelemetryStore
+from utc import compose as C, ffmpeg_tools as ff, overlay, rov_video
+from utc.config import AppConfig, RENDITIONS
+from utc.pipeline import cache_dir_for, describe_chapters
+from utc.survey import Site, SurveyPlan, Transect, resolve_plan
+from utc.telemetry import TelemetryStore
 
 FLIGHT = Path(r"C:\Users\randellz\Seattle Aquarium Dropbox\Coastal_Climate_Resilience"
               r"\flights\testing\2026_08_21_DeepSea_light_testing")

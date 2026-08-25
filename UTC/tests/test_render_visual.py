@@ -9,9 +9,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PIL import Image, ImageDraw
 
-from composite import brand, gauges
-from composite.config import Layout
-from composite.overlay import measure_panel, render_panel
+from utc import brand, gauges
+from utc.config import Layout
+from utc.overlay import measure_panel, render_panel
 
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
 OUT.mkdir(parents=True, exist_ok=True)

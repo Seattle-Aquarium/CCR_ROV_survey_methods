@@ -1,5 +1,5 @@
 """
-The CCR ROV Composite desktop application.
+The Underwater Telemetry Compositing (UTC) desktop application.
 
 Layout follows the order of the job: pick the flight folder, confirm what was
 found, describe the sites and transects, choose output sizes, run.
@@ -24,12 +24,17 @@ import customtkinter as ctk
 from .. import brand, discovery
 from ..config import AppConfig, RENDITIONS
 from ..pipeline import RunRequest, RunResult, run as run_pipeline
-from ..survey import Site, SurveyPlan, Transect
+from ..survey import (
+    PLAN_FILENAME, Site, SurveyPlan, Transect, plan_path,
+)
 from . import theme as T
 from .widgets import Card, SiteFrame, button, entry, label
 
-APP_NAME = "CCR ROV Composite"
-PLAN_FILENAME = "composite_plan.json"
+APP_NAME = "Underwater Telemetry Compositing"
+#: Short form, for window chrome and generated file names.
+APP_ABBREV = "UTC"
+# Plan filename and legacy fallback live in survey.py, so the CLI and the
+# GUI cannot drift apart on which file they read.
 
 
 class App(ctk.CTk):
@@ -77,7 +82,7 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(h, text=APP_NAME, font=T.FONT_TITLE, text_color=T.HEADING
                      ).grid(row=0, column=1, sticky="sw", pady=(14, 0))
-        ctk.CTkLabel(h, text="ROV telemetry overlays for downward GoPro transects",
+        ctk.CTkLabel(h, text="Telemetry overlays for ROV transect video and stills",
                      font=T.FONT_SMALL, text_color=T.TEXT_MUTED
                      ).grid(row=1, column=1, sticky="nw", pady=(0, 14))
 
@@ -191,7 +196,56 @@ class App(ctk.CTk):
                      font=T.FONT_SMALL, text_color=T.TEXT_MUTED, anchor="w",
                      justify="left").grid(row=1, column=0, sticky="w", pady=(8, 0))
 
+        # ---- flight photos -------------------------------------------
+        pf = ctk.CTkFrame(c3.body, fg_color="transparent")
+        pf.grid(row=2, column=0, sticky="ew", pady=(14, 0))
+        pf.grid_columnconfigure(0, weight=1)
+
+        self.photos_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(pf, text="Stamp telemetry onto flight photos",
+                        variable=self.photos_var, command=self._photos_toggled,
+                        font=T.FONT_BODY, text_color=T.TEXT, fg_color=T.ACCENT,
+                        hover_color=T.ACCENT_HOVER, checkmark_color=T.ACCENT_TEXT,
+                        border_color=T.FIELD_BORDER, corner_radius=4
+                        ).grid(row=0, column=0, sticky="w")
+
+        ctk.CTkLabel(pf,
+                     text="Each still is sorted into a folder for its transect, "
+                          "stamped with the telemetry at that instant, and renamed. "
+                          "The GPR raw files are never touched.",
+                     font=T.FONT_SMALL, text_color=T.TEXT_MUTED, anchor="w",
+                     justify="left").grid(row=1, column=0, sticky="w", pady=(4, 0))
+
+        self.off_frame = ctk.CTkFrame(pf, fg_color="transparent")
+        self.off_frame.grid(row=2, column=0, sticky="w", padx=(24, 0), pady=(8, 0))
+        ctk.CTkLabel(self.off_frame, text="Photos outside every transect:",
+                     font=T.FONT_SMALL, text_color=T.TEXT_MUTED
+                     ).grid(row=0, column=0, sticky="w", padx=(0, 14))
+
+        self.off_var = ctk.StringVar(value="keep")
+        self._off_radios = []
+        for i, (val, label) in enumerate((
+            ("keep", "Keep where they are"),
+            ("move", "Move to off_transect/"),
+            ("delete", "Delete them"),
+        )):
+            rb = ctk.CTkRadioButton(
+                self.off_frame, text=label, value=val, variable=self.off_var,
+                font=T.FONT_SMALL, text_color=T.TEXT, fg_color=T.ACCENT,
+                hover_color=T.ACCENT_HOVER, border_color=T.FIELD_BORDER,
+                radiobutton_width=16, radiobutton_height=16,
+            )
+            rb.grid(row=0, column=i + 1, sticky="w", padx=(0, 16))
+            self._off_radios.append(rb)
+        self._photos_toggled()
+
         self.add_site()
+
+    def _photos_toggled(self) -> None:
+        """The disposal choice only means anything when photos are processed."""
+        state = "normal" if self.photos_var.get() else "disabled"
+        for rb in self._off_radios:
+            rb.configure(state=state)
 
     # ------------------------------------------------------------------
     #  footer
@@ -255,10 +309,10 @@ class App(ctk.CTk):
                 sf.date.delete(0, "end")
                 sf.date.insert(0, guess_date)
 
-        plan_file = self.flight_dir / PLAN_FILENAME
-        if plan_file.is_file():
+        saved = plan_path(self.flight_dir)
+        if saved.is_file():
             try:
-                self._apply_plan(SurveyPlan.load(plan_file))
+                self._apply_plan(SurveyPlan.load(saved))
                 self._log(f"Loaded saved transects from {PLAN_FILENAME}")
             except Exception as ex:
                 self._log(f"Could not read {PLAN_FILENAME}: {ex}")
@@ -303,7 +357,7 @@ class App(ctk.CTk):
             messagebox.showinfo(APP_NAME, "Select a flight folder first.")
             return
         try:
-            self._plan().save(self.flight_dir / PLAN_FILENAME)
+            self._plan().save(plan_path(self.flight_dir, for_writing=True))
             self._log(f"Saved transects to {PLAN_FILENAME}")
         except Exception as ex:
             messagebox.showerror(APP_NAME, f"Could not save: {ex}")
@@ -351,8 +405,23 @@ class App(ctk.CTk):
             messagebox.showinfo(APP_NAME, "Choose at least one output resolution.")
             return
 
+        do_photos = bool(self.photos_var.get())
+        off_choice = self.off_var.get() if do_photos else "keep"
+        if do_photos and off_choice == "delete":
+            n = self._count_off_transect_photos()
+            n_txt = f"{n} photo(s)" if n is not None else "the photos"
+            if not messagebox.askyesno(
+                APP_NAME,
+                f"Delete {n_txt} that fall outside every transect?\n\n"
+                "This cannot be undone. The matching GPR raw files are not "
+                "touched.\n\nChoose 'Move to off_transect/' instead if you "
+                "would rather keep them.",
+                icon="warning",
+            ):
+                return
+
         try:
-            plan.save(self.flight_dir / PLAN_FILENAME)
+            plan.save(plan_path(self.flight_dir, for_writing=True))
         except Exception:
             pass
 
@@ -367,7 +436,9 @@ class App(ctk.CTk):
 
         req = RunRequest(flight_dir=self.flight_dir, plan=plan,
                          renditions=rends, app=self.cfg,
-                         write_csv=bool(self.csv_var.get()))
+                         write_csv=bool(self.csv_var.get()),
+                         process_photos=do_photos,
+                         off_transect=off_choice)
 
         def work() -> None:
             try:
@@ -382,6 +453,30 @@ class App(ctk.CTk):
 
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()
+
+    def _count_off_transect_photos(self) -> int | None:
+        """Best-effort count for the delete confirmation. Returns None if it
+        cannot be worked out, so the prompt stays vague rather than wrong."""
+        try:
+            from .. import discovery, photos as photos_mod
+            from ..survey import local_midnight_epoch
+            disc = discovery.discover(self.flight_dir)
+            pdir = photos_mod.find_photo_dir(disc.photos_dir)
+            if pdir is None:
+                return None
+            plan = self._plan()
+            stills, _ = photos_mod.index_photos(pdir)
+            windows = []
+            for site in plan.sites:
+                midnight = local_midnight_epoch(site.date_obj(), plan.timezone)
+                for t in site.transects:
+                    windows.append((midnight + t.start_s(), midnight + t.end_s()))
+            return sum(
+                1 for p in stills
+                if not any(lo <= p.epoch <= hi for lo, hi in windows)
+            )
+        except Exception:
+            return None
 
     def _cancel_run(self) -> None:
         if self._worker and self._worker.is_alive():

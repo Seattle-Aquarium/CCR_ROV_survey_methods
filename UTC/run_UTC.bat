@@ -1,6 +1,6 @@
 @echo off
 REM ---------------------------------------------------------------
-REM  CCR ROV Composite - launcher
+REM  Underwater Telemetry Compositing (UTC) - launcher
 REM  Double-click this file to open the app.
 REM  Requires Python 3.10+ with the packages in requirements.txt.
 REM ---------------------------------------------------------------
@@ -25,12 +25,12 @@ if not defined PY (
   exit /b 1
 )
 
-"%PY%" -m composite.gui.app
+"%PY%" -m utc.gui.app
 if errorlevel 1 (
   echo.
   echo The app exited with an error. Running again with the console visible:
   echo.
-  "%PY:pythonw.exe=python.exe%" -m composite.gui.app
+  "%PY:pythonw.exe=python.exe%" -m utc.gui.app
   pause
 )
 endlocal

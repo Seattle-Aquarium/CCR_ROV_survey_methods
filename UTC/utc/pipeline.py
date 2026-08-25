@@ -28,6 +28,7 @@ from typing import Callable, Sequence
 
 from . import compose as compose_mod
 from . import csv_export, discovery, ffmpeg_tools as ff, mcap_extract, overlay
+from . import photos as photos_mod
 from . import rov_video, sync as sync_mod
 from .config import AppConfig, RENDITIONS
 from .power import keep_awake
@@ -48,6 +49,10 @@ class RunRequest:
     app: AppConfig = field(default_factory=AppConfig)
     write_csv: bool = True
     force_extract: bool = False
+    #: Stamp telemetry onto the flight's stills as well as the video.
+    process_photos: bool = False
+    #: What to do with stills outside every transect: keep / move / delete.
+    off_transect: str = photos_mod.KEEP
 
 
 @dataclass
@@ -60,6 +65,7 @@ class RunResult:
     errors: list[str] = field(default_factory=list)
     elapsed_s: float = 0.0
     cancelled: bool = False
+    photos: photos_mod.PhotoReport | None = None
 
     @property
     def ok(self) -> bool:
@@ -78,6 +84,8 @@ class RunResult:
                 lines.append(f"   {p.name}")
         if self.csv_path:
             lines.append(f"telemetry CSV: {self.csv_path.name}")
+        if self.photos is not None:
+            lines.append(self.photos.summary())
         if self.sync.checked:
             lines.append(self.sync.summary())
         for w in self.warnings:
@@ -181,7 +189,9 @@ def _run(
 
     try:
         # ---- 1. discovery -------------------------------------------
-        st.plan(discover=1, extract=22, rov=18, sync=14, csv=5, render=40)
+        st.plan(discover=1, extract=22, rov=18, sync=14, csv=5,
+                photos=12 if req.process_photos else 0,
+                render=40)
         disc = discovery.discover(req.flight_dir)
         res.warnings.extend(disc.warnings)
         if not disc.mcaps:
@@ -283,6 +293,41 @@ def _run(
             except Exception as ex_:
                 res.warnings.append(f"telemetry CSV failed: {ex_}")
         st.finish("csv", "telemetry CSV written" if res.csv_path else "CSV skipped")
+
+        # ---- 6b. flight stills ---------------------------------------
+        # Photos are placed on the timeline from their own EXIF, so this needs
+        # nothing from the video path -- but the transect windows come from the
+        # resolved transects, which have been checked against the lights.
+        if req.process_photos:
+            photo_dir = photos_mod.find_photo_dir(disc.photos_dir)
+            if photo_dir is None:
+                res.warnings.append(
+                    "Photo stamping was requested but no stills were found "
+                    "under the flight's photos/ folder."
+                )
+            else:
+                windows = [(r.transect.name, r.epoch_start, r.epoch_end)
+                           for r in res.resolved]
+                if not windows:
+                    res.warnings.append(
+                        "No transect resolved, so no still could be assigned "
+                        "to one; photos were left untouched."
+                    )
+                else:
+                    try:
+                        rep = photos_mod.process_flight(
+                            photo_dir, store, windows,
+                            off_transect=req.off_transect,
+                            progress=st.sub("photos"), cancel=cancel,
+                        )
+                        res.photos = rep
+                        res.warnings.extend(rep.warnings)
+                        res.errors.extend(rep.errors)
+                    except ff.CancelledError:
+                        raise
+                    except Exception as ex_:
+                        res.warnings.append(f"photo stamping failed: {ex_}")
+        st.finish("photos", "photos done" if res.photos else "photos skipped")
 
         # ---- 7. composites -------------------------------------------
         rends = [RENDITIONS[k] for k in req.renditions if k in RENDITIONS]

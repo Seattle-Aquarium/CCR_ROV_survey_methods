@@ -41,6 +41,34 @@ SECONDS_PER_DAY = 86400
 _HHMMSS = re.compile(r"^\s*(\d{1,2})\s*[:.]\s*(\d{1,2})\s*[:.]\s*(\d{1,2})(?:[:.](\d{1,3}))?\s*$")
 
 
+#: Saved transect times live beside the flight's data under this name.
+PLAN_FILENAME = "utc_plan.json"
+
+#: Names written by earlier versions. Read, never written, so flight folders
+#: prepared before the tool was renamed keep opening without anyone re-typing
+#: a dozen transect times.
+LEGACY_PLAN_FILENAMES = ("composite_plan.json",)
+
+
+def plan_path(flight_dir, *, for_writing: bool = False):
+    """Where a flight's saved plan lives.
+
+    Writing always uses the current name; reading falls back to a legacy one if
+    that is what is actually on disk.
+    """
+    from pathlib import Path as _Path
+
+    d = _Path(flight_dir)
+    current = d / PLAN_FILENAME
+    if for_writing or current.is_file():
+        return current
+    for name in LEGACY_PLAN_FILENAMES:
+        legacy = d / name
+        if legacy.is_file():
+            return legacy
+    return current
+
+
 class SurveyError(ValueError):
     """Bad user input -- surfaced in the GUI, not a crash."""
 

@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from composite.discovery import discover
+from utc.discovery import discover
 
 F = Path(r"C:\Users\randellz\Seattle Aquarium Dropbox\Coastal_Climate_Resilience\flights")
 CASES = [

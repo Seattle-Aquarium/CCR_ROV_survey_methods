@@ -196,8 +196,14 @@ def default_cache_root() -> Path:
     Writing that into the Dropbox-synced flight folder would push gigabytes of
     disposable working files to the whole team.
     """
-    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-    return Path(base) / "ccr_composite_cache"
+    base = Path(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"))
+    current = base / "utc_cache"
+    # A cache built before the tool was renamed is still perfectly good, and it
+    # is gigabytes per flight. Keep using it rather than silently rebuilding.
+    legacy = base / "ccr_composite_cache"
+    if not current.exists() and legacy.is_dir():
+        return legacy
+    return current
 
 
 @dataclass
