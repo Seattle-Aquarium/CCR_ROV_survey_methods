@@ -43,15 +43,32 @@ ERROR = pair("error")
 FIELD_BG = (brand.WHITE, "#0A1E36")
 FIELD_BORDER = (brand.STONE_TINTS[20], "#37567F")
 
-# Type scale. Montserrat is the brand primary; Consolas is used only for the
-# monospace log pane, where column alignment matters more than branding.
-FAMILY = brand.FONT_FAMILY if brand.font_available() else "Segoe UI"
+# Type scale, following the hierarchy on p.24 of the guidelines: Title is Bold,
+# Header 1 Medium, Header 2 SemiBold, body copy Regular.
+#
+# Montserrat's weights are separate Windows families, so the weight travels in
+# the family name. Do not add a "bold" style alongside -- Tk already reports
+# Montserrat SemiBold as bold, and asking for both synthesises a double-bold.
+#
+# The guidelines also specify tracking per level; Tk exposes no letter-spacing
+# control, so that part is print-only and is deliberately not attempted here.
+# Register any fonts we ship before resolving family names -- an unregistered
+# bundled TTF cannot be named by Tk, so this has to happen first. theme is the
+# module that needs them, which makes it the right place to guarantee ordering.
+brand.register_bundled_fonts()
+
+FAMILY = brand.font_family("regular")
+FAMILY_MEDIUM = brand.font_family("medium")
+FAMILY_SEMIBOLD = brand.font_family("semibold")
+
+#: Consolas is used only for the monospace log pane, where column alignment
+#: matters more than branding.
 MONO = "Consolas"
 
-FONT_TITLE = (FAMILY, 22, "bold")
-FONT_H1 = (FAMILY, 16, "bold")
-FONT_H2 = (FAMILY, 13, "bold")
-FONT_BODY = (FAMILY, 12)
+FONT_TITLE = (FAMILY, 22, "bold")        # Title
+FONT_H1 = (FAMILY_MEDIUM, 16)            # Header 1 (primary)
+FONT_H2 = (FAMILY_SEMIBOLD, 13)          # Header 2 (secondary)
+FONT_BODY = (FAMILY, 12)                 # Body copy
 FONT_SMALL = (FAMILY, 11)
 FONT_MONO = (MONO, 11)
 

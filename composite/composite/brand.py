@@ -122,11 +122,19 @@ THEMES = {"dark": DARK, "light": LIGHT}
 #: Primary typeface per the guidelines.
 FONT_FAMILY = "Montserrat"
 
-_FONT_DIRS = [
+#: Where the operating system keeps fonts it has registered. A family here can
+#: be named by a GUI toolkit.
+_OS_FONT_DIRS = [
     Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts",
     Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "Windows" / "Fonts",
-    Path(__file__).resolve().parent.parent / "assets" / "fonts",
 ]
+
+#: Fonts we ship ourselves. Pillow can load these straight off disk for the
+#: video overlays, but a GUI toolkit cannot see them until they are registered
+#: -- see register_bundled_fonts().
+_BUNDLED_FONT_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
+
+_FONT_DIRS = [*_OS_FONT_DIRS, _BUNDLED_FONT_DIR]
 
 _WEIGHTS = {
     "thin": "Montserrat-Thin.ttf",
@@ -164,9 +172,84 @@ def font_path(weight: str = "regular") -> str | None:
     return None
 
 
-def font_available() -> bool:
-    """True when the real Montserrat family is installed."""
-    return any((d / _WEIGHTS["regular"]).is_file() for d in _FONT_DIRS)
+#: TTF filenames successfully handed to the OS by register_bundled_fonts().
+_registered: set[str] = set()
+
+
+def register_bundled_fonts() -> int:
+    """Make fonts shipped in ``assets/fonts`` usable by a GUI toolkit.
+
+    Returns how many were registered.
+
+    A TTF sitting in a folder is invisible to Tk: Windows only offers families
+    it has registered, so a packaged .exe on a laptop without Montserrat
+    installed would quietly draw itself in a default face -- and that is exactly
+    the machine we never get to look at. ``FR_PRIVATE`` registers for this
+    process only, so it needs no admin rights and installs nothing permanently.
+
+    Safe to call more than once, and a no-op off Windows.
+    """
+    if os.name != "nt" or not _BUNDLED_FONT_DIR.is_dir():
+        return 0
+    try:
+        import ctypes
+
+        gdi32 = ctypes.WinDLL("gdi32")
+    except Exception:
+        return 0
+
+    FR_PRIVATE = 0x10
+    for ttf in sorted(_BUNDLED_FONT_DIR.glob("*.ttf")):
+        if ttf.name in _registered:
+            continue
+        try:
+            if gdi32.AddFontResourceExW(ctypes.c_wchar_p(str(ttf)), FR_PRIVATE, 0):
+                _registered.add(ttf.name)
+        except Exception:
+            pass
+    return len(_registered)
+
+
+def font_available(weight: str = "regular") -> bool:
+    """True when a GUI toolkit can actually name that Montserrat weight.
+
+    Deliberately stricter than `font_path`: a bundled file counts only once it
+    has been registered, because naming a family the toolkit cannot resolve
+    falls back to its default face rather than to our chosen fallback.
+    """
+    name = _WEIGHTS.get(weight.lower(), _WEIGHTS["regular"])
+    if name in _registered:
+        return True
+    return any((d / name).is_file() for d in _OS_FONT_DIRS)
+
+
+#: Windows registers most Montserrat weights as their own font family, so a
+#: weight is selected by family *name*. Regular and Bold are the two styles of
+#: the base family; everything else stands alone.
+_FAMILY_NAMES = {
+    "regular": "Montserrat",
+    "bold": "Montserrat",
+    "medium": "Montserrat Medium",
+    "semibold": "Montserrat SemiBold",
+    "extrabold": "Montserrat ExtraBold",
+    "light": "Montserrat Light",
+}
+
+
+def font_family(weight: str = "regular", fallback: str = "Segoe UI") -> str:
+    """Family name to hand a GUI toolkit for a given Montserrat weight.
+
+    Tk has only normal/bold, so a Medium or SemiBold face cannot be requested as
+    a style -- it has to be named. Falls back weight by weight, so a laptop with
+    only the base family installed still gets Montserrat rather than dropping
+    the whole app to Segoe UI.
+    """
+    key = weight.lower()
+    if font_available(key):
+        return _FAMILY_NAMES.get(key, FONT_FAMILY)
+    if font_available("regular"):
+        return FONT_FAMILY
+    return fallback
 
 
 # --------------------------------------------------------------------------
