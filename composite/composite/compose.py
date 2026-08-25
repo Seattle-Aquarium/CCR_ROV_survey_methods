@@ -22,13 +22,13 @@ Two things here are not obvious and were both bugs in v1:
 from __future__ import annotations
 
 import math
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
 
 from . import ffmpeg_tools as ff
 from .config import AppConfig, Layout, Rendition
+from .fsutil import publish
 from .overlay import OverlaySequence
 from .rov_video import RovVideo
 from .survey import ResolvedTransect, Segment
@@ -174,29 +174,34 @@ def compose_segment(
 
 
 def concat(parts: Sequence[Path], out_path: Path, scratch: Path,
-           cancel=None) -> Path:
-    """Join segments. Identical codec parameters, so this is a stream copy."""
+           cancel=None, log: Callable[[str], None] | None = None) -> Path:
+    """Join segments. Identical codec parameters, so this is a stream copy.
+
+    The join always happens in scratch and the result is published in one move,
+    so the flight folder never holds a partial file and a locked destination is
+    survivable. Returns where the file actually landed.
+    """
     parts = [p for p in parts if p.is_file()]
     if not parts:
         raise ValueError("nothing to concatenate")
     if len(parts) == 1:
-        out_path.unlink(missing_ok=True)
-        shutil.move(str(parts[0]), str(out_path))
-        return out_path
+        return publish(parts[0], out_path, log=log)
+
     scratch.mkdir(parents=True, exist_ok=True)
     lst = scratch / "concat.txt"
+    joined = scratch / "joined.mp4"
     lst.write_text(
         "".join(f"file '{p.as_posix()}'\n" for p in parts), encoding="utf-8"
     )
     try:
         ff.run(["-y", "-f", "concat", "-safe", "0", "-i", str(lst),
-                "-c", "copy", "-movflags", "+faststart", str(out_path)],
+                "-c", "copy", "-movflags", "+faststart", str(joined)],
                cancel=cancel)
     finally:
         lst.unlink(missing_ok=True)
         for p in parts:
             p.unlink(missing_ok=True)
-    return out_path
+    return publish(joined, out_path, log=log)
 
 
 def compose_transect(
@@ -243,7 +248,10 @@ def compose_transect(
         parts.append(part)
         done += seg.dur_s
 
-    concat(parts, out_path, scratch, cancel=cancel)
+    # All the encoding is done by this point, so publishing reports at 1.0;
+    # any wait for a locked destination surfaces as a message, not a stall.
+    out_path = concat(parts, out_path, scratch, cancel=cancel,
+                      log=(lambda m: progress(1.0, m)) if progress else None)
     if progress:
         progress(1.0, f"{out_path.name} ({out_path.stat().st_size / 1e6:.0f} MB)")
     return out_path

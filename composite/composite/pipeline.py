@@ -30,6 +30,7 @@ from . import compose as compose_mod
 from . import csv_export, discovery, ffmpeg_tools as ff, mcap_extract, overlay
 from . import rov_video, sync as sync_mod
 from .config import AppConfig, RENDITIONS
+from .power import keep_awake
 from .survey import (
     Chapter, ResolvedTransect, SurveyPlan, format_hhmmss, local_midnight_epoch,
     resolve_plan, utc_offset_hours,
@@ -153,8 +154,27 @@ def run(
     progress: ProgressCB | None = None,
     cancel=None,
 ) -> RunResult:
-    """Execute a full job. Never raises for expected problems -- inspect the
-    returned `RunResult`."""
+    """Execute a full job, keeping the machine awake while it works.
+
+    Never raises for expected problems -- inspect the returned `RunResult`.
+    """
+    with keep_awake() as awake:
+        res = _run(req, progress=progress, cancel=cancel)
+    if not awake:
+        res.warnings.append(
+            "Could not stop this machine from sleeping during the run. If it "
+            "slept, the encode paused until it woke and the run took longer "
+            "than it needed to."
+        )
+    return res
+
+
+def _run(
+    req: RunRequest,
+    *,
+    progress: ProgressCB | None = None,
+    cancel=None,
+) -> RunResult:
     res = RunResult()
     started = time.time()
     st = _Stages(progress)

@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Sequence
 
+from .fsutil import publish
 from .survey import ResolvedTransect, SurveyPlan, format_hhmmss
 from .telemetry import (
     EXPORT_COLUMNS, EXPORT_STRINGS, TelemetryStore, dvl_beam_columns,
@@ -93,7 +94,13 @@ def export_1hz(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     transect_rows = 0
 
-    with open(out_path, "w", newline="", encoding="utf-8") as f:
+    # Written beside the target and moved into place at the end. Excel holds an
+    # exclusive handle on an open CSV, so writing straight to out_path would
+    # fail on the very run a user is most likely to make -- re-exporting while
+    # last run's file is still open in front of them.
+    tmp_path = out_path.with_name(out_path.name + ".part")
+
+    with open(tmp_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(columns)
 
@@ -144,6 +151,9 @@ def export_1hz(
 
             if progress and i % max(1, n // 50) == 0:
                 progress(i / n, f"telemetry CSV {i}/{n}")
+
+    out_path = publish(tmp_path, out_path,
+                       log=(lambda m: progress(1.0, m)) if progress else None)
 
     if progress:
         progress(1.0, f"{n} rows -> {out_path.name}")

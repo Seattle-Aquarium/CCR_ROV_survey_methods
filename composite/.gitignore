@@ -7,3 +7,9 @@ __pycache__/
 
 # per-run scratch
 .pytest_cache/
+
+# test artefacts
+gui_dark.png
+gui_light.png
+tests/out/
+*.part

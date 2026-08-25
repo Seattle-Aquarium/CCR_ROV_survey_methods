@@ -113,6 +113,24 @@ YYYY-MM-DD_project_site_transect_resolution.mp4
 
 The 1 Hz CSV lands in `logs/`.
 
+### While a run is going
+
+A full flight is tens of minutes of encoding, so two things are worth knowing.
+
+**Sleep.** Windows does not count a working process as user activity, so a
+laptop left alone will idle-sleep mid-encode and the run pauses until it wakes.
+On one test run that cost 55 minutes and looked exactly like a hang. The tool
+now asks Windows to stay awake while it works. **Closing the lid still sleeps
+the machine** — no program can override that — so leave the lid open on a long
+run. The screen is allowed to switch off, which is fine.
+
+**Files open elsewhere.** Outputs are written into a Dropbox folder, so
+something else may be holding the file the tool is about to replace: Dropbox
+uploading the previous version, antivirus, or Excel with the last run's CSV
+still open. The tool waits for the lock to clear and says so. If it never
+clears, it writes `…(1).mp4` alongside rather than throwing away the encode, and
+tells you to close the other program.
+
 ---
 
 ## How the clocks are tied together
@@ -223,6 +241,8 @@ composite/
         compose.py          ffmpeg composition
         csv_export.py       1 Hz CSV
         pipeline.py         orchestration
+        fsutil.py           lock-tolerant publishing of finished files
+        power.py            keeps the machine awake during a run
         gui/                CustomTkinter app
     tests/
 ```
@@ -238,6 +258,7 @@ second run skips straight to compositing. Delete that folder to force a rebuild.
 
 ```
 python tests/test_survey.py          TC-25 parsing and transect resolution
+python tests/test_fsutil.py          publishing over files locked by Excel/Dropbox
 python tests/test_discovery_live.py  discovery against the real flight folders
 python tests/test_render_visual.py   panel + gauge convention grid (writes PNGs)
 python tests/test_gui_smoke.py       constructs the GUI, screenshots both themes
