@@ -8,8 +8,13 @@ __pycache__/
 # per-run scratch
 .pytest_cache/
 
-# test artefacts
+# test artefacts -- the visual scripts write PNGs next to themselves
 gui_dark.png
 gui_light.png
+tests/*.png
 tests/out/
 *.part
+
+# packaging / tooling
+*.egg-info/
+.ruff_cache/

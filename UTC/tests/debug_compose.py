@@ -7,8 +7,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from utc import compose as C, ffmpeg_tools as ff, overlay, rov_video
-from utc.config import AppConfig, RENDITIONS
+from utc import compose as C
+from utc import ffmpeg_tools as ff
+from utc import overlay, rov_video
+from utc.config import RENDITIONS, AppConfig
 from utc.pipeline import cache_dir_for, describe_chapters
 from utc.survey import Site, SurveyPlan, Transect, resolve_plan
 from utc.telemetry import TelemetryStore

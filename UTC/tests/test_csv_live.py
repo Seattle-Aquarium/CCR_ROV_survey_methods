@@ -1,9 +1,11 @@
 """Load the smoke-test extraction, sample it, and write a 1 Hz CSV."""
-import sys, time
+import sys
+import time
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from utc.telemetry import TelemetryStore
 from utc.csv_export import export_1hz
+from utc.telemetry import TelemetryStore
 
 CACHE = Path(r"C:\Users\randellz\AppData\Local\ccr_composite_cache\_smoketest")
 t0 = time.time()
@@ -22,10 +24,11 @@ r = export_1hz(st, out, utc_offset_hours=-7.0,
                progress=lambda f, m: None)
 print(f"\nwrote {r.rows} rows, {len(r.columns)} columns -> {out.name}")
 import csv as _csv
+
 with open(out) as f:
     rows = list(_csv.reader(f))
 print("header:", ", ".join(rows[0][:14]), "...")
 print(f"\nfirst data row ({len(rows[1])} cells):")
-for k, v in zip(rows[0], rows[1]):
+for k, v in zip(rows[0], rows[1], strict=False):
     if v != "":
         print(f"   {k:26s} {v}")

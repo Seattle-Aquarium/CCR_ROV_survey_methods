@@ -1,5 +1,54 @@
 # Underwater Telemetry Compositing (UTC)
 
+File management and telemetry overlays for ROV survey flights: create a flight's
+folder structure, sort its imagery into transects, stamp telemetry onto stills,
+and build one composite video per transect.
+
+The app has three tabs, following the life of a flight:
+
+| Tab | What it does |
+|---|---|
+| **New flight** | Creates the empty folder structure to offload into. |
+| **Sort & composite** | Enter transect times once, then sort the imagery and/or build composites. |
+| **Banner tools** | Add or remove the telemetry banner on any folder of stills, later. |
+
+## Folder structure
+
+```
+2026_08_25_Centennial/
+    logs/                       *.mcap
+    photos/
+        GPR/  JPG/              drop the offload here
+        transects/
+            T1/
+                GPR/                sorted raws
+                JPG_preview/        sorted previews, banner applied
+                JPG_edited/         your colour-corrected exports
+                JPG_edited_banner/  generated banner copies
+            off_transect/       optional home for frames outside a transect
+    videos/
+        downward/  forward/  composites/
+```
+
+Sorting **moves and renames** files to `YYYY_MM_DD_hh-mm-ss`, so a raw and its
+preview end up with identical stems and stay paired:
+
+```
+photos/transects/T1/GPR/2026_08_25_13-23-17.GPR
+photos/transects/T1/JPG_preview/2026_08_25_13-23-17.JPG
+```
+
+> **`JPG_edited` is never written to.** Those frames feed downstream ML, so
+> their banner versions go to a `JPG_edited_banner` sibling instead. Removing a
+> banner is then a matter of using the originals, which were never touched — a
+> stamp-then-strip round trip costs two JPEG generations (measured at ~43 dB
+> against ~53 dB for a single stamp), and that is not worth spending on
+> analysis inputs.
+
+---
+
+## Composites
+
 Combines the **downward-facing GoPro** from an ROV transect with telemetry from
 the BlueOS `.mcap` recording, and writes one video per transect.
 
