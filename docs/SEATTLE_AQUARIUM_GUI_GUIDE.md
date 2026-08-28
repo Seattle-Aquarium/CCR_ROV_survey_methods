@@ -100,7 +100,7 @@ makes it the workhorse for UI chrome (borders, disabled states, hover fills):
    pattern; never use the wave-and-dots alone as a design element; never place
    it on a ground that fails 4.5:1.
 
-### The trap worth knowing about
+### The trap worth knowing about (1): bright colours on light grounds
 
 The bright secondary and accent colours **fail as text on light grounds at any
 size**. Measured against Pumice `#EEEEEE`:
@@ -122,6 +122,26 @@ separately chosen semantic colours — see below.
 The guidelines' own accessibility grid (p.20) shows the same thing: on the
 White and Pumice swatches, far fewer type colours are marked usable than on the
 dark grounds.
+
+### The trap worth knowing about (2): one colour, two states
+
+Some widgets expose a **single** `text_color` for states with different fills —
+CustomTkinter's segmented button, which backs its tab bar, is one. Reaching for
+the accent as the selected fill then forces dark type to sit on it, and that
+same dark type lands on the unselected tabs at **1.12:1**. The labels are
+invisible, and nothing warns you.
+
+The fix is not a second colour — there isn't one. Pick *fills* that a single
+text colour reads on. Body text on surface-versus-ground works everywhere:
+
+| | selected fill | unselected fill | contrast |
+|---|---|---|---|
+| Dark | `#1B3557` | `#0C2340` | 12.40:1 / 15.79:1 |
+| Light | `#F7F7F7` | `#FFFFFF` | 6.75:1 / 7.23:1 |
+
+Selection then reads as the tab merging with the panel below it, which is the
+standard idiom anyway. **Before styling any multi-state control, check how many
+text colours it actually accepts** — the answer changes which fills are legal.
 
 ## Gradients — the One Ocean system
 
@@ -588,6 +608,8 @@ Copy is part of the interface.
 - [ ] Both themes checked — not just the one you developed in
 - [ ] Keyboard focus is visible
 - [ ] Colour is never the only signal (pair it with text or an icon)
+- [ ] Multi-state controls checked for how many text colours they accept,
+      and both states measured — not just the selected one
 
 **Architecture**
 - [ ] Work runs off the Tk thread
@@ -668,6 +690,7 @@ Copy these from the reference implementation and adapt:
 | `UTC/utc/gui/app.py` | window assembly, worker/queue orchestration — read, then adapt |
 | `UTC/utc/fsutil.py` | lock-tolerant publishing |
 | `UTC/utc/power.py` | keeping the machine awake |
+| `UTC/utc/layout.py` | one module owning the folder structure, with a `PROTECTED` set for folders nothing may write to |
 
 `brand.py` and `theme.py` carry no ROV-specific content and should be copied
 unchanged, so a fix to a colour propagates rather than diverging per app.
