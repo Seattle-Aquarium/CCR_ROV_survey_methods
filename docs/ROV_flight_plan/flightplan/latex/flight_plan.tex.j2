@@ -1,0 +1,187 @@
+((# CCR ROV flight plan. Jinja delimiters are paren-stmt, paren-expr, paren-hash.
+    Preamble follows docs/ROV_field_tracking/CCR_ROV_field_log.tex. #))
+\documentclass[10pt]{extarticle}
+\ifdefined\pdfminorversion\pdfminorversion=7\fi
+\usepackage[letterpaper,left=0.6in,right=0.6in,top=0.5in,bottom=0.7in]{geometry}
+\usepackage[lining,tabular]{montserrat}
+\usepackage[T1]{fontenc}
+\usepackage[table,dvipsnames]{xcolor}
+\usepackage{array,tabularx,booktabs}
+\usepackage{graphicx}
+\usepackage[most]{tcolorbox}
+\usepackage{fontawesome5}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{microtype}
+\renewcommand{\familydefault}{\sfdefault}
+\setlist{nosep,leftmargin=1.15em,topsep=1pt}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+
+%% -- Seattle Aquarium palette (SAQ-001 Visual ID Guidelines, p.18) --
+\definecolor{Salish}{HTML}{004346}
+\definecolor{Fathom}{HTML}{0C2340}
+\definecolor{Mediterranean}{HTML}{1963B0}
+\definecolor{Algae}{HTML}{00C389}
+\definecolor{Seafoam}{HTML}{3CCBDA}
+\definecolor{Pumice}{HTML}{EEEEEE}
+\definecolor{Stone}{HTML}{575757}
+\definecolor{Warn}{HTML}{B4472F}
+
+\newcommand{\eyebrow}[1]{{\fontsize{8}{9.5}\selectfont\bfseries\color{Salish}\MakeUppercase{#1}}}
+\newcommand{\keyc}[1]{{\bfseries\color{Salish}#1}}
+
+\pagestyle{fancy}\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+\fancyfoot[C]{%
+  \parbox{\textwidth}{\centering\fontsize{6.6}{8}\selectfont\color{Stone}%
+    {\color{Seafoam}\rule{\textwidth}{0.6pt}}\\[3pt]
+    Generated (((retrieved | tex))). Predicted values --- verify against the
+    latest NWS products day-of.\\
+    Sources: (((sources | map('tex') | join('~~/~~')))).\hfill Page \thepage}}
+
+\begin{document}
+
+%% ============ MASTHEAD ============
+\noindent
+\begin{minipage}[b]{\dimexpr\textwidth-1.15in\relax}
+  {\fontsize{20}{22}\selectfont\bfseries\color{Salish}CCR ROV FLIGHT PLAN}\\[3pt]
+  {\fontsize{8.5}{10}\selectfont\color{Stone}%
+   Coastal Climate Resilience \textcolor{Seafoam}{\textbf{/}} Seattle Aquarium
+   \textcolor{Seafoam}{\textbf{/}} (((site_name | tex)))}
+\end{minipage}\hfill
+\begin{minipage}[b]{1.05in}
+  \raggedleft\includegraphics[width=0.82in]{(((logo)))}
+\end{minipage}
+
+\vspace{4pt}
+{\color{Salish}\rule{\textwidth}{2pt}}\\[1.2pt]
+{\color{Seafoam}\rule{\textwidth}{0.8pt}}
+\vspace{9pt}
+
+%% ============ DAY METADATA ============
+\begin{tabularx}{\textwidth}{@{}l X l X@{}}
+\eyebrow{Date}     & (((date_long | tex))) & \eyebrow{Coordinates} & (((coords | tex))) \\[3pt]
+\eyebrow{On water} & (((float_window | tex))) \;\; (((tz_abbr | tex))) & \eyebrow{ROV flight} & (((flight_window | tex))) \;\; (((tz_abbr | tex))) \\[3pt]
+\eyebrow{Pilot}    & (((meta.pilot | tex))) & \eyebrow{Tender} & (((meta.tender | tex))) \\[3pt]
+\eyebrow{ROV}      & (((meta.rov | tex))) & \eyebrow{Vessel} & (((meta.vessel | tex))) \\
+\end{tabularx}
+
+\vspace{8pt}
+
+((* if serious_alerts *))
+%% ============ RED-FLAG BANNER ============
+\begin{tcolorbox}[enhanced,sharp corners,rounded corners=west,arc=3pt,
+  colback=Warn!10,colframe=Warn,boxrule=1pt,left=10pt,right=10pt,top=6pt,bottom=6pt,boxsep=0pt]
+  {\bfseries\color{Warn}\faFlag~~%
+   ((* for a in serious_alerts *))(((a.event | tex)))((* if not loop.last *)) \textbullet\ ((* endif *))((* endfor *))}
+  \smallskip\par
+  ((* for a in serious_alerts *))
+  {\fontsize{8.4}{10}\selectfont\color{Stone}%
+   \textbf{(((a.event | tex)))} --- (((a.until | tex))).\ (((a.what | tex)))\par}
+  ((* endfor *))
+\end{tcolorbox}
+\vspace{7pt}
+((* endif *))
+
+%% ============ CONDITIONS AT A GLANCE ============
+\begin{tcolorbox}[enhanced,colback=Pumice!45,colframe=Salish,boxrule=0.8pt,
+  left=8pt,right=8pt,top=6pt,bottom=6pt,
+  title={CONDITIONS AT A GLANCE},coltitle=white,colbacktitle=Salish,
+  fonttitle=\bfseries\fontsize{8}{9}\selectfont]
+((* macro glancecol(rows) *))
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash\bfseries\color{Salish}}p{0.34\linewidth} >{\raggedright\arraybackslash}X@{}}
+((* for k, v in rows *))
+(((k | tex))) & (((v))) \\[1.5pt]
+((* endfor *))
+\end{tabularx}
+((* endmacro *))
+\noindent
+\begin{minipage}[t]{0.485\linewidth}((( glancecol(glance_left) )))\end{minipage}\hfill
+\begin{minipage}[t]{0.485\linewidth}((( glancecol(glance_right) )))\end{minipage}
+\end{tcolorbox}
+
+((* if stale or warnings *))
+{\fontsize{7}{8.5}\selectfont\color{Warn}%
+((* if stale *))Some values served from cache (offline). ((* endif *))%
+((* if warnings *))Data gaps: (((warnings | join('; ') | tex))).((* endif *))\par}
+((* endif *))
+
+\vspace{6pt}
+
+%% ============ FIGURES ============
+((* if figures.tide *))
+\begin{center}\includegraphics[width=\linewidth]{(((figures.tide)))}\end{center}
+\vspace{2pt}
+((* endif *))
+((* if figures.wind *))
+\begin{center}\includegraphics[width=\linewidth]{(((figures.wind)))}\end{center}
+\vspace{2pt}
+((* endif *))
+((* if figures.sea *))
+\begin{center}\includegraphics[width=\linewidth]{(((figures.sea)))}\end{center}
+\vspace{2pt}
+((* endif *))
+
+((* if marine *))
+%% ============ NWS MARINE FORECAST ============
+\vspace{3pt}
+\eyebrow{NWS marine forecast --- zone (((marine.zone | tex))) ((( marine.product | tex )))}%
+((* if marine.area *))\\{\fontsize{7.5}{9}\selectfont\color{Stone}(((marine.area | tex)))}((* endif *))
+\par\smallskip
+((* if marine.advisory *))
+{\fontsize{8.4}{10}\selectfont\bfseries\color{Warn}(((marine.advisory | tex)))\par}\smallskip
+((* endif *))
+((* if marine.synopsis *))
+{\fontsize{8.4}{10.5}\selectfont\color{Stone}\textit{Synopsis.}\ (((marine.synopsis | tex)))\par}\smallskip
+((* endif *))
+((* for p in marine.periods *))
+{\fontsize{8.4}{10.5}\selectfont\color{Stone}\textbf{(((p.name | tex))).}\ (((p.text | tex)))\par}
+((* endfor *))
+((* endif *))
+
+\vspace{9pt}
+
+%% ============ CONTACTS ============
+((* macro contable(label, people) *))
+\begin{minipage}{\linewidth}
+\eyebrow{(((label)))}\par\smallskip
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{0.215\linewidth} >{\raggedright\arraybackslash}p{0.235\linewidth} >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}p{0.165\linewidth}@{}}
+\rowcolor{Salish}
+{\color{white}\bfseries Name} & {\color{white}\bfseries Entity} & {\color{white}\bfseries Email} & {\color{white}\bfseries Cell}\\
+((* for p in people *))
+\rule{0pt}{2.2ex}(((p.name | tex))) & (((p.role | tex))) & {\fontsize{8}{9}\selectfont\relax (((p.email | tex)))} & (((p.cell | tex)))\\
+\arrayrulecolor{Stone!25}\hline
+((* endfor *))
+\end{tabularx}
+\end{minipage}
+\vspace{8pt}\par
+((* endmacro *))
+
+(((  contable('Core Seattle Aquarium contacts', contacts.aquarium) )))
+(((  contable('Collaborator contacts', contacts.collaborators) )))
+(((  contable('Non-Aquarium emergency contacts', contacts.emergency) )))
+
+((* if meta.objective or meta.sequencing or meta.hazards *))
+\vspace{3pt}
+\eyebrow{Objectives, sequencing \& hazards}\par\smallskip
+((* if meta.objective *)){\fontsize{8.6}{11}\selectfont\color{Stone}\textbf{Objective.}\ (((meta.objective | tex)))\par}\smallskip((* endif *))
+((* if meta.sequencing *))
+{\fontsize{8.6}{11}\selectfont\color{Stone}\textbf{Sequencing.}}
+\begin{itemize}[leftmargin=1.3em]\fontsize{8.6}{11}\selectfont\color{Stone}
+((* for s in meta.sequencing *))\item (((s | tex)))
+((* endfor *))
+\end{itemize}\smallskip
+((* endif *))
+((* if meta.hazards *))
+{\fontsize{8.6}{11}\selectfont\color{Stone}\textbf{Known hazards.}}
+\begin{itemize}[leftmargin=1.3em]\fontsize{8.6}{11}\selectfont\color{Stone}
+((* for s in meta.hazards *))\item (((s | tex)))
+((* endfor *))
+\end{itemize}
+((* endif *))
+((* endif *))
+
+\end{document}

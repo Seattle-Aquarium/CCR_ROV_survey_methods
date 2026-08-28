@@ -1,0 +1,15 @@
+# Core pipeline (scrape -> figures -> LaTeX)
+requests>=2.31
+numpy>=1.26
+matplotlib>=3.8
+Jinja2>=3.1
+astral>=3.2
+geopy>=2.4          # optional: --place text geocoding in the CLI
+
+# Also required, outside pip:
+#   a LaTeX toolchain with pdflatex + the montserrat, tcolorbox, fontawesome5,
+#   booktabs and enumitem packages (MiKTeX auto-installs them on first run).
+
+# GUI (later milestone), not needed for the CLI:
+#   customtkinter>=5.2
+#   tkintermapview>=1.29
