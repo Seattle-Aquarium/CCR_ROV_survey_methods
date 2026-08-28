@@ -19,22 +19,25 @@ Design notes:
 from __future__ import annotations
 
 import hashlib
-import shutil
 import time
 import traceback
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Sequence
 
 from . import compose as compose_mod
-from . import csv_export, discovery, ffmpeg_tools as ff, mcap_extract, overlay
-from . import photos as photos_mod
-from . import rov_video, sync as sync_mod
-from .config import AppConfig, RENDITIONS
+from . import csv_export, discovery, mcap_extract, overlay, rov_video, sorting
+from . import ffmpeg_tools as ff
+from . import sync as sync_mod
+from .config import RENDITIONS, AppConfig
 from .power import keep_awake
 from .survey import (
-    Chapter, ResolvedTransect, SurveyPlan, format_hhmmss, local_midnight_epoch,
-    resolve_plan, utc_offset_hours,
+    Chapter,
+    ResolvedTransect,
+    SurveyPlan,
+    local_midnight_epoch,
+    resolve_plan,
+    utc_offset_hours,
 )
 from .telemetry import TelemetryStore
 
@@ -51,8 +54,10 @@ class RunRequest:
     force_extract: bool = False
     #: Stamp telemetry onto the flight's stills as well as the video.
     process_photos: bool = False
-    #: What to do with stills outside every transect: keep / move / delete.
-    off_transect: str = photos_mod.KEEP
+    #: How to sort them. Shared with the standalone sort so the two paths
+    #: cannot drift into producing different layouts.
+    sort_options: sorting.SortOptions = field(
+        default_factory=lambda: sorting.SortOptions())
 
 
 @dataclass
@@ -65,7 +70,7 @@ class RunResult:
     errors: list[str] = field(default_factory=list)
     elapsed_s: float = 0.0
     cancelled: bool = False
-    photos: photos_mod.PhotoReport | None = None
+    photos: sorting.SortReport | None = None
 
     @property
     def ok(self) -> bool:
@@ -136,6 +141,70 @@ def cache_dir_for(flight_dir: Path, root: Path) -> Path:
     """
     h = hashlib.sha1(str(Path(flight_dir).resolve()).encode("utf-8")).hexdigest()[:8]
     return Path(root) / f"{Path(flight_dir).name}_{h}"
+
+
+def ensure_telemetry(
+    flight_dir: Path,
+    app: AppConfig | None = None,
+    *,
+    windows: Sequence[tuple[float, float]] | None = None,
+    progress: ProgressCB | None = None,
+    force: bool = False,
+) -> tuple[TelemetryStore, list[str]]:
+    """Telemetry for a flight, reading its mcap only if the cache is cold.
+
+    Sorting imagery and bannering an edited folder both need telemetry but
+    neither needs the video pipeline, so this is the shared way in: the first
+    task that touches a flight pays for the extraction and everything after it
+    is a cache hit.
+
+    Returns (store, warnings). Raises if there is no mcap to read.
+    """
+    app = app or AppConfig()
+    disc = discovery.discover(flight_dir)
+    if not disc.mcaps:
+        raise FileNotFoundError(
+            f"No .mcap telemetry found in {flight_dir}. Put the recording in "
+            f"the flight's logs/ folder."
+        )
+
+    # Narrow to the recordings that actually cover the work before insisting
+    # anything is downloaded. A day of testing leaves a folder full of them,
+    # and requiring the lot means waiting on gigabytes that will never be read.
+    warnings: list[str] = []
+    chosen = list(disc.mcaps)
+    if windows:
+        chosen, skipped, warns = mcap_extract.select_for_windows(chosen, windows)
+        warnings.extend(warns)
+        if not chosen:
+            raise FileNotFoundError(
+                "None of the recordings in logs/ overlap the transect times. "
+                "Check the times, or that the right mcap was copied over."
+            )
+
+    blocked = discovery.check_local(chosen)
+    if blocked:
+        raise RuntimeError("\n".join(blocked))
+
+    cache = cache_dir_for(flight_dir, app.cache_root)
+    ex = mcap_extract.extract(chosen, cache, progress=progress, force=force)
+    return TelemetryStore.load(ex.telemetry_csv), warnings + list(ex.warnings)
+
+
+def plan_windows(plan: SurveyPlan) -> list[tuple[str, float, float]]:
+    """(name, epoch_start, epoch_end) for every transect in a plan.
+
+    Derived from the plan alone, so imagery can be sorted before -- or without
+    -- any video being processed. The composite path resolves its own windows
+    against the GoPro chapters instead, because it also has to know which file
+    each second lives in.
+    """
+    out: list[tuple[str, float, float]] = []
+    for site in plan.sites:
+        midnight = local_midnight_epoch(site.date_obj(), plan.timezone)
+        for t in site.transects:
+            out.append((t.name, midnight + t.start_s(), midnight + t.end_s()))
+    return out
 
 
 def describe_chapters(paths: Sequence[Path], ffmpeg: str | None = None) -> list[Chapter]:
@@ -299,34 +368,24 @@ def _run(
         # nothing from the video path -- but the transect windows come from the
         # resolved transects, which have been checked against the lights.
         if req.process_photos:
-            photo_dir = photos_mod.find_photo_dir(disc.photos_dir)
-            if photo_dir is None:
-                res.warnings.append(
-                    "Photo stamping was requested but no stills were found "
-                    "under the flight's photos/ folder."
+            # Same sort the 'Sort imagery' button runs, so a combined run and a
+            # separate one cannot produce different folder layouts. Windows come
+            # from the plan rather than the resolved transects: sorting does not
+            # need the video, and a transect whose footage is missing should
+            # still get its stills.
+            try:
+                rep = sorting.sort_flight(
+                    req.flight_dir, plan_windows(req.plan),
+                    store=store, options=req.sort_options,
+                    progress=st.sub("photos"), cancel=cancel,
                 )
-            else:
-                windows = [(r.transect.name, r.epoch_start, r.epoch_end)
-                           for r in res.resolved]
-                if not windows:
-                    res.warnings.append(
-                        "No transect resolved, so no still could be assigned "
-                        "to one; photos were left untouched."
-                    )
-                else:
-                    try:
-                        rep = photos_mod.process_flight(
-                            photo_dir, store, windows,
-                            off_transect=req.off_transect,
-                            progress=st.sub("photos"), cancel=cancel,
-                        )
-                        res.photos = rep
-                        res.warnings.extend(rep.warnings)
-                        res.errors.extend(rep.errors)
-                    except ff.CancelledError:
-                        raise
-                    except Exception as ex_:
-                        res.warnings.append(f"photo stamping failed: {ex_}")
+                res.photos = rep
+                res.warnings.extend(rep.warnings)
+                res.errors.extend(rep.errors)
+            except ff.CancelledError:
+                raise
+            except Exception as ex_:
+                res.warnings.append(f"sorting imagery failed: {ex_}")
         st.finish("photos", "photos done" if res.photos else "photos skipped")
 
         # ---- 7. composites -------------------------------------------
@@ -344,8 +403,12 @@ def _run(
                 base = i * per
                 label = f"{r.site.name}/{r.transect.name} {rd.label}"
 
-                def jp(frac: float, msg: str = "", _b=base) -> None:
-                    st.sub("render")(_b + frac * per, msg or label)
+                # Bind everything the closure needs: it is called inside
+                # this iteration today, but a deferred call later would
+                # otherwise silently report the last job's label.
+                def jp(frac: float, msg: str = "", _b=base,
+                       _lab=label) -> None:
+                    st.sub("render")(_b + frac * per, msg or _lab)
 
                 try:
                     out = _render_one(r, rd, rov, store, cache, _composites,

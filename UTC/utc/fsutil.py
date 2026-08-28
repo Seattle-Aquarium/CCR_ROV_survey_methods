@@ -19,8 +19,8 @@ import errno
 import os
 import shutil
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 #: Windows sharing/lock violations. 32 = "in use by another process",
 #: 33 = a byte-range lock is held.

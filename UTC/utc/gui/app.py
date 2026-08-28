@@ -11,7 +11,6 @@ touches a widget directly.
 
 from __future__ import annotations
 
-import json
 import queue
 import threading
 import traceback
@@ -21,14 +20,17 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from .. import brand, discovery
-from ..config import AppConfig, RENDITIONS
-from ..pipeline import RunRequest, RunResult, run as run_pipeline
+from .. import discovery
+from ..config import AppConfig
+from ..pipeline import RunResult
 from ..survey import (
-    PLAN_FILENAME, Site, SurveyPlan, Transect, plan_path,
+    PLAN_FILENAME,
+    Site,
+    SurveyPlan,
+    plan_path,
 )
 from . import theme as T
-from .widgets import Card, SiteFrame, button, entry, label
+from .widgets import Card, SiteFrame, button, entry
 
 APP_NAME = "Underwater Telemetry Compositing"
 #: Short form, for window chrome and generated file names.
@@ -52,7 +54,7 @@ class App(ctk.CTk):
         self.flight_dir: Path | None = None
         self.discovery: discovery.Discovery | None = None
         self._sites: list[SiteFrame] = []
-        self._queue: "queue.Queue[tuple]" = queue.Queue()
+        self._queue: queue.Queue[tuple] = queue.Queue()
         self._worker: threading.Thread | None = None
         self._cancel = threading.Event()
         self._logo_img = None
@@ -123,9 +125,50 @@ class App(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _build_body(self) -> None:
-        body = ctk.CTkScrollableFrame(self, fg_color=T.BG)
-        body.grid(row=1, column=0, sticky="nsew", padx=16, pady=(14, 8))
+        """A left rail, one page per stage of a flight's life.
+
+        Vertical rather than tabs across the top: pages are added by growing
+        downward, so a fifth never has to fight for horizontal room or lose its
+        label to truncation.
+        """
+        from .bannertools import BannerToolsTab
+        from .importpage import ImportPage
+        from .nav import Navigator
+        from .videopage import VideoPage
+
+        nav = Navigator(self)
+        nav.grid(row=1, column=0, sticky="nsew", padx=(0, 16), pady=(4, 8))
+        self.nav = nav
+
+        self._build_flight_page(nav.add("Flight setup", "folder · transects"))
+        self.pages = {}
+        for name, sub, cls in (
+            ("Import photos", "card or folder", ImportPage),
+            ("Video", "trim · composite", VideoPage),
+            ("Banner tools", "edited JPGs", BannerToolsTab),
+        ):
+            page = cls(nav.add(name, sub), self)
+            page.grid(row=0, column=0, sticky="nsew")
+            self.pages[name] = page
+        nav.select("Flight setup")
+
+    def use_flight(self, path: Path) -> None:
+        """Adopt a flight folder as the current one and rescan it.
+
+        Creating a flight selects it, so the natural next step needs no
+        re-navigation. Every page reads `self.flight_dir`, so one setter serves
+        all of them.
+        """
+        self.flight_dir = Path(path)
+        self.folder_entry.delete(0, "end")
+        self.folder_entry.insert(0, str(self.flight_dir))
+        self._scan()
+
+    def _build_flight_page(self, parent) -> None:
+        body = ctk.CTkScrollableFrame(parent, fg_color=T.BG)
+        body.grid(row=0, column=0, sticky="nsew")
         body.grid_columnconfigure(0, weight=1)
+
 
         # ---- 1. flight folder ----------------------------------------
         c1 = Card(body, "1.  Flight folder",
@@ -167,100 +210,45 @@ class App(ctk.CTk):
         button(srow, "Save", self._save_plan, "ghost", width=90
                ).grid(row=0, column=2, padx=(8, 0))
 
-        # ---- 3. outputs ----------------------------------------------
-        c3 = Card(body, "3.  Output",
-                  "One video per transect per resolution, written to "
-                  "videos/composites/. A 1 Hz telemetry CSV goes to logs/.")
+        # ---- 3. preview -----------------------------------------------
+        c3 = Card(body, "3.  Preview the transects",
+                  "Reads the flight's mcap and draws the dive profile with your "
+                  "transects marked. Worth doing before importing imagery — "
+                  "especially if the card is about to be wiped.")
         c3.grid(row=2, column=0, sticky="ew", pady=(0, 12))
-        rr = ctk.CTkFrame(c3.body, fg_color="transparent")
-        rr.grid(row=0, column=0, sticky="w")
-        self.res_vars: dict[str, ctk.BooleanVar] = {}
-        for i, key in enumerate(("4K", "1080p", "720p")):
-            v = ctk.BooleanVar(value=(key == "1080p"))
-            self.res_vars[key] = v
-            ctk.CTkCheckBox(rr, text=key, variable=v, font=T.FONT_BODY,
-                            text_color=T.TEXT, fg_color=T.ACCENT,
-                            hover_color=T.ACCENT_HOVER, checkmark_color=T.ACCENT_TEXT,
-                            border_color=T.FIELD_BORDER, corner_radius=4
-                            ).grid(row=0, column=i, padx=(0, 22))
-        self.csv_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(rr, text="1 Hz telemetry CSV", variable=self.csv_var,
-                        font=T.FONT_BODY, text_color=T.TEXT, fg_color=T.ACCENT,
-                        hover_color=T.ACCENT_HOVER, checkmark_color=T.ACCENT_TEXT,
-                        border_color=T.FIELD_BORDER, corner_radius=4
-                        ).grid(row=0, column=3, padx=(10, 0))
-
-        ctk.CTkLabel(c3.body,
-                     text="4K keeps 10-bit for analysis; 720p is 8-bit H.264 for "
-                          "sharing. Longer transects at 4K can take hours.",
-                     font=T.FONT_SMALL, text_color=T.TEXT_MUTED, anchor="w",
-                     justify="left").grid(row=1, column=0, sticky="w", pady=(8, 0))
-
-        # ---- flight photos -------------------------------------------
-        pf = ctk.CTkFrame(c3.body, fg_color="transparent")
-        pf.grid(row=2, column=0, sticky="ew", pady=(14, 0))
-        pf.grid_columnconfigure(0, weight=1)
-
-        self.photos_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(pf, text="Stamp telemetry onto flight photos",
-                        variable=self.photos_var, command=self._photos_toggled,
-                        font=T.FONT_BODY, text_color=T.TEXT, fg_color=T.ACCENT,
-                        hover_color=T.ACCENT_HOVER, checkmark_color=T.ACCENT_TEXT,
-                        border_color=T.FIELD_BORDER, corner_radius=4
-                        ).grid(row=0, column=0, sticky="w")
-
-        ctk.CTkLabel(pf,
-                     text="Each still is sorted into a folder for its transect, "
-                          "stamped with the telemetry at that instant, and renamed. "
-                          "The GPR raw files are never touched.",
-                     font=T.FONT_SMALL, text_color=T.TEXT_MUTED, anchor="w",
-                     justify="left").grid(row=1, column=0, sticky="w", pady=(4, 0))
-
-        self.off_frame = ctk.CTkFrame(pf, fg_color="transparent")
-        self.off_frame.grid(row=2, column=0, sticky="w", padx=(24, 0), pady=(8, 0))
-        ctk.CTkLabel(self.off_frame, text="Photos outside every transect:",
-                     font=T.FONT_SMALL, text_color=T.TEXT_MUTED
-                     ).grid(row=0, column=0, sticky="w", padx=(0, 14))
-
-        self.off_var = ctk.StringVar(value="keep")
-        self._off_radios = []
-        for i, (val, label) in enumerate((
-            ("keep", "Keep where they are"),
-            ("move", "Move to off_transect/"),
-            ("delete", "Delete them"),
-        )):
-            rb = ctk.CTkRadioButton(
-                self.off_frame, text=label, value=val, variable=self.off_var,
-                font=T.FONT_SMALL, text_color=T.TEXT, fg_color=T.ACCENT,
-                hover_color=T.ACCENT_HOVER, border_color=T.FIELD_BORDER,
-                radiobutton_width=16, radiobutton_height=16,
-            )
-            rb.grid(row=0, column=i + 1, sticky="w", padx=(0, 16))
-            self._off_radios.append(rb)
-        self._photos_toggled()
+        c3.body.grid_columnconfigure(0, weight=1)
+        prow = ctk.CTkFrame(c3.body, fg_color="transparent")
+        prow.grid(row=0, column=0, sticky="w")
+        button(prow, "Preview transects", self._preview_transects, "primary",
+               width=170).grid(row=0, column=0)
+        button(prow, "Save plan", self._save_plan, "ghost", width=110
+               ).grid(row=0, column=1, padx=(10, 0))
+        self.preview_note = ctk.CTkLabel(
+            c3.body, text="", font=T.FONT_SMALL, text_color=T.TEXT_MUTED,
+            anchor="w", justify="left")
+        self.preview_note.grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.preview_img = ctk.CTkLabel(c3.body, text="")
+        self.preview_img.grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self._profile_img = None
 
         self.add_site()
 
-    def _photos_toggled(self) -> None:
-        """The disposal choice only means anything when photos are processed."""
-        state = "normal" if self.photos_var.get() else "disabled"
-        for rb in self._off_radios:
-            rb.configure(state=state)
-
-    # ------------------------------------------------------------------
-    #  footer
-    # ------------------------------------------------------------------
-
     def _build_footer(self) -> None:
+        """Progress, status and log, shared by every page.
+
+        There is no global Run button: each page starts its own job, and one
+        button would have to mean something different on each of them. Stop
+        stays here because there is only ever one worker to stop.
+        """
         f = ctk.CTkFrame(self, fg_color=T.SURFACE, corner_radius=0)
         f.grid(row=2, column=0, sticky="ew")
         f.grid_columnconfigure(0, weight=1)
 
-        self.log = ctk.CTkTextbox(f, height=150, font=T.FONT_MONO,
+        self.log = ctk.CTkTextbox(f, height=140, font=T.FONT_MONO,
                                   fg_color=T.FIELD_BG, text_color=T.TEXT,
                                   border_width=1, border_color=T.BORDER,
                                   corner_radius=6, wrap="word")
-        self.log.grid(row=0, column=0, columnspan=3, sticky="ew",
+        self.log.grid(row=0, column=0, columnspan=2, sticky="ew",
                       padx=16, pady=(12, 8))
         self.log.configure(state="disabled")
 
@@ -268,16 +256,16 @@ class App(ctk.CTk):
                                            progress_color=T.ACCENT,
                                            fg_color=T.SURFACE_ALT)
         self.progress.set(0.0)
-        self.progress.grid(row=1, column=0, sticky="ew", padx=(16, 12), pady=(0, 6))
+        self.progress.grid(row=1, column=0, sticky="ew", padx=(16, 12),
+                           pady=(0, 6))
 
         self.status = ctk.CTkLabel(f, text="Ready.", font=T.FONT_SMALL,
                                    text_color=T.TEXT_MUTED, anchor="w")
         self.status.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 12))
 
-        self.run_btn = button(f, "Create composites", self._start, "primary", 170)
-        self.run_btn.grid(row=1, column=1, rowspan=2, padx=(0, 8), pady=(0, 12))
         self.cancel_btn = button(f, "Stop", self._cancel_run, "danger", 90)
-        self.cancel_btn.grid(row=1, column=2, rowspan=2, padx=(0, 16), pady=(0, 12))
+        self.cancel_btn.grid(row=1, column=1, rowspan=2, padx=(0, 16),
+                             pady=(0, 12))
         self.cancel_btn.configure(state="disabled")
 
     # ------------------------------------------------------------------
@@ -379,20 +367,20 @@ class App(ctk.CTk):
     #  run
     # ------------------------------------------------------------------
 
-    def _start(self) -> None:
-        if self._worker and self._worker.is_alive():
-            return
+    def _preview_transects(self) -> None:
+        """Draw the dive profile with the transects marked.
+
+        The sanity check before imagery is imported and a card is wiped: it
+        shows the times landing on the part of the dive the user believes they
+        describe, rather than asking them to trust six typed digits.
+        """
+        from .. import depthplot
+        from ..pipeline import ensure_telemetry, plan_windows
+        from ..survey import utc_offset_hours
+
         if not self.flight_dir:
             messagebox.showinfo(APP_NAME, "Select a flight folder first.")
             return
-        if self.discovery is None or not self.discovery.ok:
-            if not messagebox.askyesno(
-                APP_NAME,
-                "The flight folder does not look complete (see the panel under "
-                "step 1).\n\nTry anyway?"
-            ):
-                return
-
         plan = self._plan()
         errs = plan.validate()
         if errs:
@@ -400,83 +388,80 @@ class App(ctk.CTk):
                                  "\n• ".join(errs[:10]))
             return
 
-        rends = tuple(k for k, v in self.res_vars.items() if v.get())
-        if not rends:
-            messagebox.showinfo(APP_NAME, "Choose at least one output resolution.")
-            return
-
-        do_photos = bool(self.photos_var.get())
-        off_choice = self.off_var.get() if do_photos else "keep"
-        if do_photos and off_choice == "delete":
-            n = self._count_off_transect_photos()
-            n_txt = f"{n} photo(s)" if n is not None else "the photos"
-            if not messagebox.askyesno(
-                APP_NAME,
-                f"Delete {n_txt} that fall outside every transect?\n\n"
-                "This cannot be undone. The matching GPR raw files are not "
-                "touched.\n\nChoose 'Move to off_transect/' instead if you "
-                "would rather keep them.",
-                icon="warning",
-            ):
-                return
-
+        flight, cfg, mode = self.flight_dir, self.cfg, self.mode
+        windows = plan_windows(plan)
         try:
-            plan.save(plan_path(self.flight_dir, for_writing=True))
+            off = utc_offset_hours(plan.sites[0].date_obj(), plan.timezone)
         except Exception:
-            pass
+            off = -7.0
+
+        def work(progress, cancel):
+            store, warns = ensure_telemetry(
+                flight, cfg, windows=[(a, b) for _n, a, b in windows],
+                progress=progress)
+            style = (depthplot.PlotStyle() if mode == "dark"
+                     else depthplot.PlotStyle.light())
+            img = depthplot.render_profile(store, windows, width=980, height=300,
+                                           style=style, tz_offset_hours=off)
+            return ("profile", img, depthplot.transect_stats(store, windows), warns)
+
+        self.submit(work, "Reading telemetry for the transect preview…")
+
+    def _show_profile(self, img, stats, warns) -> None:
+        """Put the rendered profile on the Flight setup page."""
+        self._profile_img = ctk.CTkImage(light_image=img, dark_image=img,
+                                         size=img.size)
+        self.preview_img.configure(image=self._profile_img, text="")
+        bits = []
+        for r in stats:
+            d = (f"  {r['depth_min']:.1f}–{r['depth_max']:.1f} m"
+                 if "depth_min" in r else "  no depth data")
+            bits.append(f"{r['name']}: {r['seconds']/60:.1f} min{d}")
+        self.preview_note.configure(text="     ".join(bits), text_color=T.TEXT)
+        for w in warns:
+            self._log(f"note: {w}")
+
+    # ------------------------------------------------------------------
+    #  the one worker
+    # ------------------------------------------------------------------
+
+    def submit(self, work, label: str | None = None) -> bool:
+        """Run ``work(progress, cancel)`` on the worker thread.
+
+        Every tab goes through here, so there is exactly one worker, one queue,
+        and one place that touches widgets. Returns False if a job is already
+        running rather than starting a second one -- two jobs moving the same
+        files would race.
+        """
+        if self._worker and self._worker.is_alive():
+            messagebox.showinfo(APP_NAME, "A job is already running. Wait for "
+                                          "it to finish, or press Stop.")
+            return False
 
         self._cancel.clear()
-        self.run_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
         self.progress.set(0.0)
-        self._log("─" * 60)
-        self._log(f"Starting: {len(plan.sites)} site(s), "
-                  f"{sum(len(s.transects) for s in plan.sites)} transect(s), "
-                  f"{', '.join(rends)}")
+        if label:
+            self._log("─" * 60)
+            self._log(label)
 
-        req = RunRequest(flight_dir=self.flight_dir, plan=plan,
-                         renditions=rends, app=self.cfg,
-                         write_csv=bool(self.csv_var.get()),
-                         process_photos=do_photos,
-                         off_transect=off_choice)
-
-        def work() -> None:
+        def runner() -> None:
             try:
-                res = run_pipeline(
-                    req,
-                    progress=lambda f, m: self._queue.put(("progress", f, m)),
-                    cancel=self._cancel,
+                out = work(
+                    lambda f, m="": self._queue.put(("progress", f, m)),
+                    self._cancel,
                 )
-                self._queue.put(("done", res))
+                self._queue.put(("done", out))
             except Exception:
                 self._queue.put(("crash", traceback.format_exc()))
 
-        self._worker = threading.Thread(target=work, daemon=True)
+        self._worker = threading.Thread(target=runner, daemon=True)
         self._worker.start()
+        return True
 
-    def _count_off_transect_photos(self) -> int | None:
-        """Best-effort count for the delete confirmation. Returns None if it
-        cannot be worked out, so the prompt stays vague rather than wrong."""
-        try:
-            from .. import discovery, photos as photos_mod
-            from ..survey import local_midnight_epoch
-            disc = discovery.discover(self.flight_dir)
-            pdir = photos_mod.find_photo_dir(disc.photos_dir)
-            if pdir is None:
-                return None
-            plan = self._plan()
-            stills, _ = photos_mod.index_photos(pdir)
-            windows = []
-            for site in plan.sites:
-                midnight = local_midnight_epoch(site.date_obj(), plan.timezone)
-                for t in site.transects:
-                    windows.append((midnight + t.start_s(), midnight + t.end_s()))
-            return sum(
-                1 for p in stills
-                if not any(lo <= p.epoch <= hi for lo, hi in windows)
-            )
-        except Exception:
-            return None
+    @property
+    def busy(self) -> bool:
+        return bool(self._worker and self._worker.is_alive())
 
     def _cancel_run(self) -> None:
         if self._worker and self._worker.is_alive():
@@ -502,26 +487,63 @@ class App(ctk.CTk):
             pass
         self.after(80, self._drain)
 
-    def _finish(self, res: RunResult) -> None:
+    def _finish(self, res) -> None:
+        """Report whatever the worker returned.
+
+        A full pipeline run gets the detailed treatment; the smaller jobs the
+        other tabs submit just report their own summary, so one worker can
+        serve every tab without each needing its own plumbing.
+        """
         self._reset_buttons()
-        self.progress.set(1.0 if res.ok else self.progress.get())
-        for line in res.summary().splitlines():
-            self._log(line)
-        if res.cancelled:
-            self.status.configure(text="Cancelled.")
-        elif res.errors:
-            self.status.configure(text="Finished with errors — see the log.")
-        else:
-            self.status.configure(text=f"Done — {len(res.outputs)} file(s).")
-            if res.outputs:
-                try:
-                    import os
-                    os.startfile(res.outputs[0].parent)   # noqa: S606
-                except Exception:
-                    pass
+
+        if isinstance(res, RunResult):
+            self.progress.set(1.0 if res.ok else self.progress.get())
+            for line in res.summary().splitlines():
+                self._log(line)
+            if res.cancelled:
+                self.status.configure(text="Cancelled.")
+            elif res.errors:
+                self.status.configure(text="Finished with errors — see the log.")
+            else:
+                self.status.configure(text=f"Done — {len(res.outputs)} file(s).")
+                self._reveal(res.outputs[0].parent if res.outputs else None)
+            return
+
+        if isinstance(res, tuple) and res and res[0] == "profile":
+            _tag, img, stats, warns = res
+            self.progress.set(1.0)
+            self._show_profile(img, stats, warns)
+            self.status.configure(text="Preview drawn — check the transects.")
+            return
+
+        self.progress.set(1.0)
+        reports = res if isinstance(res, (list, tuple)) else [res]
+        opened: Path | None = None
+        for r in reports:
+            if r is None:
+                continue
+            text = r.summary() if hasattr(r, "summary") else str(r)
+            for line in str(text).splitlines():
+                self._log(line)
+            for w in getattr(r, "warnings", []):
+                self._log(f"WARNING: {w}")
+            for e in getattr(r, "errors", []):
+                self._log(f"ERROR: {e}")
+            opened = opened or getattr(r, "root", None) or getattr(r, "target", None)
+        self.status.configure(text="Done.")
+        self._reveal(opened)
+
+    def _reveal(self, path: Path | None) -> None:
+        """Open a folder in Explorer, best effort."""
+        if not path:
+            return
+        try:
+            import os
+            os.startfile(Path(path))          # noqa: S606
+        except Exception:
+            pass
 
     def _reset_buttons(self) -> None:
-        self.run_btn.configure(state="normal")
         self.cancel_btn.configure(state="disabled")
 
     def _log(self, text: str) -> None:

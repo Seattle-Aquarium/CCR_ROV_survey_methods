@@ -27,11 +27,12 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import struct
-from datetime import datetime, timezone
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
 
 from mcap.reader import make_reader
 
@@ -569,21 +570,63 @@ class McapInfo:
     start: float | None = None
     end: float | None = None
     error: str | None = None
+    #: True when the times came from the filename rather than the file, because
+    #: the file is still a cloud placeholder.
+    estimated: bool = False
+    cloud: bool = False
 
     @property
     def usable(self) -> bool:
         return self.error is None and self.start is not None
 
 
-def probe_mcaps(mcaps: Sequence[Path]) -> list[McapInfo]:
+#: BlueOS names recordings ``recorder_YYYYMMDD_HHMMSS`` in UTC.
+_NAME_TIME = re.compile(r"(\d{8})_(\d{6})")
+
+
+def name_start_utc(path: Path) -> float | None:
+    """A recording's start time, from its name alone.
+
+    Worth having because it needs no read at all: a file still in the cloud can
+    be judged irrelevant and skipped, instead of forcing gigabytes over the
+    network just to discover it covers the wrong hour.
+    """
+    m = _NAME_TIME.search(Path(path).stem)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(
+            m.group(1) + m.group(2), "%Y%m%d%H%M%S"
+        ).replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
+def probe_mcaps(
+    mcaps: Sequence[Path], *, open_cloud: bool = False
+) -> list[McapInfo]:
     """Read each file's summary, tolerating ones that will not open.
 
     A folder can contain a recording from another day, or a truncated file from
     a crashed session. Neither should take the whole run down with it.
+
+    Cloud placeholders are timed from their names rather than opened: reading
+    the summary means touching the file, and Dropbox answers that by
+    downloading the whole thing.
     """
+    from .discovery import is_cloud_placeholder
+
     out: list[McapInfo] = []
     for m in mcaps:
         info = McapInfo(Path(m))
+        info.cloud = is_cloud_placeholder(info.path)
+        if info.cloud and not open_cloud:
+            info.start = name_start_utc(info.path)
+            info.estimated = True
+            if info.start is None:
+                info.error = "still in the cloud, and its name carries no time"
+            out.append(info)
+            continue
         try:
             with open(m, "rb") as f:
                 s = make_reader(f).get_summary()
@@ -596,6 +639,56 @@ def probe_mcaps(mcaps: Sequence[Path]) -> list[McapInfo]:
             info.error = f"{type(ex).__name__}: {ex}".split("\n")[0][:120]
         out.append(info)
     return out
+
+
+#: How long a recording is assumed to run when its end is unknown, used only
+#: for a placeholder whose successor cannot bound it.
+_ASSUMED_RUN_S = 4 * 3600
+
+
+def select_for_windows(
+    mcaps: Sequence[Path],
+    windows: Sequence[tuple[float, float]],
+    *,
+    margin_s: float = 120.0,
+) -> tuple[list[Path], list[McapInfo], list[str]]:
+    """The recordings that actually overlap the work, plus what was skipped.
+
+    A day of testing and rebooting leaves a folder full of recordings. Merging
+    all of them stretches one shared timeline across hours of irrelevant data,
+    and -- worse -- requires every one of them to be downloaded first. Only the
+    recordings covering the transects are needed.
+
+    Returns (chosen, skipped_infos, warnings).
+    """
+    infos = probe_mcaps(mcaps)
+    warnings = [f"skipping {i.path.name}: {i.error}" for i in infos if i.error]
+    good = sorted((i for i in infos if i.usable), key=lambda i: i.start or 0.0)
+    if not good or not windows:
+        return [i.path for i in good], [], warnings
+
+    # A recording whose end is unknown is bounded by the next one starting:
+    # the recorder only restarts after stopping.
+    for a, b in zip(good, good[1:], strict=False):   # pairwise: the last has no successor
+        if a.end is None and a.start is not None:
+            a.end = b.start
+    if good and good[-1].end is None and good[-1].start is not None:
+        good[-1].end = good[-1].start + _ASSUMED_RUN_S
+
+    lo = min(w[0] for w in windows) - margin_s
+    hi = max(w[1] for w in windows) + margin_s
+
+    chosen, skipped = [], []
+    for i in good:
+        s, e = i.start or 0.0, i.end or 0.0
+        (chosen if (s <= hi and e >= lo) else skipped).append(i)
+
+    if skipped:
+        warnings.append(
+            f"{len(skipped)} of {len(good)} recording(s) fall outside the "
+            f"transect times and were not read"
+        )
+    return [i.path for i in chosen], skipped, warnings
 
 
 def select_mcaps(mcaps: Sequence[Path]) -> tuple[list[Path], list[str]]:

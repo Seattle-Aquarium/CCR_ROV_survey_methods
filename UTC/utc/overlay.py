@@ -17,14 +17,14 @@ from __future__ import annotations
 import math
 import re
 import shutil
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
 
 from PIL import Image, ImageDraw, ImageFont
 
 from . import gauges
-from .config import Layout, PANEL_ROWS, Row
+from .config import PANEL_ROWS, Layout, Row
 
 ProgressCB = Callable[[float, str], None]
 

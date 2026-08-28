@@ -27,12 +27,12 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
 
-from PIL import Image, ExifTags, ImageDraw, ImageFont, ImageOps, JpegImagePlugin
+from PIL import ExifTags, Image, ImageDraw, ImageFont, ImageOps, JpegImagePlugin
 
 from . import brand
 from .telemetry import TelemetryStore
@@ -276,12 +276,12 @@ def render_band(
     # fields. Bounded above by the band's own height so tall type cannot crowd
     # it, and below so a pathological field list still renders something.
     min_gap = height * 0.55
-    vsize, f_value, f_label, widths = 8, *measure(8)
+    f_value, f_label, widths = measure(8)
     for size in range(int(height * style.max_value_frac), 7, -2):
         fv, fl, w = measure(size)
         slack = width - 2 * margin - sum(w)
         if slack >= min_gap * (len(fields) - 1):
-            vsize, f_value, f_label, widths = size, fv, fl, w
+            f_value, f_label, widths = fv, fl, w
             break
 
     gap = ((width - 2 * margin - sum(widths)) / (len(fields) - 1)
@@ -299,7 +299,7 @@ def render_band(
     x = float(margin)
     draw_pair(x, TIME_FIELD.label, tc25, style.time_color)
     x += widths[0] + gap
-    for fld, w in zip(BAND_FIELDS, widths[1:]):
+    for fld, w in zip(BAND_FIELDS, widths[1:], strict=True):
         text = format_value(sample.get(fld.key), fld)
         if fld.unit and text != "--":
             text = f"{text}{'' if fld.unit == '%' else ' '}{fld.unit}"
@@ -352,6 +352,112 @@ def stamped_name(
     return f"{stamp}_{alt}m_{lights}p_{speed}ms{tail}{suffix}"
 
 
+#: The naming convention for sorted imagery: a GPR and its preview JPG end up
+#: with identical stems, so the pairing is structural rather than something we
+#: have to preserve in metadata.
+TIMESTAMP_FMT = "%Y_%m_%d_%H-%M-%S"
+
+_TIMESTAMP_RE = re.compile(r"(\d{4})_(\d{2})_(\d{2})_(\d{2})-(\d{2})-(\d{2})")
+
+
+def timestamp_name(local: datetime, suffix: str) -> str:
+    """``2026_08_25_13-23-17.JPG``"""
+    return f"{local.strftime(TIMESTAMP_FMT)}{suffix}"
+
+
+def time_from_name(
+    name: str,
+    offset_hours: float | None = None,
+    *,
+    tz_name: str | None = None,
+) -> datetime | None:
+    """Recover a capture time from a name we wrote earlier.
+
+    Lightroom and similar tools drop ``DateTimeOriginal`` when exporting, and a
+    round trip through TIFF and an enhancer drops whatever survived that. So an
+    edited frame may carry no usable EXIF at all. Because sorted files are named
+    with their timestamp, the name is a dependable fallback -- which is the
+    reason the naming convention is worth keeping strict.
+
+    Matches anywhere in the name, so decorated exports like
+    ``2026_08_26_12-20-02_enhanced`` still resolve.
+
+    Prefer `tz_name` over a fixed `offset_hours`: the date is right there in the
+    name, so the correct offset can be derived for it, and a flight either side
+    of a DST change gets the right answer instead of the one that happened to be
+    passed in.
+    """
+    m = _TIMESTAMP_RE.search(str(name))
+    if not m:
+        return None
+    y, mo, d, h, mi, s = (int(g) for g in m.groups())
+    try:
+        naive = datetime(y, mo, d, h, mi, s)
+    except ValueError:
+        return None
+
+    if offset_hours is None and tz_name:
+        from .survey import utc_offset_hours
+        try:
+            offset_hours = utc_offset_hours(naive.date(), tz_name)
+        except Exception:
+            return None
+    if offset_hours is None:
+        return None
+    return naive.replace(tzinfo=timezone(timedelta(hours=offset_hours)))
+
+
+def photo_time(
+    path: Path,
+    *,
+    offset_hours: float | None = None,
+    tz_name: str | None = None,
+    allow_name: bool = True,
+) -> tuple[float, datetime, bool] | None:
+    """Capture time from EXIF, falling back to the filename.
+
+    Returns (epoch, local, already_stamped).
+
+    A naked local time needs an offset before it can go on the timeline, so one
+    of `offset_hours` or `tz_name` has to be available for the filename
+    fallback to be usable at all -- `tz_name` being the better of the two, since
+    the date in the name then picks the right offset.
+    """
+    got = read_photo_time(path, offset_hours)
+    if got is not None:
+        return got
+    if allow_name and (offset_hours is not None or tz_name):
+        local = time_from_name(Path(path).stem, offset_hours, tz_name=tz_name)
+        if local is not None:
+            stamped = False
+            try:
+                with Image.open(path) as im:
+                    desc = str(im.getexif().get(_IMAGE_DESCRIPTION) or "")
+                stamped = STAMP_MARKER in desc
+            except Exception:
+                pass
+            return local.timestamp(), local, stamped
+    return None
+
+
+def band_height_of(path: Path) -> int | None:
+    """Height of the banner this file carries, or None if it has none.
+
+    Read back from the marker we wrote, so stripping never has to guess -- and
+    so a file we did not stamp is never cropped. Guessing here would quietly
+    destroy the top of somebody's photograph.
+    """
+    try:
+        with Image.open(path) as im:
+            desc = str(im.getexif().get(_IMAGE_DESCRIPTION) or "")
+    except Exception:
+        return None
+    if STAMP_MARKER not in desc:
+        return None
+    m = re.search(r"band=(\d+)px", desc)
+    return int(m.group(1)) if m else None
+
+
 def unique_path(directory: Path, name: str) -> Path:
     """Avoid clobbering: two stills can share a second at a 3 s interval only
     if the clock stalls, but a collision must never silently delete a photo."""
@@ -390,6 +496,7 @@ def stamp_photo(
     out_dir: Path | None = None,
     style: BandStyle | None = None,
     rename: bool = True,
+    name: str | None = None,
     quality: int | None = None,
 ) -> StampResult:
     """Add the band and rename. Writes in place when `out_dir` is None.
@@ -448,9 +555,15 @@ def stamp_photo(
 
     target_dir = Path(out_dir) if out_dir else photo.path.parent
     target_dir.mkdir(parents=True, exist_ok=True)
-    name = (stamped_name(photo.local, sample, photo.path.suffix, photo.path.stem)
-            if rename else photo.path.name)
-    dest = unique_path(target_dir, name)
+    # An explicit name wins: when a GPR and its preview are sorted together
+    # they must land on identical stems, and only the caller knows the name it
+    # already chose for the pair.
+    if name is None:
+        name = (stamped_name(photo.local, sample, photo.path.suffix,
+                             photo.path.stem)
+                if rename else photo.path.name)
+    dest = target_dir / name if name == photo.path.name else unique_path(
+        target_dir, name)
 
     save_kw: dict = {"exif": exif.tobytes()}
     if subsampling in (0, 1, 2):
@@ -507,132 +620,89 @@ def find_photo_dir(photos_root: Path | None) -> Path | None:
     return None
 
 
-def _retry_unlink(path: Path, tries: int = 20, wait: float = 0.5) -> bool:
-    """Dropbox holds a handle while it uploads; a lock here is transient."""
-    import time
 
-    for _ in range(tries):
-        try:
-            path.unlink()
-            return True
-        except FileNotFoundError:
-            return True
-        except PermissionError:
-            time.sleep(wait)
-    return False
+# --------------------------------------------------------------------------
+#  Acting on a whole folder
+# --------------------------------------------------------------------------
 
 
 @dataclass
-class PhotoReport:
-    stamped: int = 0
+class FolderReport:
+    folder: Path
+    target: Path
+    action: str = "banner"
+    done: int = 0
     skipped: int = 0
     failed: int = 0
-    off_transect: int = 0
-    off_transect_action: str = KEEP
-    folders: list[Path] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
-        lines = [f"Photos: {self.stamped} stamped into "
-                 f"{len(self.folders)} transect folder(s)"]
+        where = ("" if self.target == self.folder
+                 else f" -> {self.target.name}/")
+        bits = [f"{self.folder.name}{where}: {self.done} {self.action}ed"]
         if self.skipped:
-            lines.append(f"  {self.skipped} already stamped, left alone")
+            bits.append(f"{self.skipped} skipped")
         if self.failed:
-            lines.append(f"  {self.failed} failed")
-        verb = {KEEP: "left in place", MOVE: f"moved to {OFF_TRANSECT_DIR}/",
-                DELETE: "deleted"}[self.off_transect_action]
-        lines.append(f"  {self.off_transect} off-transect still(s) {verb}")
-        return "\n".join(lines)
+            bits.append(f"{self.failed} failed")
+        return ", ".join(bits)
 
 
-def process_flight(
-    photo_dir: Path,
+def banner_folder(
+    folder: Path,
     store: TelemetryStore,
-    windows: Sequence[tuple[str, float, float]],
     *,
-    off_transect: str = KEEP,
+    out_dir: Path | None = None,
+    offset_hours: float | None = None,
+    tz_name: str | None = None,
     style: BandStyle | None = None,
-    fallback_offset_hours: float | None = None,
     progress: ProgressCB | None = None,
     cancel=None,
-) -> PhotoReport:
-    """Stamp every on-transect still, and dispose of the rest as asked.
+) -> FolderReport:
+    """Stamp every still in one folder.
 
-    `windows` is (name, epoch_start, epoch_end) per transect, so this needs
-    nothing from the video path -- stills carry their own UTC offset and are
-    placed on the timeline independently.
-
-    A still is written into its transect folder *before* the original is
-    removed, so an interruption can cost time but never a photo.
+    `out_dir` writes copies instead of modifying in place -- which is how the
+    edited frames are handled, since they feed downstream ML and must stay
+    byte-for-byte as exported.
     """
-    if off_transect not in OFF_TRANSECT_CHOICES:
-        raise ValueError(f"off_transect must be one of {OFF_TRANSECT_CHOICES}")
+    folder = Path(folder)
+    target = Path(out_dir) if out_dir else folder
+    rep = FolderReport(folder=folder, target=target)
 
-    photo_dir = Path(photo_dir)
-    rep = PhotoReport(off_transect_action=off_transect)
-    photos, warns = index_photos(
-        photo_dir, fallback_offset_hours=fallback_offset_hours
-    )
-    rep.warnings.extend(warns)
-    if not photos:
-        rep.warnings.append(f"no stills found in {photo_dir}")
+    files = sorted(p for p in folder.iterdir()
+                   if p.is_file() and p.suffix.lower() in PHOTO_EXTS)
+    if not files:
+        rep.warnings.append(f"no stills in {folder}")
         return rep
 
-    def transect_for(p: Photo) -> str | None:
-        for name, lo, hi in windows:
-            if lo <= p.epoch <= hi:
-                return name
-        return None
-
-    assigned = [(p, transect_for(p)) for p in photos]
-    on = [(p, n) for p, n in assigned if n]
-    off = [p for p, n in assigned if not n]
-    total = max(1, len(on) + len(off))
-    done = 0
-
-    for p, name in on:
+    for i, p in enumerate(files):
         if cancel is not None and cancel.is_set():
             from .ffmpeg_tools import CancelledError
             raise CancelledError("cancelled")
-        out_dir = photo_dir / name
+        got = photo_time(p, offset_hours=offset_hours, tz_name=tz_name)
+        if got is None:
+            rep.skipped += 1
+            rep.warnings.append(
+                f"{p.name}: no capture time in EXIF, and no "
+                f"YYYY_MM_DD_hh-mm-ss in the filename either; skipped"
+            )
+            continue
+        epoch, local, already = got
+        if already and out_dir is None:
+            rep.skipped += 1
+            continue
+        photo = Photo(p, epoch, local, stamped=False)
         try:
-            res = stamp_photo(p, store, out_dir=out_dir, style=style)
+            res = stamp_photo(photo, store, out_dir=out_dir, style=style,
+                              rename=False)
         except Exception as ex:
             rep.failed += 1
-            rep.errors.append(f"{p.path.name}: {ex}")
-            done += 1
+            rep.errors.append(f"{p.name}: {ex}")
             continue
         if res.skipped:
             rep.skipped += 1
-        elif res.output and res.output.is_file():
-            if res.output != p.path and not _retry_unlink(p.path):
-                rep.warnings.append(
-                    f"stamped {res.output.name} but could not remove the "
-                    f"original {p.path.name}; it is open in another program"
-                )
-            rep.stamped += 1
-            if out_dir not in rep.folders:
-                rep.folders.append(out_dir)
-        done += 1
-        if progress and done % 5 == 0:
-            progress(done / total, f"photos {done}/{total}")
-
-    rep.off_transect = len(off)
-    if off and off_transect == MOVE:
-        dest = photo_dir / OFF_TRANSECT_DIR
-        dest.mkdir(parents=True, exist_ok=True)
-        for p in off:
-            target = unique_path(dest, p.path.name)
-            try:
-                p.path.replace(target)
-            except OSError as ex:
-                rep.warnings.append(f"could not move {p.path.name}: {ex}")
-    elif off and off_transect == DELETE:
-        for p in off:
-            if not _retry_unlink(p.path):
-                rep.warnings.append(f"could not delete {p.path.name}")
-
-    if progress:
-        progress(1.0, f"photos: {rep.stamped} stamped")
+        else:
+            rep.done += 1
+        if progress:
+            progress((i + 1) / len(files), f"{folder.name} {i+1}/{len(files)}")
     return rep

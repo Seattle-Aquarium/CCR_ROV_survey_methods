@@ -8,15 +8,14 @@ if one is present.
 
 from __future__ import annotations
 
-import json
 import re
 import shutil
 import subprocess
 import sys
 import threading
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
 
 log_cb: Callable[[str], None] | None = None
 
@@ -212,7 +211,10 @@ class MediaInfo:
 _DUR = re.compile(r"Duration:\s*(\d+):(\d\d):(\d\d(?:\.\d+)?)")
 _FPS = re.compile(r"(\d+(?:\.\d+)?)\s*fps")
 _WH = re.compile(r"Video:.*?,\s*(\d{2,5})x(\d{2,5})")
-_TC = re.compile(r"timecode\s*:\s*(\d\d:\d\d:\d\d[:;]\d\d)")
+# The frame field is written with as many digits as the rate needs, so a clip
+# at 10 fps reports "12:00:00:0". GoPro shoots at 24 fps and up, where it is
+# always two, but accepting one costs nothing and avoids a silent miss.
+_TC = re.compile(r"timecode\s*:\s*(\d\d:\d\d:\d\d[:;]\d{1,2})")
 _ROT = re.compile(r"displaymatrix:\s*rotation of\s*(-?[\d.]+)\s*degrees")
 
 
@@ -225,7 +227,7 @@ def probe(path: str | Path, ffmpeg: str | None = None) -> MediaInfo:
     exe = ffmpeg or find_ffmpeg()
     p = subprocess.run(
         [exe, "-hide_banner", "-i", str(path)],
-        capture_output=True, universal_newlines=True, errors="replace",
+        capture_output=True, text=True, errors="replace",
         creationflags=_NO_WINDOW,
     )
     txt = (p.stderr or "") + (p.stdout or "")

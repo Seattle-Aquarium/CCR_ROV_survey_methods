@@ -21,11 +21,15 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import discovery
-from .config import AppConfig, RENDITIONS
+from . import discovery, sorting
+from .config import RENDITIONS, AppConfig
 from .pipeline import RunRequest, run
 from .survey import (
-    PLAN_FILENAME, Site, SurveyPlan, Transect, plan_path,
+    PLAN_FILENAME,
+    Site,
+    SurveyPlan,
+    Transect,
+    plan_path,
 )
 
 # Plan filename and legacy fallback live in survey.py, so the CLI and the
@@ -110,7 +114,9 @@ def main(argv: list[str] | None = None) -> int:
                    app=AppConfig(), write_csv=not args.no_csv,
                    force_extract=args.force_extract,
                    process_photos=args.photos,
-                   off_transect=args.off_transect),
+                   sort_options=sorting.SortOptions(
+                       off_transect_gpr=args.off_transect,
+                       off_transect_jpg=args.off_transect)),
         progress=progress,
     )
     print("\n")

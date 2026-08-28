@@ -26,10 +26,12 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field, asdict
-from datetime import date as _date, datetime, time as _time, timedelta
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass, field
+from datetime import date as _date
+from datetime import datetime
+from datetime import time as _time
 from pathlib import Path
-from typing import Iterable, Sequence
 
 try:
     from zoneinfo import ZoneInfo
@@ -195,7 +197,7 @@ class Site:
             seen.add(t.name)
         # overlapping transects are almost always a transcription slip
         ordered = sorted((t for t in self.transects), key=lambda t: _safe(t.start_s))
-        for a, b in zip(ordered, ordered[1:]):
+        for a, b in zip(ordered, ordered[1:], strict=False):   # pairwise
             try:
                 if b.start_s() < a.end_s():
                     errs.append(
@@ -232,7 +234,7 @@ class SurveyPlan:
         return json.dumps(asdict(self), indent=2)
 
     @classmethod
-    def from_json(cls, text: str) -> "SurveyPlan":
+    def from_json(cls, text: str) -> SurveyPlan:
         raw = json.loads(text)
         sites = [
             Site(
@@ -247,7 +249,7 @@ class SurveyPlan:
         Path(path).write_text(self.to_json(), encoding="utf-8")
 
     @classmethod
-    def load(cls, path: str | Path) -> "SurveyPlan":
+    def load(cls, path: str | Path) -> SurveyPlan:
         return cls.from_json(Path(path).read_text(encoding="utf-8"))
 
 
