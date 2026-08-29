@@ -229,18 +229,53 @@ class TimeEntry(ctk.CTkEntry):
         parts = [digits[i:i + 2] for i in range(0, len(digits), 2)]
         return ":".join(p for p in parts if p)
 
+    @staticmethod
+    def _caret_after_digits(text: str, n: int) -> int:
+        """Index just past the nth digit of `text` (0 -> start of string).
+
+        The caret is tracked by *digit count* rather than character offset,
+        because inserting a colon shifts every offset after it.
+        """
+        if n <= 0:
+            return 0
+        seen = 0
+        for i, c in enumerate(text):
+            if c.isdigit():
+                seen += 1
+                if seen == n:
+                    return i + 1
+        return len(text)
+
+    def _place_caret(self, pos: int) -> None:
+        try:
+            self.icursor(pos)
+        except Exception:
+            pass                          # widget went away mid-edit
+
     def _reformat(self, *_a) -> None:
         if self._guard:
             return
         raw = self._var.get()
+        try:
+            caret = self.index("insert")
+        except Exception:
+            caret = len(raw)
+        # How many digits sit left of the caret? That survives reformatting;
+        # a character offset does not.
+        digits_left = sum(1 for c in raw[:caret] if c.isdigit())
+
         want = self._format(self._digits(raw))
         if want != raw:
             self._guard = True
             self._var.set(want)
-            # Keep the caret at the end: the colon is inserted for the user, so
-            # the next digit they type must land after it.
-            self.icursor("end")
             self._guard = False
+            # Restore the caret on the next idle cycle. Setting it here is
+            # discarded: this runs inside the variable's write trace, before Tk
+            # has finished applying the new text to the widget. That was the
+            # bug that turned "123456" into "12:45:63" -- the caret stayed left
+            # of the inserted colon, so every later digit landed before it.
+            self.after_idle(self._place_caret,
+                            self._caret_after_digits(want, digits_left))
         if self._on_change:
             self._on_change()
 

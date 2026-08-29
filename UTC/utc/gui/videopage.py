@@ -21,7 +21,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from . import theme as T
-from .widgets import Card, button, entry
+from .widgets import Card, button, entry, label
 
 
 class VideoPage(ctk.CTkFrame):
@@ -127,9 +127,175 @@ class VideoPage(ctk.CTkFrame):
 
         # ---- go ------------------------------------------------------
         c3 = Card(body, "3.  Run", "")
-        c3.grid(row=2, column=0, sticky="ew")
+        c3.grid(row=2, column=0, sticky="ew", pady=(0, 12))
         button(c3.body, "Process video", self._go, "primary", width=160
                ).grid(row=0, column=0, sticky="w")
+
+        self._build_clips(body)
+
+    # ------------------------------------------------------------------
+    #  short clips
+    # ------------------------------------------------------------------
+
+    def _build_clips(self, body) -> None:
+        """Cutting a shareable moment out of one file.
+
+        Separate from the transect work above because the times mean something
+        different: an offset *into the chosen file*, not a TC-25 clock time.
+        Mixing the two on one control would be a good way to cut the wrong
+        fifteen seconds.
+        """
+        from .. import clips
+
+        c = Card(body, "4.  Short clip from one video",
+                 "For a talk or a post. Times are minutes:seconds into the "
+                 "file you pick — not TC-25. Output goes to videos/clips/.")
+        c.grid(row=3, column=0, sticky="ew")
+        c.body.grid_columnconfigure(0, weight=1)
+
+        row = ctk.CTkFrame(c.body, fg_color="transparent")
+        row.grid(row=0, column=0, sticky="ew")
+        row.grid_columnconfigure(0, weight=1)
+        self.clip_src = entry(row, "Pick a folder of videos, or one file",
+                              width=560)
+        self.clip_src.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        button(row, "Folder…", self._clip_pick_dir, "primary", width=100
+               ).grid(row=0, column=1)
+        button(row, "File…", self._clip_pick_file, "ghost", width=90
+               ).grid(row=0, column=2, padx=(8, 0))
+
+        self.clip_menu = ctk.CTkOptionMenu(
+            c.body, values=["— scan a folder first —"], width=560,
+            font=T.FONT_BODY, text_color=T.TEXT, fg_color=T.FIELD_BG,
+            button_color=T.SURFACE_ALT, button_hover_color=T.BORDER,
+            dropdown_fg_color=T.SURFACE, dropdown_text_color=T.TEXT,
+            command=self._clip_chosen)
+        self.clip_menu.grid(row=1, column=0, sticky="w", pady=(8, 0))
+        self._clip_sources: list = []
+
+        trow = ctk.CTkFrame(c.body, fg_color="transparent")
+        trow.grid(row=2, column=0, sticky="w", pady=(8, 0))
+        label(trow, "start", muted=True).grid(row=0, column=0, padx=(0, 6))
+        self.clip_start = entry(trow, "6:40", width=90)
+        self.clip_start.grid(row=0, column=1, padx=(0, 14))
+        label(trow, "end", muted=True).grid(row=0, column=2, padx=(0, 6))
+        self.clip_end = entry(trow, "6:55", width=90)
+        self.clip_end.grid(row=0, column=3, padx=(0, 14))
+        label(trow, "name", muted=True).grid(row=0, column=4, padx=(0, 6))
+        self.clip_label = entry(trow, "e.g. lingcod", width=160)
+        self.clip_label.grid(row=0, column=5, padx=(0, 14))
+        self.clip_note = ctk.CTkLabel(trow, text="", font=T.FONT_SMALL,
+                                      text_color=T.TEXT_MUTED, anchor="w")
+        self.clip_note.grid(row=0, column=6, sticky="w")
+        for e in (self.clip_start, self.clip_end):
+            e.bind("<KeyRelease>", lambda _e: self._clip_refresh())
+
+        frow = ctk.CTkFrame(c.body, fg_color="transparent")
+        frow.grid(row=3, column=0, sticky="w", pady=(10, 0))
+        self.clip_vars: dict[str, ctk.BooleanVar] = {}
+        for i, (key, fmt) in enumerate(clips.CLIP_FORMATS.items()):
+            v = ctk.BooleanVar(value=(key == "1080p"))
+            self.clip_vars[key] = v
+            ctk.CTkCheckBox(frow, text=fmt.label, variable=v, font=T.FONT_BODY,
+                            text_color=T.TEXT, fg_color=T.ACCENT,
+                            hover_color=T.ACCENT_HOVER,
+                            checkmark_color=T.ACCENT_TEXT,
+                            border_color=T.FIELD_BORDER, corner_radius=4
+                            ).grid(row=0, column=i, padx=(0, 18))
+        ctk.CTkLabel(
+            c.body,
+            text="  •  ".join(f"{f.label}: {f.note}"
+                              for f in clips.CLIP_FORMATS.values()),
+            font=T.FONT_SMALL, text_color=T.TEXT_MUTED, anchor="w",
+            justify="left", wraplength=900
+        ).grid(row=4, column=0, sticky="w", pady=(6, 0))
+
+        button(c.body, "Make clip", self._clip_go, "primary", width=140
+               ).grid(row=5, column=0, sticky="w", pady=(12, 0))
+
+    def _clip_pick_dir(self) -> None:
+        d = filedialog.askdirectory(title="Folder of videos")
+        if d:
+            self._clip_scan(Path(d))
+
+    def _clip_pick_file(self) -> None:
+        f = filedialog.askopenfilename(
+            title="Video file", filetypes=[("Video", "*.mp4 *.mov *.m4v")])
+        if f:
+            self._clip_scan(Path(f))
+
+    def _clip_scan(self, where: Path) -> None:
+        from .. import clips
+        self.clip_src.delete(0, "end")
+        self.clip_src.insert(0, str(where))
+        self._clip_sources = clips.list_videos(where)
+        if not self._clip_sources:
+            self.clip_menu.configure(values=["— no video found here —"])
+            self.clip_menu.set("— no video found here —")
+            return
+        names = [v.caption for v in self._clip_sources]
+        self.clip_menu.configure(values=names)
+        self.clip_menu.set(names[0])
+        self._clip_refresh()
+
+    def _clip_chosen(self, _value=None) -> None:
+        self._clip_refresh()
+
+    def _current_clip_source(self):
+        cap = self.clip_menu.get()
+        return next((v for v in self._clip_sources if v.caption == cap), None)
+
+    def _clip_refresh(self) -> None:
+        from .. import clips
+        src = self._current_clip_source()
+        if src is None:
+            return
+        a = clips.parse_offset(self.clip_start.get())
+        b = clips.parse_offset(self.clip_end.get())
+        if a is None or b is None:
+            self.clip_note.configure(text="times read as m:ss or h:mm:ss",
+                                     text_color=T.TEXT_MUTED)
+            return
+        errs = clips.validate(src, a, b)
+        if errs:
+            self.clip_note.configure(text=errs[0], text_color=T.WARN)
+        else:
+            self.clip_note.configure(text=f"{b - a:.0f}s clip", text_color=T.OK)
+
+    def _clip_go(self) -> None:
+        from .. import clips
+
+        src = self._current_clip_source()
+        if src is None:
+            messagebox.showinfo(self.app.title(), "Choose a video first.")
+            return
+        a = clips.parse_offset(self.clip_start.get())
+        b = clips.parse_offset(self.clip_end.get())
+        if a is None or b is None:
+            messagebox.showerror(self.app.title(),
+                                 "Times are minutes:seconds into the file — "
+                                 "for example 6:40.")
+            return
+        errs = clips.validate(src, a, b)
+        if errs:
+            messagebox.showerror(self.app.title(), "\n".join(errs))
+            return
+        chosen = [k for k, v in self.clip_vars.items() if v.get()]
+        if not chosen:
+            messagebox.showinfo(self.app.title(), "Choose at least one format.")
+            return
+
+        out = clips.clips_dir(src.path.parent)
+        name = self.clip_label.get().strip()
+
+        def work(progress, cancel):
+            return clips.make_clip(src, a, b, out, chosen, label=name,
+                                   progress=progress, cancel=cancel)
+
+        self.app.submit(
+            work,
+            f"Cutting {clips.format_offset(a)}–{clips.format_offset(b)} "
+            f"from {src.path.name} ({', '.join(chosen)})…")
 
     # ------------------------------------------------------------------
 
