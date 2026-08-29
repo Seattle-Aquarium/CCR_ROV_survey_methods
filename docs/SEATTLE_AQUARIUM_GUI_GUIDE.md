@@ -528,6 +528,40 @@ Header / body / footer, with the body carrying the weight:
 folder → confirm what was found → describe the work → choose outputs → run. A
 first-time user can follow it top to bottom without instruction.
 
+## Navigation: a left rail, not tabs
+
+Once an app has more than about three screens, put the page list in a
+**vertical rail down the left**, not a strip of tabs across the top. Pages then
+grow downward, so a fifth or sixth costs no horizontal room and no label gets
+truncated. There is room for a one-line subtitle under each name, which is
+often the difference between a person guessing and knowing.
+
+CustomTkinter's `CTkTabview` only does horizontal, so the rail is a fixed-width
+column of buttons beside a content area that raises one page at a time — about
+120 lines. Copy `UTC/utc/gui/nav.py`.
+
+Three things about it are load-bearing, and all three were bugs first.
+
+**Selection is shown by fill and a stripe, never by type colour.** A segmented
+button — and this rail — offers a *single* text colour for both states, so an
+accent fill would force dark type, which then sits at about **1.1:1** on the
+unselected rows. Invisible. Body text on surface-versus-ground clears 6.7:1 in
+both themes; mark the selection with an accent stripe instead.
+
+**Park the slack in one spacer row.** Give a row below the last entry
+`weight=1`. Without it the rail shares its leftover height out among the rows,
+which pulls each label away from its own subtitle.
+
+**A `CTkFrame` defaults to 200px in both directions.** With `grid_propagate(False)`
+it *keeps* that. A 4px-wide accent stripe built as a frame silently made every
+rail row 200px tall — 351px once display scaling was applied — and pushed the
+last page off the bottom of the window. Pass an explicit `height=1` and let the
+row set the height.
+
+> That last one is why layout is worth checking **programmatically** rather than
+> by eye: a screenshot showed something looked wrong, but `winfo_height()` gave
+> the number, the row, and the cause in one line. See the testing note below.
+
 ## Cards
 
 One `Card` per step: heading in `heading`, optional subtitle in `text_muted`,
@@ -629,6 +663,27 @@ Copy is part of the interface.
 
 ---
 
+## Checking the layout without screenshots
+
+Verify layout by asking the widgets, not by photographing the screen:
+
+```python
+page.winfo_width(), page.winfo_height()      # zero-sized? wider than the window?
+holder.winfo_y() + holder.winfo_height()     # does the last row fit in the rail?
+```
+
+Two reasons this beats a screenshot. It gives a *number and a cause* rather than
+an impression — the 200px frame default above was found this way after a
+screenshot only hinted at it. And `ImageGrab` captures a screen *region*: if the
+app is not frontmost at the instant of the grab it silently photographs whatever
+is, which on a real desktop can be a colleague's private browser tab. That has
+happened; do not keep screenshots in an automated suite.
+
+Realise the window first (`geometry(...)`, then `update()` a few times) and bail
+out if it never comes up, or every check fails for the wrong reason.
+
+---
+
 # Appendix A — Contrast checker
 
 Run this against your theme before shipping. It is the check the eye cannot do.
@@ -686,7 +741,8 @@ Copy these from the reference implementation and adapt:
 |---|---|
 | `UTC/utc/brand.py` | palette, `Theme`, font + logo discovery — copy as-is |
 | `UTC/utc/gui/theme.py` | `(light, dark)` pairs, type scale — copy as-is |
-| `UTC/utc/gui/widgets.py` | `Card`, `entry`, `label`, `button` — copy, then add domain widgets |
+| `UTC/utc/gui/widgets.py` | `Card`, `entry`, `label`, `button`, `TimeEntry` — copy, then add domain widgets |
+| `UTC/utc/gui/nav.py` | the left rail — copy as-is |
 | `UTC/utc/gui/app.py` | window assembly, worker/queue orchestration — read, then adapt |
 | `UTC/utc/fsutil.py` | lock-tolerant publishing |
 | `UTC/utc/power.py` | keeping the machine awake |
