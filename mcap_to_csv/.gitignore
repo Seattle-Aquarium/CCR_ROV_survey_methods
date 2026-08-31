@@ -1,0 +1,12 @@
+# build artefacts -- never commit the packaged exe
+build/
+dist/
+*.spec.bak
+__pycache__/
+*.pyc
+*.egg-info/
+
+# per-run scratch
+.pytest_cache/
+*.part
+tests/out/
