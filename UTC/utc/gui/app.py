@@ -134,15 +134,22 @@ class App(ctk.CTk):
         from .bannertools import BannerToolsTab
         from .importpage import ImportPage
         from .nav import Navigator
+        from .transectpage import TransectPage
         from .videopage import VideoPage
 
-        nav = Navigator(self)
+        # Pages that read the flight re-read it when opened: the folder and
+        # the survey plan are both edited on Flight setup, and a page built
+        # once at startup would still show the state from then.
+        nav = Navigator(self, on_select=self._page_shown)
         nav.grid(row=1, column=0, sticky="nsew", padx=(0, 16), pady=(4, 8))
         self.nav = nav
 
         self._build_flight_page(nav.add("Flight setup", "folder · transects"))
         self.pages = {}
         for name, sub, cls in (
+            # Transects first: the CSVs need only the plan and the mcaps,
+            # and the same windows go on to drive the video overlays.
+            ("Transects", "mcap to CSV", TransectPage),
             ("Import photos", "card or folder", ImportPage),
             ("Video", "trim · composite", VideoPage),
             ("Banner tools", "edited JPGs", BannerToolsTab),
@@ -151,6 +158,13 @@ class App(ctk.CTk):
             page.grid(row=0, column=0, sticky="nsew")
             self.pages[name] = page
         nav.select("Flight setup")
+
+    def _page_shown(self, name: str) -> None:
+        """Let a page re-read the flight when the rail raises it."""
+        page = getattr(self, "pages", {}).get(name)
+        refresh = getattr(page, "refresh", None)
+        if callable(refresh):
+            refresh()
 
     def use_flight(self, path: Path) -> None:
         """Adopt a flight folder as the current one and rescan it.
