@@ -100,7 +100,7 @@ makes it the workhorse for UI chrome (borders, disabled states, hover fills):
    pattern; never use the wave-and-dots alone as a design element; never place
    it on a ground that fails 4.5:1.
 
-### The trap worth knowing about
+### The trap worth knowing about (1): bright colours on light grounds
 
 The bright secondary and accent colours **fail as text on light grounds at any
 size**. Measured against Pumice `#EEEEEE`:
@@ -122,6 +122,26 @@ separately chosen semantic colours — see below.
 The guidelines' own accessibility grid (p.20) shows the same thing: on the
 White and Pumice swatches, far fewer type colours are marked usable than on the
 dark grounds.
+
+### The trap worth knowing about (2): one colour, two states
+
+Some widgets expose a **single** `text_color` for states with different fills —
+CustomTkinter's segmented button, which backs its tab bar, is one. Reaching for
+the accent as the selected fill then forces dark type to sit on it, and that
+same dark type lands on the unselected tabs at **1.12:1**. The labels are
+invisible, and nothing warns you.
+
+The fix is not a second colour — there isn't one. Pick *fills* that a single
+text colour reads on. Body text on surface-versus-ground works everywhere:
+
+| | selected fill | unselected fill | contrast |
+|---|---|---|---|
+| Dark | `#1B3557` | `#0C2340` | 12.40:1 / 15.79:1 |
+| Light | `#F7F7F7` | `#FFFFFF` | 6.75:1 / 7.23:1 |
+
+Selection then reads as the tab merging with the panel below it, which is the
+standard idiom anyway. **Before styling any multi-state control, check how many
+text colours it actually accepts** — the answer changes which fills are legal.
 
 ## Gradients — the One Ocean system
 
@@ -508,6 +528,40 @@ Header / body / footer, with the body carrying the weight:
 folder → confirm what was found → describe the work → choose outputs → run. A
 first-time user can follow it top to bottom without instruction.
 
+## Navigation: a left rail, not tabs
+
+Once an app has more than about three screens, put the page list in a
+**vertical rail down the left**, not a strip of tabs across the top. Pages then
+grow downward, so a fifth or sixth costs no horizontal room and no label gets
+truncated. There is room for a one-line subtitle under each name, which is
+often the difference between a person guessing and knowing.
+
+CustomTkinter's `CTkTabview` only does horizontal, so the rail is a fixed-width
+column of buttons beside a content area that raises one page at a time — about
+120 lines. Copy `UTC/utc/gui/nav.py`.
+
+Three things about it are load-bearing, and all three were bugs first.
+
+**Selection is shown by fill and a stripe, never by type colour.** A segmented
+button — and this rail — offers a *single* text colour for both states, so an
+accent fill would force dark type, which then sits at about **1.1:1** on the
+unselected rows. Invisible. Body text on surface-versus-ground clears 6.7:1 in
+both themes; mark the selection with an accent stripe instead.
+
+**Park the slack in one spacer row.** Give a row below the last entry
+`weight=1`. Without it the rail shares its leftover height out among the rows,
+which pulls each label away from its own subtitle.
+
+**A `CTkFrame` defaults to 200px in both directions.** With `grid_propagate(False)`
+it *keeps* that. A 4px-wide accent stripe built as a frame silently made every
+rail row 200px tall — 351px once display scaling was applied — and pushed the
+last page off the bottom of the window. Pass an explicit `height=1` and let the
+row set the height.
+
+> That last one is why layout is worth checking **programmatically** rather than
+> by eye: a screenshot showed something looked wrong, but `winfo_height()` gave
+> the number, the row, and the cause in one line. See the testing note below.
+
 ## Cards
 
 One `Card` per step: heading in `heading`, optional subtitle in `text_muted`,
@@ -588,6 +642,8 @@ Copy is part of the interface.
 - [ ] Both themes checked — not just the one you developed in
 - [ ] Keyboard focus is visible
 - [ ] Colour is never the only signal (pair it with text or an icon)
+- [ ] Multi-state controls checked for how many text colours they accept,
+      and both states measured — not just the selected one
 
 **Architecture**
 - [ ] Work runs off the Tk thread
@@ -604,6 +660,27 @@ Copy is part of the interface.
 - [ ] Spec targets a `launch.py` shim
 - [ ] `build/` and `dist/` git-ignored
 - [ ] Debug console build available
+
+---
+
+## Checking the layout without screenshots
+
+Verify layout by asking the widgets, not by photographing the screen:
+
+```python
+page.winfo_width(), page.winfo_height()      # zero-sized? wider than the window?
+holder.winfo_y() + holder.winfo_height()     # does the last row fit in the rail?
+```
+
+Two reasons this beats a screenshot. It gives a *number and a cause* rather than
+an impression — the 200px frame default above was found this way after a
+screenshot only hinted at it. And `ImageGrab` captures a screen *region*: if the
+app is not frontmost at the instant of the grab it silently photographs whatever
+is, which on a real desktop can be a colleague's private browser tab. That has
+happened; do not keep screenshots in an automated suite.
+
+Realise the window first (`geometry(...)`, then `update()` a few times) and bail
+out if it never comes up, or every check fails for the wrong reason.
 
 ---
 
@@ -664,10 +741,12 @@ Copy these from the reference implementation and adapt:
 |---|---|
 | `UTC/utc/brand.py` | palette, `Theme`, font + logo discovery — copy as-is |
 | `UTC/utc/gui/theme.py` | `(light, dark)` pairs, type scale — copy as-is |
-| `UTC/utc/gui/widgets.py` | `Card`, `entry`, `label`, `button` — copy, then add domain widgets |
+| `UTC/utc/gui/widgets.py` | `Card`, `entry`, `label`, `button`, `TimeEntry` — copy, then add domain widgets |
+| `UTC/utc/gui/nav.py` | the left rail — copy as-is |
 | `UTC/utc/gui/app.py` | window assembly, worker/queue orchestration — read, then adapt |
 | `UTC/utc/fsutil.py` | lock-tolerant publishing |
 | `UTC/utc/power.py` | keeping the machine awake |
+| `UTC/utc/layout.py` | one module owning the folder structure, with a `PROTECTED` set for folders nothing may write to |
 
 `brand.py` and `theme.py` carry no ROV-specific content and should be copied
 unchanged, so a fix to a colour propagates rather than diverging per app.

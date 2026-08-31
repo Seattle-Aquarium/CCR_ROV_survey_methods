@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date as _date
-from typing import Callable
 
 import customtkinter as ctk
 
-from ..survey import Site, SurveyError, Transect, parse_hhmmss
+from ..survey import Site, Transect
 from . import theme as T
 
 
@@ -65,7 +65,7 @@ def button(master, text, command, kind: str = "primary", width: int = 120):
 class TransectRow(ctk.CTkFrame):
     """One transect: name, TC-25 start, TC-25 end."""
 
-    def __init__(self, master, on_remove: Callable[["TransectRow"], None],
+    def __init__(self, master, on_remove: Callable[[TransectRow], None],
                  name: str = "T1", start: str = "", end: str = ""):
         super().__init__(master, fg_color="transparent")
         self.grid_columnconfigure(5, weight=1)
@@ -76,13 +76,13 @@ class TransectRow(ctk.CTkFrame):
         self.name.grid(row=0, column=0, padx=(0, 8), pady=3)
 
         label(self, "start", muted=True).grid(row=0, column=1, padx=(0, 4))
-        self.start = entry(self, "hh:mm:ss", width=110)
-        self.start.insert(0, start)
+        self.start = TimeEntry(self, width=110)
+        self.start.set(start)
         self.start.grid(row=0, column=2, padx=(0, 10))
 
         label(self, "end", muted=True).grid(row=0, column=3, padx=(0, 4))
-        self.end = entry(self, "hh:mm:ss", width=110)
-        self.end.insert(0, end)
+        self.end = TimeEntry(self, width=110)
+        self.end.set(end)
         self.end.grid(row=0, column=4, padx=(0, 10))
 
         self.status = ctk.CTkLabel(self, text="", font=T.FONT_SMALL,
@@ -92,9 +92,9 @@ class TransectRow(ctk.CTkFrame):
         button(self, "Remove", lambda: on_remove(self), "danger", width=80
                ).grid(row=0, column=6)
 
+        # Wire the callbacks only now: every widget refresh() touches exists.
         for e in (self.start, self.end):
-            e.bind("<FocusOut>", lambda _e: self.refresh())
-            e.bind("<KeyRelease>", lambda _e: self.refresh())
+            e.set_on_change(self.refresh)
 
     def to_transect(self) -> Transect:
         return Transect(self.name.get().strip() or "T?",
@@ -116,7 +116,7 @@ class TransectRow(ctk.CTkFrame):
 class SiteFrame(ctk.CTkFrame):
     """A survey site and its transects."""
 
-    def __init__(self, master, on_remove: Callable[["SiteFrame"], None],
+    def __init__(self, master, on_remove: Callable[[SiteFrame], None],
                  index: int = 1, site: Site | None = None,
                  default_project: str = "", default_date: str = ""):
         super().__init__(master, fg_color=T.SURFACE_ALT, corner_radius=T.RADIUS,
@@ -191,3 +191,113 @@ class SiteFrame(ctk.CTkFrame):
             date=self.date.get().strip(),
             transects=[r.to_transect() for r in self._rows],
         )
+
+
+class TimeEntry(ctk.CTkEntry):
+    """hh:mm:ss typed as six digits, with the colons written for you.
+
+    A transect is four numbers a day, typed in the field on a laptop lid, and
+    reaching for ':' twice per time is most of the effort. Every component is
+    zero-padded to two digits, so six keystrokes is always the whole time and
+    the separators can be inserted as you go.
+
+    Paste and editing still work: the text is re-derived from whatever digits
+    the box ends up containing, rather than from keystrokes, so a pasted
+    "12:25:45" or a mid-string correction both settle on the same result.
+    """
+
+    def __init__(self, master, width: int = 110, on_change=None, **kw):
+        self._var = ctk.StringVar()
+        super().__init__(
+            master, textvariable=self._var, placeholder_text="hh:mm:ss",
+            width=width, font=T.FONT_BODY, text_color=T.TEXT,
+            fg_color=T.FIELD_BG, border_color=T.FIELD_BORDER, border_width=1,
+            corner_radius=6, **kw
+        )
+        self._on_change = on_change
+        self._guard = False
+        self._var.trace_add("write", self._reformat)
+
+    # ---- helpers -----------------------------------------------------
+
+    @staticmethod
+    def _digits(text: str) -> str:
+        return "".join(c for c in str(text) if c.isdigit())[:6]
+
+    @staticmethod
+    def _format(digits: str) -> str:
+        parts = [digits[i:i + 2] for i in range(0, len(digits), 2)]
+        return ":".join(p for p in parts if p)
+
+    @staticmethod
+    def _caret_after_digits(text: str, n: int) -> int:
+        """Index just past the nth digit of `text` (0 -> start of string).
+
+        The caret is tracked by *digit count* rather than character offset,
+        because inserting a colon shifts every offset after it.
+        """
+        if n <= 0:
+            return 0
+        seen = 0
+        for i, c in enumerate(text):
+            if c.isdigit():
+                seen += 1
+                if seen == n:
+                    return i + 1
+        return len(text)
+
+    def _place_caret(self, pos: int) -> None:
+        try:
+            self.icursor(pos)
+        except Exception:
+            pass                          # widget went away mid-edit
+
+    def _reformat(self, *_a) -> None:
+        if self._guard:
+            return
+        raw = self._var.get()
+        try:
+            caret = self.index("insert")
+        except Exception:
+            caret = len(raw)
+        # How many digits sit left of the caret? That survives reformatting;
+        # a character offset does not.
+        digits_left = sum(1 for c in raw[:caret] if c.isdigit())
+
+        want = self._format(self._digits(raw))
+        if want != raw:
+            self._guard = True
+            self._var.set(want)
+            self._guard = False
+            # Restore the caret on the next idle cycle. Setting it here is
+            # discarded: this runs inside the variable's write trace, before Tk
+            # has finished applying the new text to the widget. That was the
+            # bug that turned "123456" into "12:45:63" -- the caret stayed left
+            # of the inserted colon, so every later digit landed before it.
+            self.after_idle(self._place_caret,
+                            self._caret_after_digits(want, digits_left))
+        if self._on_change:
+            self._on_change()
+
+    # ---- public ------------------------------------------------------
+
+    def get(self) -> str:
+        return self._var.get()
+
+    def set(self, text: str) -> None:
+        self._var.set(self._format(self._digits(text)))
+
+    def clear(self) -> None:
+        self._var.set("")
+
+    def set_on_change(self, cb) -> None:
+        """Attach the callback after the owner is fully built.
+
+        Setting an initial value fires the callback, and during __init__ the
+        widgets it wants to update do not exist yet.
+        """
+        self._on_change = cb
+
+    @property
+    def complete(self) -> bool:
+        return len(self._digits(self._var.get())) == 6

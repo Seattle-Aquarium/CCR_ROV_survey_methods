@@ -13,8 +13,6 @@ require on white) and Salish/Mediterranean for headings and actions.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from .. import brand
 
 L, D = brand.LIGHT, brand.DARK

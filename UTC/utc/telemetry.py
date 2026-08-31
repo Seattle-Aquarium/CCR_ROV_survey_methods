@@ -18,9 +18,8 @@ from __future__ import annotations
 
 import csv
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
 
 import numpy as np
 
@@ -83,7 +82,7 @@ class TelemetryStore:
     # ---- loading -------------------------------------------------------
 
     @classmethod
-    def load(cls, csv_path: str | Path) -> "TelemetryStore":
+    def load(cls, csv_path: str | Path) -> TelemetryStore:
         store = cls()
         times: dict[str, list[float]] = {}
         vals: dict[str, list[float]] = {}
@@ -91,7 +90,7 @@ class TelemetryStore:
 
         with open(csv_path, newline="") as f:
             r = csv.reader(f)
-            header = next(r, None)
+            next(r, None)          # skip the header row
             for row in r:
                 if len(row) < 4:
                     continue

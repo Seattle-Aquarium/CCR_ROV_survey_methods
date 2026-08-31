@@ -1,0 +1,68 @@
+[project]
+name = "utc"
+version = "0.3.0"
+description = "Underwater Telemetry Compositing — file management and telemetry overlays for ROV survey flights"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "customtkinter>=5.2",
+    "pillow>=10.0",
+    "numpy>=1.24",
+    "av>=11.0",
+    "mcap>=1.1",
+    "imageio-ffmpeg>=0.4.9",
+    # Windows has no system timezone database. Without this,
+    # local transect times resolve to the wrong instant.
+    "tzdata>=2024.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "pyinstaller>=6.0",
+]
+
+[project.scripts]
+utc = "utc.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["utc*"]
+
+# --------------------------------------------------------------------------
+#  pytest
+# --------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# -p no:cacheprovider keeps a .pytest_cache out of a Dropbox-synced folder.
+addopts = "-q --strict-markers -p no:cacheprovider"
+markers = [
+    "live: needs a real flight folder or a display; run with --runlive",
+]
+
+# --------------------------------------------------------------------------
+#  ruff — linting only, no formatter opinions imposed on contributors
+# --------------------------------------------------------------------------
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+exclude = ["build", "dist", "assets"]
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle
+    "F",     # pyflakes — undefined names, unused imports
+    "I",     # import sorting
+    "B",     # bugbear — likely bugs
+    "UP",    # pyupgrade
+]
+ignore = [
+    "E501",  # line length: the comments here earn their width
+    "B008",  # function call in default arg — dataclass field() is fine
+    "E702",  # `a = 1; b = 2` reads well in the tight binary-parsing routines
+    "E731",  # a one-line lambda alias is clearer than a def for tiny helpers
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests reach into internals on purpose, and the live scripts are scripts.
+"tests/*" = ["E402", "F401"]

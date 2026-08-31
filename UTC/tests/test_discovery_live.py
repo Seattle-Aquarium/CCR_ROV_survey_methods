@@ -1,6 +1,7 @@
 """Exercise discovery against the real (varied) flight folders on this machine."""
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from utc.discovery import discover
 

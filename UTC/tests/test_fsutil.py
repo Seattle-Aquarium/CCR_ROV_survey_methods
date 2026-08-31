@@ -68,7 +68,7 @@ def test_waits_for_a_lock_that_clears():
         src = _mk(d, "src.mp4", "new")
         dst = _mk(d, "final.mp4", "old")
 
-        handle = open(dst, "r")
+        handle = open(dst)
         released = threading.Event()
 
         def release_soon():
@@ -98,7 +98,7 @@ def test_falls_back_when_the_lock_never_clears():
         src = _mk(d, "src.mp4", "new")
         dst = _mk(d, "final.mp4", "old")
 
-        with open(dst, "r"):
+        with open(dst):
             msgs: list[str] = []
             got = publish(src, dst, timeout_s=1.0, log=msgs.append)
 
@@ -119,7 +119,7 @@ def test_real_lock_is_classified_as_transient():
         d = Path(td)
         src = _mk(d, "src.mp4", "new")
         dst = _mk(d, "final.mp4", "old")
-        with open(dst, "r"):
+        with open(dst):
             try:
                 os.replace(src, dst)
             except OSError as exc:

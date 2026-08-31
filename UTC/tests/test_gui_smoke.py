@@ -1,7 +1,10 @@
-"""Construct the GUI, screenshot both themes, and close.
+"""GUI smoke test: build every page and check the layout programmatically.
 
-Not a substitute for using it, but it catches construction errors, missing
-assets and theme regressions without a human in the loop.
+Deliberately no screenshots. ImageGrab captures a screen *region*, so if the
+app is not frontmost at the moment of the grab it silently photographs whatever
+is -- which on a real desktop can be someone's private browser tab. Widget
+geometry answers the same questions (is anything clipped, is anything
+zero-sized, did every page build) without ever reading the screen.
 """
 
 from __future__ import annotations
@@ -16,31 +19,49 @@ OUT = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
 OUT.mkdir(parents=True, exist_ok=True)
 
 import customtkinter as ctk  # noqa: E402
+
 from utc.gui.app import App  # noqa: E402
 from utc.survey import Site, SurveyPlan, Transect  # noqa: E402
 
 
-def shot(app: App, name: str) -> None:
-    # ImageGrab captures the screen, so the window must actually be frontmost --
-    # otherwise it silently photographs whatever is underneath.
-    app.deiconify()
-    app.lift()
-    app.attributes("-topmost", True)
-    app.focus_force()
-    for _ in range(6):
+def check_layout(app: App) -> list[str]:
+    """Every page built, nothing zero-sized, nothing wider than the window.
+
+    Replaces the old screenshot: it answers the questions a screenshot was
+    being used for, without capturing the screen.
+    """
+    # Let the window actually lay out first. Measuring an unrealised window
+    # returns placeholder sizes and every check fails -- a test that always
+    # reports problems is one nobody reads.
+    app.geometry("1300x940")
+    for _ in range(3):
         app.update_idletasks()
         app.update()
         time.sleep(0.15)
-    try:
-        from PIL import ImageGrab
-        x, y = app.winfo_rootx(), app.winfo_rooty()
-        w, h = app.winfo_width(), app.winfo_height()
-        ImageGrab.grab(bbox=(x, y, x + w, y + h)).save(OUT / name)
-        print(f"wrote {name}  ({w}x{h} at {x},{y})")
-    except Exception as ex:
-        print("screenshot failed:", ex)
-    finally:
-        app.attributes("-topmost", False)
+    problems: list[str] = []
+    win_w = app.winfo_width()
+    if win_w <= 1 or app.nav.rail.winfo_height() <= 100:
+        return ["window never realised; layout could not be checked"]
+    for name in list(app.pages) + ["Flight setup"]:
+        app.nav.select(name)
+        app.update_idletasks()
+        page = app.nav._pages[name]
+        w, h = page.winfo_width(), page.winfo_height()
+        if w <= 1 or h <= 1:
+            problems.append(f"{name}: page is {w}x{h}")
+        if w > win_w:
+            problems.append(f"{name}: page {w}px wider than the {win_w}px window")
+    # every rail row must be visible inside the rail
+    rail_h = app.nav.rail.winfo_height()
+    for label, (holder, _stripe, _btn) in app.nav._rows.items():
+        y, h = holder.winfo_y(), holder.winfo_height()
+        if y + h > rail_h:
+            problems.append(f"rail row {label!r} runs past the rail "
+                            f"({y + h} > {rail_h})")
+        if h <= 1:
+            problems.append(f"rail row {label!r} collapsed to {h}px")
+    return problems
+
 
 
 app = App()
@@ -59,17 +80,20 @@ app._apply_plan(SurveyPlan([
         Transect("T2", "13:35:00", "13:50:00"),
     ]),
 ]))
-app.res_vars["1080p"].set(True)
-app.res_vars["720p"].set(True)
+app.pages["Video"].res_vars["1080p"].set(True)
+app.pages["Video"].res_vars["720p"].set(True)
 app._log("Ready. Select a flight folder, add transects, then Create composites.")
-
-shot(app, "gui_dark.png")
 
 app.theme_switch.deselect()
 app._toggle_theme()
-shot(app, "gui_light.png")
 
 print("sites:", len(app._sites))
 print("plan valid:", app._plan().validate() or "OK")
+problems = check_layout(app)
+for pr in problems:
+    print("  LAYOUT:", pr)
+print("layout OK" if not problems else f"{len(problems)} layout problem(s)")
+
 app.destroy()
 print("GUI smoke test complete")
+

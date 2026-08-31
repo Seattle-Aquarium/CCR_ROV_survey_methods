@@ -25,10 +25,10 @@ from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import Callable, Sequence
 
 from . import ffmpeg_tools as ff
 
@@ -79,7 +79,7 @@ def remux(
 
     Returns (mp4 path, epoch of PTS 0, frames written).
     """
-    import av                                    # imported late: heavy
+    import av  # imported late: heavy
 
     cache_dir = Path(cache_dir)
     out = cache_dir / "rov_full.mp4"

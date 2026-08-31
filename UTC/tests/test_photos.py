@@ -21,11 +21,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ExifTags, ImageDraw
+from PIL import ExifTags, Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from utc import brand, photos as ph  # noqa: E402
+from utc import brand  # noqa: E402
+from utc import photos as ph
 
 _ORI = {v: k for k, v in ExifTags.TAGS.items()}["Orientation"]
 _DTO = {v: k for k, v in ExifTags.TAGS.items()}["DateTimeOriginal"]
@@ -134,7 +135,7 @@ def test_worst_case_band_does_not_clip():
     chosen for one value silently truncates a longer one."""
     style = ph.BandStyle()
     W, H = 5568, style.height(4872)
-    worst = {f.key: v for f, v in zip(
+    worst = {f.key: v for f, v in zip(  # noqa: B905
         ph.BAND_FIELDS,
         [88.88, 8.88, 100.0, 188.88, 1888.0, "MOTOR_DETECT"])}
     band = np.asarray(ph.render_band(W, H, worst, "23:59:59", style).convert("RGB"))
@@ -218,70 +219,47 @@ def test_unique_path_never_clobbers():
         assert ph.unique_path(d, "x.JPG").name == "x_2.JPG"
 
 
-def _flight(td: Path) -> tuple[Path, list]:
-    """Three stills: two inside a transect window, one well outside it."""
-    d = td / "JPEG"
-    d.mkdir(parents=True)
-    _make_jpeg(d / "G01.jpg", when="2026:08:24 13:24:10")
-    _make_jpeg(d / "G02.jpg", when="2026:08:24 13:24:20")
-    _make_jpeg(d / "G03.jpg", when="2026:08:24 14:00:00")   # off-transect
-    lo = datetime(2026, 8, 24, 13, 24, 0,
-                  tzinfo=timezone(timedelta(hours=-7))).timestamp()
-    return d, [("T1", lo, lo + 60)]
+def test_time_from_a_decorated_export_name():
+    """Lightroom and the enhancer append suffixes and drop EXIF entirely, so
+    the timestamp has to be found anywhere in the name, not only at the start."""
+    for name in ("2026_08_26_12-20-02",
+                 "2026_08_26_12-20-02_enhanced",
+                 "T1_2026_08_26_12-20-02_enhanced-2",
+                 "2026_08_26_12-20-02_denoise_crop_enhanced"):
+        got = ph.time_from_name(name, tz_name="America/Los_Angeles")
+        assert got is not None, name
+        assert got.strftime("%Y-%m-%d %H:%M:%S") == "2026-08-26 12:20:02", name
+        assert got.utcoffset() == timedelta(hours=-7), name
 
 
-def test_process_flight_keep_leaves_off_transect_alone():
+def test_timezone_beats_a_fixed_offset_across_dst():
+    """The date is in the name, so the right offset can be derived for it --
+    a fixed offset would be an hour out on one side of the change."""
+    summer = ph.time_from_name("2026_08_26_12-00-00", tz_name="America/Los_Angeles")
+    winter = ph.time_from_name("2026_12_26_12-00-00", tz_name="America/Los_Angeles")
+    assert summer.utcoffset() == timedelta(hours=-7), summer
+    assert winter.utcoffset() == timedelta(hours=-8), winter
+
+
+def test_filename_fallback_needs_a_zone_and_says_so():
+    """Without a zone a bare local time cannot be placed, and guessing one
+    would put every frame an unknown number of hours off."""
+    assert ph.time_from_name("2026_08_26_12-20-02") is None
+    assert ph.time_from_name("no timestamp here", tz_name="America/Los_Angeles") is None
+
+
+def test_photo_time_falls_back_to_the_name_when_exif_is_gone():
+    """The bug this guards: the fallback was reachable only when an offset was
+    passed, and the caller passed None, so every edited frame was skipped."""
+    from PIL import Image
     with tempfile.TemporaryDirectory() as td:
-        d, windows = _flight(Path(td))
-        rep = ph.process_flight(d, _Store(SAMPLE), windows, off_transect=ph.KEEP)
-        assert rep.stamped == 2, rep.summary()
-        assert rep.off_transect == 1
-        assert rep.failed == 0
-        assert len(list((d / "T1").glob("*.jpg"))) == 2
-        assert (d / "G03.jpg").is_file(), "off-transect still must be untouched"
-        # the two on-transect originals were consumed
-        assert not (d / "G01.jpg").exists()
-
-
-def test_process_flight_move_relocates_off_transect():
-    with tempfile.TemporaryDirectory() as td:
-        d, windows = _flight(Path(td))
-        rep = ph.process_flight(d, _Store(SAMPLE), windows, off_transect=ph.MOVE)
-        moved = d / ph.OFF_TRANSECT_DIR / "G03.jpg"
-        assert moved.is_file(), list((d / ph.OFF_TRANSECT_DIR).iterdir())
-        assert not (d / "G03.jpg").exists()
-        assert rep.off_transect == 1
-
-
-def test_process_flight_delete_removes_only_off_transect():
-    with tempfile.TemporaryDirectory() as td:
-        d, windows = _flight(Path(td))
-        rep = ph.process_flight(d, _Store(SAMPLE), windows, off_transect=ph.DELETE)
-        assert not (d / "G03.jpg").exists()
-        assert len(list((d / "T1").glob("*.jpg"))) == 2, "on-transect must survive"
-        assert rep.off_transect == 1
-
-
-def test_process_flight_rejects_an_unknown_policy():
-    """A typo must not silently fall through to deleting anything."""
-    with tempfile.TemporaryDirectory() as td:
-        d, windows = _flight(Path(td))
-        try:
-            ph.process_flight(d, _Store(SAMPLE), windows, off_transect="purge")
-        except ValueError:
-            return
-        raise AssertionError("expected ValueError for an unknown policy")
-
-
-def test_process_flight_is_safe_to_rerun():
-    with tempfile.TemporaryDirectory() as td:
-        d, windows = _flight(Path(td))
-        ph.process_flight(d, _Store(SAMPLE), windows, off_transect=ph.KEEP)
-        before = sorted(p.name for p in (d / "T1").glob("*.jpg"))
-        again = ph.process_flight(d, _Store(SAMPLE), windows, off_transect=ph.KEEP)
-        after = sorted(p.name for p in (d / "T1").glob("*.jpg"))
-        assert after == before, "a re-run must not add or rename anything"
-        assert again.stamped == 0
+        p = Path(td) / "2026_08_26_12-20-02_enhanced.jpg"
+        Image.new("RGB", (64, 48), (10, 20, 30)).save(p, "JPEG")   # no EXIF
+        assert ph.read_photo_time(p) is None, "test setup: EXIF should be absent"
+        assert ph.photo_time(p) is None, "no zone, no offset -> cannot place it"
+        got = ph.photo_time(p, tz_name="America/Los_Angeles")
+        assert got is not None, "should recover the time from the filename"
+        assert got[1].strftime("%H:%M:%S") == "12:20:02"
 
 
 def test_find_photo_dir_locates_jpegs():

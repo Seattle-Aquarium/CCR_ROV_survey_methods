@@ -26,10 +26,12 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field, asdict
-from datetime import date as _date, datetime, time as _time, timedelta
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass, field
+from datetime import date as _date
+from datetime import datetime
+from datetime import time as _time
 from pathlib import Path
-from typing import Iterable, Sequence
 
 try:
     from zoneinfo import ZoneInfo
@@ -95,29 +97,60 @@ def format_hhmmss(seconds: float) -> str:
     return f"{seconds // 3600:02d}:{(seconds % 3600) // 60:02d}:{seconds % 60:02d}"
 
 
+class TimezoneDataMissing(RuntimeError):
+    """No IANA timezone database is available to this Python."""
+
+
+def _zone(tz_name: str):
+    """The tzinfo for a zone, or a loud failure.
+
+    There used to be a fallback here that returned a fixed -8 (PST) when the
+    database was missing. It was worse than useless: it made every summer
+    transect an hour out, and the midnight helper's version of the same
+    fallback double-counted the offset and landed **eight** hours out. Times
+    that are quietly wrong send imagery into the wrong transect and cut the
+    wrong footage, and nothing downstream can tell.
+
+    Windows ships no timezone database at all, so this is a real possibility
+    on a fresh laptop rather than a theoretical one. Stopping with an
+    actionable message is the only safe answer.
+    """
+    if ZoneInfo is None:
+        raise TimezoneDataMissing(
+            "This Python has no zoneinfo module, so local times cannot be "
+            "resolved. Python 3.9 or newer is required."
+        )
+    try:
+        return ZoneInfo(tz_name)
+    except Exception as ex:
+        raise TimezoneDataMissing(
+            f"No timezone database entry for {tz_name!r}. Windows does not "
+            f"ship one, so Python needs the 'tzdata' package:\n"
+            f"    python -m pip install tzdata\n"
+            f"Without it every transect time would resolve to the wrong "
+            f"instant, and the error would not be visible in the output."
+        ) from ex
+
+
+def timezone_data_available(tz_name: str = "America/Los_Angeles") -> bool:
+    """Cheap check for startup diagnostics."""
+    try:
+        _zone(tz_name)
+        return True
+    except TimezoneDataMissing:
+        return False
+
+
 def utc_offset_hours(on: _date, tz_name: str = "America/Los_Angeles") -> float:
     """Local UTC offset in force on a given date (handles PST/PDT)."""
-    if ZoneInfo is None:
-        return -8.0
-    try:
-        tz = ZoneInfo(tz_name)
-    except Exception:
-        return -8.0
-    dt = datetime.combine(on, _time(12, 0), tzinfo=tz)   # midday: never ambiguous
+    dt = datetime.combine(on, _time(12, 0), tzinfo=_zone(tz_name))  # midday: never ambiguous
     off = dt.utcoffset()
     return off.total_seconds() / 3600.0 if off else 0.0
 
 
 def local_midnight_epoch(on: _date, tz_name: str = "America/Los_Angeles") -> float:
     """Epoch seconds at local midnight on `on`."""
-    if ZoneInfo is not None:
-        try:
-            tz = ZoneInfo(tz_name)
-            return datetime.combine(on, _time(0, 0), tzinfo=tz).timestamp()
-        except Exception:
-            pass
-    off = utc_offset_hours(on, tz_name)
-    return datetime.combine(on, _time(0, 0)).replace(tzinfo=None).timestamp() - off * 3600
+    return datetime.combine(on, _time(0, 0), tzinfo=_zone(tz_name)).timestamp()
 
 
 # --------------------------------------------------------------------------
@@ -195,7 +228,7 @@ class Site:
             seen.add(t.name)
         # overlapping transects are almost always a transcription slip
         ordered = sorted((t for t in self.transects), key=lambda t: _safe(t.start_s))
-        for a, b in zip(ordered, ordered[1:]):
+        for a, b in zip(ordered, ordered[1:], strict=False):   # pairwise
             try:
                 if b.start_s() < a.end_s():
                     errs.append(
@@ -232,7 +265,7 @@ class SurveyPlan:
         return json.dumps(asdict(self), indent=2)
 
     @classmethod
-    def from_json(cls, text: str) -> "SurveyPlan":
+    def from_json(cls, text: str) -> SurveyPlan:
         raw = json.loads(text)
         sites = [
             Site(
@@ -247,7 +280,7 @@ class SurveyPlan:
         Path(path).write_text(self.to_json(), encoding="utf-8")
 
     @classmethod
-    def load(cls, path: str | Path) -> "SurveyPlan":
+    def load(cls, path: str | Path) -> SurveyPlan:
         return cls.from_json(Path(path).read_text(encoding="utf-8"))
 
 

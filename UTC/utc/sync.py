@@ -27,12 +27,10 @@ enough that whole-frame luma barely moves across a full lights-off transition.
 
 from __future__ import annotations
 
-import json
-import math
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Sequence
 
 import numpy as np
 
@@ -177,12 +175,12 @@ def validate(
     for i, ch in enumerate(usable):
         if progress:
             progress(i / len(usable), f"brightness {i+1}/{len(usable)}")
-        p, l = brightness_trace(ch.path, cache_dir, ffmpeg=ffmpeg,
-                                progress=None, cancel=cancel)
-        if p.size:
+        pos, lum = brightness_trace(ch.path, cache_dir, ffmpeg=ffmpeg,
+                                    progress=None, cancel=cancel)
+        if pos.size:
             # chapter position -> absolute epoch, via the timecode track
-            all_pts.append(midnight_epoch + ch.tc_start_s + p)
-            all_lum.append(l)
+            all_pts.append(midnight_epoch + ch.tc_start_s + pos)
+            all_lum.append(lum)
 
     if not all_pts:
         rep.message = "no brightness samples could be read"

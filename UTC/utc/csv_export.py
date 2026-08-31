@@ -15,15 +15,18 @@ from __future__ import annotations
 
 import csv
 import math
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Sequence
 
 from .fsutil import publish
-from .survey import ResolvedTransect, SurveyPlan, format_hhmmss
+from .survey import ResolvedTransect, SurveyPlan
 from .telemetry import (
-    EXPORT_COLUMNS, EXPORT_STRINGS, TelemetryStore, dvl_beam_columns,
+    EXPORT_COLUMNS,
+    EXPORT_STRINGS,
+    TelemetryStore,
+    dvl_beam_columns,
 )
 
 ProgressCB = Callable[[float, str], None]

@@ -1,0 +1,80 @@
+name: UTC
+
+# Runs the automated UTC suite on every push to main and every pull request
+# that touches it. The live scripts (real flight data, or a window on screen)
+# are skipped -- see UTC/tests/conftest.py.
+on:
+  push:
+    branches: [main]
+    paths: ["UTC/**", ".github/workflows/utc-ci.yml"]
+  pull_request:
+    paths: ["UTC/**", ".github/workflows/utc-ci.yml"]
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: UTC
+
+jobs:
+  test:
+    # Windows is the platform UTC is built and shipped for: it packages a
+    # Windows .exe, keeps the machine awake through the Win32 API, and lists
+    # removable drives to find a GoPro card. Testing elsewhere would mostly
+    # measure the shims around those.
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest ruff
+
+      - name: Lint
+        run: ruff check utc tests
+
+      - name: Test
+        # ffmpeg comes from the imageio-ffmpeg wheel, so nothing to install.
+        run: pytest -q
+
+  build:
+    # Prove the app still packages. A broken spec is invisible to the tests
+    # and only shows up when someone tries to hand the .exe to a colleague.
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+      - name: Build the executable
+        run: pyinstaller --noconfirm utc.spec
+      - name: Check it exists
+        shell: pwsh
+        run: |
+          $exe = "dist/Underwater-Telemetry-Compositing.exe"
+          if (-not (Test-Path $exe)) { throw "no executable was produced" }
+          $mb = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+          Write-Host "built $exe  ($mb MB)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UTC-exe-${{ github.sha }}
+          path: UTC/dist/Underwater-Telemetry-Compositing.exe
+          retention-days: 14

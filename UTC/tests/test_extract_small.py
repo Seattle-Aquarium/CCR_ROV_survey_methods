@@ -1,6 +1,8 @@
 """Extract two small mcaps from the C3 flight and sanity-check the result."""
-import sys, time
+import sys
+import time
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from utc.mcap_extract import extract
 
@@ -22,6 +24,7 @@ print(f"h264 bytes   : {r.h264_path.stat().st_size:,}")
 print(f"warnings     : {r.warnings}")
 
 import collections
+
 c = collections.Counter()
 with open(r.telemetry_csv) as f:
     next(f)

@@ -21,10 +21,9 @@ Two things here are not obvious and were both bugs in v1:
 
 from __future__ import annotations
 
-import math
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Sequence
 
 from . import ffmpeg_tools as ff
 from .config import AppConfig, Layout, Rendition

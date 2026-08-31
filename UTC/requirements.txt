@@ -6,3 +6,5 @@ imageio-ffmpeg>=0.4  # ships a static ffmpeg; skipped if ffmpeg is on PATH
 Pillow>=10           # overlay rendering
 numpy>=1.24          # telemetry indexing and the sync check
 customtkinter>=5.2   # GUI
+tzdata>=2024.1       # Windows ships no timezone database; without this every
+                     # transect time resolves to the wrong instant
