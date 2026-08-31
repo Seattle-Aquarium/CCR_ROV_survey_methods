@@ -12,6 +12,25 @@ The app has three tabs, following the life of a flight:
 | **Sort & composite** | Enter transect times once, then sort the imagery and/or build composites. |
 | **Banner tools** | Add or remove the telemetry banner on any folder of stills, later. |
 
+## Transects (mcap to CSV)
+
+The **Transects** page runs the extractor in [`mcap_to_csv/`](../mcap_to_csv/)
+against the flight that is already open. It reads the survey plan from Flight
+setup and the recordings from the flight folder, so the transect windows are
+typed once and drive both the CSVs and the video overlays — two copies of those
+times drifting apart is the kind of error that only shows up when the analysis
+disagrees with the footage.
+
+It writes one CSV per transect plus a Leaflet map of the site. Column meanings
+and provenance are in [COLUMNS.md](../mcap_to_csv/COLUMNS.md).
+
+`run_UTC.bat` installs the extractor alongside UTC. If the page reports it
+missing, install it by hand:
+
+```bash
+python -m pip install -e ../mcap_to_csv
+```
+
 ## Folder structure
 
 ```
@@ -69,16 +88,27 @@ flight data.
 
 ## Running it
 
-Double-click **`run_UTC.bat`**, or from a terminal:
+Double-click **`run_UTC.bat`**. Nothing needs installing first beyond Python
+3.10 or newer: on its first run the launcher builds a private environment in
+`%LOCALAPPDATA%\CCR_ROV\venv`, installs UTC and the transect extractor into it,
+and starts the app. That takes a few minutes once; after that it opens straight
+away.
+
+The environment sits outside the repo deliberately — this checkout lives in a
+OneDrive folder, and a virtualenv there would be thousands of files for the sync
+client to chew through forever. `run_MCAP_to_CSV.bat` shares the same
+environment, so whichever runs first does the work.
+
+The launcher tests each Python it finds rather than taking the first one on
+disk. A partial install still leaves a `python.exe` that cannot find its own
+standard library, and choosing it produces a misleading `_tkinter` DLL error
+rather than an obvious "this Python is broken".
+
+From a terminal instead:
 
 ```
+python -m pip install -e .
 python -m utc.gui.app
-```
-
-First time only:
-
-```
-python -m pip install -r requirements.txt
 ```
 
 `ffmpeg` does not need installing separately — the `imageio-ffmpeg` wheel ships

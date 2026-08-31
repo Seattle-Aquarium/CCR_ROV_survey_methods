@@ -13,8 +13,15 @@ the CSVs drop straight into the existing VIAME and percent-cover joins.
 
 ## Running it
 
-**Double-click `run_MCAP_to_CSV.bat`**, the same way UTC is launched. It finds
-your Python install and opens the window.
+**Double-click `run_MCAP_to_CSV.bat`.** Nothing needs installing first beyond
+Python 3.10 or newer: on its first run the launcher builds a private
+environment in `%LOCALAPPDATA%\CCR_ROVenv`, installs this tool into it, and
+opens the window. That takes a couple of minutes once.
+
+It is also a step inside UTC — the **Transects** page — which is the better
+route when a flight folder and survey plan already exist, because it reads the
+transect windows from the plan instead of asking for them again. This launcher
+is for extracting CSVs on their own.
 
 1. **Add File(s)** or **Add Folder** — pick the `.mcap` files for the dive. Each
    is listed with the local clock time it covers, and a combined span underneath.
