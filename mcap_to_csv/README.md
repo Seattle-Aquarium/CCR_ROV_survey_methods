@@ -335,10 +335,6 @@ second the ROV was over it.
 
 ## Installing
 
-> **Do not `pip install m2c`.** A completely unrelated package of that name
-> exists on PyPI. This tool is not published there at all — install it from this
-> folder. Its import name is `ccr_m2c` precisely so the two cannot be confused.
-
 From a checkout, in whatever environment you use:
 
 ```bash
