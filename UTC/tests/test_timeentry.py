@@ -16,23 +16,35 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
-def _root():
+@pytest.fixture(scope="module")
+def root():
+    """One Tk root for the whole module.
+
+    Creating and destroying a root per test was flaky -- Tcl intermittently
+    failed to re-initialise ("couldn't read file auto.tcl"), the skip guard
+    caught it, and the tests guarding a real reported bug quietly did not run.
+    A skipped test that looks like a passing one is worse than no test.
+    """
     import customtkinter as ctk
     try:
         r = ctk.CTk()
-    except Exception as ex:                       # no display
+        r.withdraw()
+        r.update()
+    except Exception as ex:                       # genuinely no display
         pytest.skip(f"Tk unavailable: {ex}")
-    r.withdraw()
-    return r
+    yield r
+    try:
+        r.destroy()
+    except Exception:
+        pass
 
 
-def _type(seq: str, start: str = "") -> str:
+def _type(root, seq: str, start: str = "") -> str:
     """Type one character at a time at the caret, like a person does."""
     from utc.gui.widgets import TimeEntry
-    root = _root()
+    e = TimeEntry(root, width=110)
+    e.pack()
     try:
-        e = TimeEntry(root, width=110)
-        e.pack()
         if start:
             e.set(start)
         root.update()
@@ -42,7 +54,7 @@ def _type(seq: str, start: str = "") -> str:
             root.update_idletasks()           # let the caret fix-up run
         return e.get()
     finally:
-        root.destroy()
+        e.destroy()
 
 
 @pytest.mark.parametrize("typed,expected", [
@@ -54,7 +66,7 @@ def _type(seq: str, start: str = "") -> str:
     ("12", "12"),
     ("1", "1"),
 ])
-def test_typing_digits_left_to_right(typed, expected):
+def test_typing_digits_left_to_right(root, typed, expected):
     """The regression: this produced '12:45:63' from '123456'.
 
     Inserting the colon left the caret to its left, so every later digit landed
@@ -62,17 +74,17 @@ def test_typing_digits_left_to_right(typed, expected):
     the caret inside the write trace does nothing, because Tk has not applied
     the new text to the widget yet.
     """
-    assert _type(typed) == expected
+    assert _type(root, typed) == expected
 
 
-def test_pasting_a_whole_time_works():
-    assert _type("", "12:25:45") == "12:25:45"
-    assert _type("", "122545") == "12:25:45"
-    assert _type("", "12-25-45") == "12:25:45"
+def test_pasting_a_whole_time_works(root):
+    assert _type(root, "", "12:25:45") == "12:25:45"
+    assert _type(root, "", "122545") == "12:25:45"
+    assert _type(root, "", "12-25-45") == "12:25:45"
 
 
-def test_extra_digits_are_dropped_not_wrapped():
-    assert _type("12345678") == "12:34:56"
+def test_extra_digits_are_dropped_not_wrapped(root):
+    assert _type(root, "12345678") == "12:34:56"
 
 
 def test_caret_tracks_digits_not_characters():
@@ -87,14 +99,13 @@ def test_caret_tracks_digits_not_characters():
     assert after("12:34:56", 99) == 8     # never past the end
 
 
-def test_completeness_flag():
+def test_completeness_flag(root):
     from utc.gui.widgets import TimeEntry
-    root = _root()
+    e = TimeEntry(root)
     try:
-        e = TimeEntry(root)
         e.set("12:34")
         assert not e.complete
         e.set("123456")
         assert e.complete
     finally:
-        root.destroy()
+        e.destroy()

@@ -162,6 +162,53 @@ def test_output_stem_sanitises():
     assert not any(c in stem for c in '\\/:*?"<>|')
 
 
+def test_missing_timezone_database_fails_loudly():
+    """A wrong time is worse than no time.
+
+    Windows ships no timezone database, so a fresh laptop (or a CI runner)
+    can lack it entirely. The old code fell back to a fixed -8: summer times
+    came out an hour wrong, and local_midnight_epoch's version of the same
+    fallback double-counted and came out EIGHT hours wrong. That silently
+    files imagery into the wrong transect. It must raise instead.
+    """
+    import datetime as _dt
+
+    from utc import survey as S
+
+    def _raises_no_data(hint: str) -> None:
+        for call in (lambda: S.utc_offset_hours(_dt.date(2026, 8, 26)),
+                     lambda: S.local_midnight_epoch(_dt.date(2026, 8, 26))):
+            try:
+                value = call()
+            except S.TimezoneDataMissing as ex:
+                assert hint in str(ex).lower(), ex
+            else:
+                raise AssertionError(
+                    f"returned {value!r} instead of raising — a wrong time "
+                    f"is worse than no time")
+        assert S.timezone_data_available() is False
+
+    saved = S.ZoneInfo
+
+    # The realistic case: zoneinfo exists, but Windows ships no database for
+    # it to read. The message must name the package that fixes it.
+    class _NoData:
+        def __init__(self, *_a, **_k):
+            raise KeyError("no time zone found with key")
+
+    try:
+        S.ZoneInfo = _NoData
+        _raises_no_data("tzdata")
+
+        # The other way it can be missing: no zoneinfo module at all.
+        S.ZoneInfo = None
+        _raises_no_data("zoneinfo")
+    finally:
+        S.ZoneInfo = saved
+
+    assert S.timezone_data_available() is True
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

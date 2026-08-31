@@ -26,6 +26,7 @@ absolute epoch timeline.
 from __future__ import annotations
 
 import csv
+import io
 import json
 import re
 import struct
@@ -342,6 +343,50 @@ def select_channels(reader) -> tuple[dict[str, str], list[str]]:
     return chosen, sorted(video_topics)
 
 
+#: How many messages of a truncated file to read before deciding which channels
+#: to keep. BlueOS declares its channels in the opening chunks, so this only has
+#: to be comfortably past them -- it is not a sample of the whole recording.
+_DISCOVERY_MESSAGES = 200_000
+
+
+def select_channels_streaming(
+    path: Path, health: McapHealth, limit: int = _DISCOVERY_MESSAGES
+) -> tuple[dict[str, str], list[str]]:
+    """`select_channels` for a recording that has no index to read.
+
+    Same ranking as the indexed path -- prefer the autopilot, then the busiest
+    channel -- learned from a bounded first pass instead of the summary. Doing
+    it up front rather than as topics appear matters: a better channel
+    discovered late would already have had the worse one's rows written.
+    """
+    from mcap.reader import NonSeekingReader
+
+    schema_of: dict[str, str] = {}
+    counts: dict[str, int] = {}
+    with open_repaired(path, health) as f:
+        for i, (schema, channel, _msg) in enumerate(
+                NonSeekingReader(f).iter_messages()):
+            schema_of.setdefault(channel.topic, schema.name if schema else "")
+            counts[channel.topic] = counts.get(channel.topic, 0) + 1
+            if i >= limit:
+                break
+
+    by_type: dict[str, list[tuple[tuple[int, int], int, str]]] = {}
+    video_topics: list[str] = []
+    for topic, sname in schema_of.items():
+        if VIDEO_SCHEMA in sname:
+            video_topics.append(topic)
+            continue
+        mt = _msg_type(topic)
+        if mt is None or (mt not in WANTED and mt not in SPECIAL):
+            continue
+        by_type.setdefault(mt, []).append(
+            (_sysid_rank(topic), -counts.get(topic, 0), topic)
+        )
+    chosen = {mt: sorted(v)[0][2] for mt, v in by_type.items()}
+    return chosen, sorted(video_topics)
+
+
 # --------------------------------------------------------------------------
 #  Extraction
 # --------------------------------------------------------------------------
@@ -415,17 +460,55 @@ def extract(
             if progress:
                 progress(done_bytes / total_bytes,
                          f"reading {mpath.name} ({mi + 1}/{len(ordered)})")
+            # A recording the vehicle never closed has no index, so it has to be
+            # read straight through. Everything else is unchanged: the reader is
+            # swapped, not the loop.
+            health = None
             try:
-                with open(mpath, "rb") as f:
-                    reader = make_reader(f)
-                    chosen, video_topics = select_channels(reader)
-                    if not video_topics:
-                        warnings.append(f"{mpath.name}: no video stream")
-                    topics = list(chosen.values()) + video_topics
-                    if not topics:
-                        warnings.append(f"{mpath.name}: nothing recognisable, skipped")
-                        done_bytes += mpath.stat().st_size
-                        continue
+                health = scan_health(mpath)
+            except Exception:
+                pass
+            truncated = bool(health and health.recoverable)
+            if truncated:
+                warnings.append(
+                    f"{mpath.name}: the recorder never closed this file "
+                    f"(power lost mid-dive?). Reading it anyway -- the "
+                    f"last {health.lost_bytes:,} bytes of "
+                    f"{health.size / 1e9:.2f} GB were never written."
+                )
+
+            try:
+                f = (open_repaired(mpath, health) if truncated
+                     else open(mpath, "rb"))
+                with f:
+                    if truncated:
+                        from mcap.reader import NonSeekingReader
+                        reader = NonSeekingReader(f)
+                        chosen, video_topics = select_channels_streaming(
+                            mpath, health)
+                        if not video_topics:
+                            warnings.append(f"{mpath.name}: no video stream")
+                        # NonSeekingReader has no topic filter, so the loop
+                        # below skips what we did not choose.
+                        keep = set(chosen.values()) | set(video_topics)
+                        topics = None
+                        if not keep:
+                            warnings.append(
+                                f"{mpath.name}: nothing recognisable, skipped")
+                            done_bytes += mpath.stat().st_size
+                            continue
+                    else:
+                        keep = None
+                        reader = make_reader(f)
+                        chosen, video_topics = select_channels(reader)
+                        if not video_topics:
+                            warnings.append(f"{mpath.name}: no video stream")
+                        topics = list(chosen.values()) + video_topics
+                        if not topics:
+                            warnings.append(
+                                f"{mpath.name}: nothing recognisable, skipped")
+                            done_bytes += mpath.stat().st_size
+                            continue
 
                     topic_type = {v: k for k, v in chosen.items()}
                     last_kept: dict[str, float] = {}
@@ -435,8 +518,11 @@ def extract(
                     # smoothly *within* a file. Without this a single-mcap flight --
                     # the common case -- would sit at one fraction for the whole of
                     # the longest stage and look hung.
-                    summary = reader.get_summary()
-                    expected = 0
+                    # A truncated file has no summary to count from, so estimate
+                    # from its chunks -- the bar only needs to move smoothly,
+                    # not to be exact.
+                    summary = None if truncated else reader.get_summary()
+                    expected = (health.chunks * 300) if truncated else 0
                     if summary and summary.statistics:
                         per_ch = dict(summary.statistics.channel_message_counts)
                         want = set(topics)
@@ -446,7 +532,11 @@ def extract(
                         )
                     expected = max(1, expected)
                     size = mpath.stat().st_size
-                    for _schema, channel, message in reader.iter_messages(topics=topics):
+                    stream = (reader.iter_messages() if truncated
+                              else reader.iter_messages(topics=topics))
+                    for _schema, channel, message in stream:
+                        if keep is not None and channel.topic not in keep:
+                            continue
                         nread += 1
                         if nread % 20000 == 0 and progress:
                             within = min(1.0, nread / expected)
@@ -564,6 +654,145 @@ def _write_telemetry(tw, mt: str, t: float, raw: bytes) -> int:
 STRAY_GAP_HOURS = 12.0
 
 
+# --------------------------------------------------------------------------
+#  Recovering a recording the vehicle never closed
+# --------------------------------------------------------------------------
+#
+# BlueOS writes each chunk header with a placeholder length and backfills it
+# when the chunk closes, then writes DATA_END, the summary and a footer. Lose
+# power mid-dive and the file ends with a chunk header whose length is still
+# 0xFFFF_FFFF_FFFF_FFFF and no footer at all.
+#
+# Every reader then refuses the whole file, because the index it wants lives at
+# the end. But the data before that point is intact -- on the recording this was
+# written for, 100% of 4.73 GB was valid and only the last 3 kB was the stub.
+# Rather than lose an hour of a dive to three missing kilobytes, the good extent
+# is found and the missing tail is supplied on the fly. The file on disk is
+# opened read-only and never altered.
+
+MCAP_MAGIC = b"\x89MCAP0\r\n"
+_MAX_RECORD = 2 ** 32
+_OP_DATA_END, _OP_FOOTER, _OP_CHUNK = 15, 2, 6
+
+
+@dataclass
+class McapHealth:
+    """What a linear pass over the record headers found."""
+
+    good_end: int                 # byte offset just past the last valid record
+    size: int
+    complete: bool                # has a proper footer and end magic
+    first_time: float | None = None
+    last_time: float | None = None
+    chunks: int = 0
+
+    @property
+    def recoverable(self) -> bool:
+        return not self.complete and self.chunks > 0
+
+    @property
+    def lost_bytes(self) -> int:
+        return max(0, self.size - self.good_end)
+
+
+def scan_health(path: Path) -> McapHealth:
+    """Walk the record headers, seeking rather than reading the payloads.
+
+    Cheap even on multi-gigabyte files -- nine bytes are read per record.
+    Chunk headers carry their own message time range, so the span comes out of
+    the same pass without decompressing anything.
+    """
+    path = Path(path)
+    size = path.stat().st_size
+    pos = len(MCAP_MAGIC)
+    first = last = None
+    chunks = 0
+    with open(path, "rb") as f:
+        if f.read(len(MCAP_MAGIC)) != MCAP_MAGIC:
+            return McapHealth(good_end=0, size=size, complete=False)
+        while pos + 9 <= size:
+            f.seek(pos)
+            hdr = f.read(9)
+            if len(hdr) < 9:
+                break
+            op = hdr[0]
+            ln = int.from_bytes(hdr[1:], "little")
+            if op == 0 or op > 15 or ln > _MAX_RECORD or pos + 9 + ln > size:
+                break
+            if op == _OP_CHUNK:
+                # message_start_time, message_end_time: the first two fields
+                head = f.read(16)
+                if len(head) == 16:
+                    a, b = struct.unpack("<QQ", head)
+                    if a:
+                        first = a / 1e9 if first is None else first
+                        last = b / 1e9
+                chunks += 1
+            pos += 9 + ln
+    # The closing magic is not a record, so a healthy file always ends with
+    # exactly those eight bytes left unwalked. Requiring pos == size instead
+    # would call every intact recording truncated -- and then "repair" it by
+    # appending a second footer to one it already had.
+    complete = False
+    if size - pos == len(MCAP_MAGIC):
+        with open(path, "rb") as f:
+            f.seek(pos)
+            complete = f.read(len(MCAP_MAGIC)) == MCAP_MAGIC
+    return McapHealth(good_end=size if complete else pos, size=size,
+                      complete=complete, first_time=first, last_time=last,
+                      chunks=chunks)
+
+
+def _synthetic_tail() -> bytes:
+    """DATA_END, an empty summary, and a footer -- what the recorder never wrote."""
+    out = bytearray()
+    out += bytes([_OP_DATA_END]) + struct.pack("<Q", 4) + struct.pack("<I", 0)
+    footer = struct.pack("<QQI", 0, 0, 0)      # no summary, no offsets, crc 0
+    out += bytes([_OP_FOOTER]) + struct.pack("<Q", len(footer)) + footer
+    out += MCAP_MAGIC
+    return bytes(out)
+
+
+class _RepairedStream(io.RawIOBase):
+    """The valid bytes of a truncated mcap, followed by a synthetic tail.
+
+    Sequential only, which is all a non-seeking reader needs, and it means no
+    multi-gigabyte copy has to be made to read a damaged recording.
+    """
+
+    def __init__(self, path: Path, good_end: int):
+        self._f = open(path, "rb")
+        self._end = int(good_end)
+        self._tail = _synthetic_tail()
+        self._pos = 0
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, b) -> int:
+        want = len(b)
+        if self._pos < self._end:
+            data = self._f.read(min(want, self._end - self._pos))
+        else:
+            off = self._pos - self._end
+            data = self._tail[off:off + want]
+        b[:len(data)] = data
+        self._pos += len(data)
+        return len(data)
+
+    def close(self) -> None:
+        try:
+            self._f.close()
+        finally:
+            super().close()
+
+
+def open_repaired(path: Path, health: McapHealth):
+    """A buffered stream over a truncated recording, ready for a linear read."""
+    return io.BufferedReader(_RepairedStream(Path(path), health.good_end),
+                             buffer_size=1 << 20)
+
+
 @dataclass
 class McapInfo:
     path: Path
@@ -574,6 +803,9 @@ class McapInfo:
     #: the file is still a cloud placeholder.
     estimated: bool = False
     cloud: bool = False
+    #: The recorder never closed this file, but its data is readable.
+    truncated: bool = False
+    health: McapHealth | None = None
 
     @property
     def usable(self) -> bool:
@@ -634,9 +866,21 @@ def probe_mcaps(
                 info.start = s.statistics.message_start_time / 1e9
                 info.end = s.statistics.message_end_time / 1e9
             else:
-                info.error = "no summary (file may be truncated)"
+                raise ValueError("no summary")
         except Exception as ex:
-            info.error = f"{type(ex).__name__}: {ex}".split("\n")[0][:120]
+            # No usable index. Before writing the recording off, look at what is
+            # actually in it: a dive cut short by a power loss still holds all
+            # its telemetry, and refusing the file loses the whole flight.
+            first_err = f"{type(ex).__name__}: {ex}".split("\n")[0][:120]
+            try:
+                h = scan_health(info.path)
+            except Exception:
+                h = None
+            if h is not None and h.recoverable and h.first_time:
+                info.start, info.end = h.first_time, h.last_time
+                info.health, info.truncated = h, True
+            else:
+                info.error = first_err
         out.append(info)
     return out
 
@@ -663,6 +907,15 @@ def select_for_windows(
     """
     infos = probe_mcaps(mcaps)
     warnings = [f"skipping {i.path.name}: {i.error}" for i in infos if i.error]
+    # Say this before the extraction rather than after it: an operator who sees
+    # a short transect wants to know the recorder died, not to wonder whether
+    # the times were typed wrong.
+    warnings += [
+        f"{i.path.name} was never closed by the recorder (power lost "
+        f"mid-dive?) -- reading it anyway; the last "
+        f"{i.health.lost_bytes:,} bytes are missing"
+        for i in infos if i.truncated and i.health
+    ]
     good = sorted((i for i in infos if i.usable), key=lambda i: i.start or 0.0)
     if not good or not windows:
         return [i.path for i in good], [], warnings

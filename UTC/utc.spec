@@ -10,6 +10,9 @@ ROOT = Path(SPECPATH)
 
 datas = [(str(ROOT / "assets"), "assets")]
 datas += collect_data_files("customtkinter")
+# tzdata is a data-only package: without this the packaged app
+# cannot resolve local times and every transect lands wrong.
+datas += collect_data_files("tzdata")
 
 # imageio-ffmpeg carries the static ffmpeg binary we shell out to
 try:
@@ -23,7 +26,7 @@ a = Analysis(
     ["launch.py"],
     pathex=[str(ROOT)],
     datas=datas,
-    hiddenimports=["PIL._tkinter_finder", "av", "mcap",
+    hiddenimports=["PIL._tkinter_finder", "av", "mcap", "tzdata",
                    "utc.gui.app", "utc.cli"],
     excludes=["matplotlib", "pandas", "scipy", "pytest"],
     noarchive=False,
