@@ -25,8 +25,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import binlog, csv_export, discovery, mcap_extract, overlay, rov_video, sorting
 from . import compose as compose_mod
-from . import csv_export, discovery, mcap_extract, overlay, rov_video, sorting
 from . import ffmpeg_tools as ff
 from . import sync as sync_mod
 from .config import RENDITIONS, AppConfig
@@ -143,6 +143,23 @@ def cache_dir_for(flight_dir: Path, root: Path) -> Path:
     return Path(root) / f"{Path(flight_dir).name}_{h}"
 
 
+def telemetry_csv_for(flight_dir: Path, cache_root: Path) -> tuple[Path | None, str]:
+    """The telemetry a flight should be read from, and where it came from.
+
+    One place decides this, because the answer is not "the cache's
+    telemetry.csv": a flight whose mcap failed can be pointed at the
+    autopilot's dataflash log instead, and every caller has to honour that.
+    Reading the cache file directly is how the banner tool ended up ignoring a
+    BIN override the operator had explicitly chosen.
+    """
+    cache = cache_dir_for(Path(flight_dir), cache_root)
+    over = binlog.override_active(cache)
+    if over:
+        return Path(over["csv"]), f"{Path(over['source']).name} (autopilot log)"
+    csv = cache / "telemetry.csv"
+    return (csv, "mcap") if csv.is_file() else (None, "none")
+
+
 def ensure_telemetry(
     flight_dir: Path,
     app: AppConfig | None = None,
@@ -161,6 +178,20 @@ def ensure_telemetry(
     Returns (store, warnings). Raises if there is no mcap to read.
     """
     app = app or AppConfig()
+
+    # A flight whose telemetry was rebuilt from the autopilot's own dataflash
+    # log reads that instead. Checked before the mcap is even looked for,
+    # because the reason for choosing BIN is usually that the mcap is the
+    # thing that failed.
+    cache = cache_dir_for(flight_dir, app.cache_root)
+    over = binlog.override_active(cache)
+    if over:
+        note = (f"telemetry is coming from {Path(over['source']).name} "
+                f"(the autopilot's own log), not the mcap")
+        if over.get("depth_agreement") is not None:
+            note += f"; clock aligned to r={over['depth_agreement']:.4f}"
+        return TelemetryStore.load(over["csv"]), [note]
+
     disc = discovery.discover(flight_dir)
     if not disc.mcaps:
         raise FileNotFoundError(
@@ -186,7 +217,6 @@ def ensure_telemetry(
     if blocked:
         raise RuntimeError("\n".join(blocked))
 
-    cache = cache_dir_for(flight_dir, app.cache_root)
     ex = mcap_extract.extract(chosen, cache, progress=progress, force=force)
     return TelemetryStore.load(ex.telemetry_csv), warnings + list(ex.warnings)
 
