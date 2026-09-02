@@ -286,3 +286,28 @@ if __name__ == "__main__":
                 print(f"  FAIL  {name}: {ex}")
     print(f"\n{'all passed' if not failed else f'{failed} FAILED'}")
     sys.exit(1 if failed else 0)
+
+
+def test_a_folder_that_is_already_bannered_says_so_plainly():
+    """"0 bannered, 3 skipped" is accurate but reads as a non-event.
+
+    An operator who has just switched telemetry source needs to be told that
+    the existing band is what blocked the re-stamp -- not their new source.
+    That silence is what made a BIN-telemetry re-banner look like a failure.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        folder = Path(td) / "JPG_preview"
+        folder.mkdir()
+        for i in range(3):
+            _make_jpeg(folder / f"a{i}.jpg", when=f"2026:08:24 13:24:1{i}")
+
+        first = ph.banner_folder(folder, _Store(SAMPLE),
+                                 tz_name="America/Los_Angeles")
+        assert first.done == 3, first.summary()
+        assert not any("already carries" in w for w in first.warnings)
+
+        again = ph.banner_folder(folder, _Store(SAMPLE),
+                                 tz_name="America/Los_Angeles")
+        assert again.done == 0 and again.skipped == 3, again.summary()
+        assert any("already carries a banner" in w for w in again.warnings),             again.warnings
+        assert any("originals" in w for w in again.warnings),             "must say where an unstamped copy comes from"

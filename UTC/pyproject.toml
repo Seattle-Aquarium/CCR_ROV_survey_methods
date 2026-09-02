@@ -10,6 +10,9 @@ dependencies = [
     "numpy>=1.24",
     "av>=11.0",
     "mcap>=1.1",
+    # ArduPilot dataflash logs: the autopilot records these itself, so they
+    # survive a companion-computer failure that empties the mcap.
+    "pymavlink>=2.4",
     "imageio-ffmpeg>=0.4.9",
     # Windows has no system timezone database. Without this,
     # local transect times resolve to the wrong instant.

@@ -73,8 +73,13 @@ def test_waits_for_a_lock_that_clears():
 
         def release_soon():
             time.sleep(1.5)
-            handle.close()
+            # Set the flag *before* letting go, not after. Closing the handle
+            # is the instant publish can win, so setting it afterwards leaves a
+            # window in which publish returns and the flag is still clear --
+            # which failed this test intermittently. The claim that publish
+            # really waited is carried by `waited` below, which cannot race.
             released.set()
+            handle.close()
 
         threading.Thread(target=release_soon, daemon=True).start()
         t0 = time.time()

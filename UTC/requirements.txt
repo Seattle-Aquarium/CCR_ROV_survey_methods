@@ -1,6 +1,8 @@
 # CCR ROV Composite
 # Install with:  python -m pip install -r requirements.txt
 mcap>=1.1            # BlueOS telemetry container
+pymavlink>=2.4       # ArduPilot .BIN dataflash logs -- the autopilot's own
+                     # telemetry, the fallback when the MAVLink router dies
 av>=11               # exact-PTS remux of the ROV camera stream (PyAV)
 imageio-ffmpeg>=0.4  # ships a static ffmpeg; skipped if ffmpeg is on PATH
 Pillow>=10           # overlay rendering

@@ -4,19 +4,21 @@ File management and telemetry overlays for ROV survey flights: create a flight's
 folder structure, sort its imagery into transects, stamp telemetry onto stills,
 and build one composite video per transect.
 
-The app has three tabs, following the life of a flight:
+The app has five screens on a left-hand rail, following the life of a flight:
 
-| Tab | What it does |
+| Screen | What it does |
 |---|---|
-| **New flight** | Creates the empty folder structure to offload into. |
-| **Sort & composite** | Enter transect times once, then sort the imagery and/or build composites. |
-| **Banner tools** | Add or remove the telemetry banner on any folder of stills, later. |
+| **Flight setup** | Create a flight's folders, then enter its transect times once. Draws a dive profile with the transects marked, so a mistyped time is obvious before anything is processed. |
+| **Import photos** | Pull stills off the camera card straight into transect folders, renamed and bannered. Copies, never moves. |
+| **Video** | Trim each transect from the GoPro, build composites, and cut short shareable clips. |
+| **Recording health** | Check each `.mcap` for damage, repair the ones the vehicle never closed, and — when a recording is beyond saving — read telemetry from the autopilot's own `.BIN` log instead. |
+| **Banner tools** | Add the telemetry banner to any folder of stills, later. |
 
 ## Folder structure
 
 ```
 2026_08_25_Centennial/
-    logs/                       *.mcap
+    logs/                       *.mcap, *.BIN
     photos/
         GPR/  JPG/              drop the offload here
         transects/
@@ -27,7 +29,11 @@ The app has three tabs, following the life of a flight:
                 JPG_edited_banner/  generated banner copies
             off_transect/       optional home for frames outside a transect
     videos/
-        downward/  forward/  composites/
+        downward/  forward/     source GoPro footage
+        transects/T1/           per-transect trims
+        composites/             finished composites
+        clips/                  short shareable cuts
+    utc_plan.json               sites and transect times
 ```
 
 Sorting **moves and renames** files to `YYYY_MM_DD_hh-mm-ss`, so a raw and its
@@ -69,6 +75,49 @@ flight data.
 
 ## Running it
 
+### For collaborators: nothing to install
+
+Hand them **`Underwater-Telemetry-Compositing.exe`** and they double-click it.
+There is nothing else to install — no Python, no ffmpeg, no fonts, no
+timezone database. It is one self-contained file (~96 MB) carrying its own
+copy of everything:
+
+| bundled | why it has to be |
+|---|---|
+| Python 3.13 runtime | the whole point of the single file |
+| ffmpeg (static) | every trim, composite and clip shells out to it |
+| Montserrat | the Aquarium brand face, for the GUI and the photo banner |
+| `tzdata` | Windows ships no IANA database, and without one every transect time resolves to the wrong instant |
+| `pymavlink` | reads the autopilot's `.BIN` dataflash logs |
+| `mcap`, `PyAV`, Pillow, NumPy, CustomTkinter | telemetry, video, imagery, GUI |
+
+Requirements on their side:
+
+* **Windows 10 or 11, 64-bit.** The build is Windows-only; macOS or Linux
+  would need its own build from the same spec.
+* **Disk space.** The app is small but its working cache is not — reading one
+  dive writes several GB per flight under `%LOCALAPPDATA%`, and a 5 GB
+  recording can produce ~12 GB of intermediates.
+* **An NVIDIA GPU is optional.** UTC runs a two-frame trial encode to find out
+  whether NVENC really works and falls back to the CPU encoder when it does
+  not — it is a speed difference, not a requirement.
+* **First launch shows a SmartScreen warning**, because the executable is not
+  code-signed: *More info* → *Run anyway*. Tell partners to expect this, or it
+  reads as the file being unsafe.
+
+If a partner reports trouble, have them run the build's own health check:
+
+```
+Underwater-Telemetry-Compositing.exe --selftest
+```
+
+It verifies the bundled ffmpeg, fonts and timezone database, that `pymavlink`
+imports, and that overlay rendering really does run across processes — then
+writes the result to `%TEMP%\utc_selftest.txt` for them to send on. A windowed
+build discards stdout, so the file is the point.
+
+### For development
+
 Double-click **`run_UTC.bat`**, or from a terminal:
 
 ```
@@ -91,7 +140,7 @@ python -m pip install pyinstaller
 pyinstaller utc.spec
 ```
 
-Produces `dist/Underwater-Telemetry-Compositing.exe` (~87 MB), which needs no Python install
+Produces `dist/Underwater-Telemetry-Compositing.exe` (~96 MB), which needs no Python install
 and can be handed to a colleague directly. Windows SmartScreen will warn about
 an unsigned executable the first time: *More info* → *Run anyway*.
 
@@ -147,8 +196,15 @@ type, and obviously wrong entries are flagged.
 
 Multiple sites per flight folder are supported.
 
-Entries are saved to `composite_plan.json` in the flight folder and reloaded
+Entries are saved to `utc_plan.json` in the flight folder and reloaded
 automatically next time, so a re-run at a different resolution needs no retyping.
+
+> Transect names must be **unique across the whole plan**, not just within one
+> site, and a reused name is now rejected by validation. Imagery is filed by
+> transect name alone, so two sites that both call a transect `T1` land in one
+> folder and cannot be told apart afterwards — which happened on 2026-08-31 with
+> two ROVs flown the same day. If a second vehicle flew, number its transects
+> onward (`T5`) rather than restarting at `T1`.
 
 ### 3. Output
 
@@ -161,6 +217,42 @@ YYYY-MM-DD_project_site_transect_resolution.mp4
 ```
 
 The 1 Hz CSV lands in `logs/`.
+
+### How long it takes, and where the time goes
+
+Measured on a 20-core laptop, one 10-minute transect (3,600 overlay frames):
+
+| overlay workers | wall clock | frames/s | vs one core |
+|---|---|---|---|
+| 1 | 613.8 s | 5.9 | — |
+| 4 | 176.0 s | 20.5 | 3.5× |
+| 8 | 158.6 s | 22.7 | 3.9× |
+| 12 *(default)* | 115.7 s | 31.1 | **5.3×** |
+| 16 | 103.3 s | 34.8 | 5.9× |
+
+Drawing the overlay was the pipeline's only serial stretch — ffmpeg already
+uses every core when it encodes, and the trims are stream copies bound by the
+disk. Panels are now drawn across processes: telemetry is sampled and footers
+formatted in the parent, so workers receive plain data and neither the
+telemetry store nor the caller's footer callback has to be picklable.
+
+The default leaves two cores free (capped at 12) because a run lasts tens of
+minutes and the machine is normally still in use. Override with
+`AppConfig.overlay_workers` or the `UTC_OVERLAY_WORKERS` environment variable.
+Scaling is well short of linear — past a dozen workers, PNG compression and the
+disk take over — so 16 buys little over 12 while making the laptop sluggish.
+
+Sequences under 400 frames stay on one process: starting a pool costs more than
+it saves. If a pool cannot start at all, the run falls back to one core and
+says so rather than failing.
+
+> Parallel and serial output is verified byte-identical, frame for frame — a
+> composite must not depend on how many cores drew it.
+
+**Trimming is deliberately not parallelised.** It is an ffmpeg stream copy: one
+flight wrote 9.19 GB across three transects in about 24 seconds, roughly
+400-500 MB/s, which is the disk's limit rather than the CPU's. Running them at
+once would divide that bandwidth, not multiply it.
 
 ### While a run is going
 
@@ -220,6 +312,58 @@ rather than guessing.
 
 ---
 
+## When a recording fails
+
+**Arming the ROV starts a new `.mcap`; disarming closes it.** The filename is
+the arm time in UTC, which is why a day's folder holds a file per arm/disarm
+cycle, some of them seconds long. Verified against the autopilot's own arm
+events on two flights: `recorder_20260901_161800.mcap` was created at the
+09:18:00 arm to the second, and closed one second after the 09:30:40 disarm.
+
+The corollary matters: **the close depends on the disarm arriving over
+MAVLink.** Break that path and the recorder never closes the file. Both
+failures we have seen are that, and the fix differs:
+
+| symptom | cause | what UTC does |
+|---|---|---|
+| `.mcap` rejected as corrupt (`RecordLengthLimitExceeded`); the BIN stops at the same instant | power lost mid-dive — the recorder was killed before it could write its footer | **Reads it anyway.** A scan walks the record headers to find the last good byte, then feeds the file plus a synthetic footer to the reader. The recording is opened read-only and never modified. |
+| `.mcap` runs long past the disarm and is truncated; the BIN keeps logging normally | the MAVLink router died — the vehicle flew on, but nothing reached the recorder | The mcap holds video but no telemetry for the rest of the dive. **Switch that flight to the `.BIN`** on *Recording health*. |
+
+Which of the two it is takes seconds to tell: compare where the BIN ends
+against where the mcap ends.
+
+### Reading the autopilot's own log
+
+The flight controller writes `.BIN` dataflash logs to its own storage,
+independent of BlueOS and of the MAVLink router — so they survive exactly the
+failure that empties an mcap. *Recording health* lists them, places them on the
+wall clock, and can make one the flight's telemetry source; everything
+downstream (banner, dive profile, overlay, CSV) then reads it without knowing
+the difference. **"Back to mcap" undoes it**, and the mcaps are never written to.
+
+Placing a BIN on the clock is the hard part, because `TimeUS` is only
+microseconds since the autopilot booted and a submerged vehicle rarely has a
+GPS fix. Two routes, in order of preference:
+
+* **GPS**, when any fix was logged — week and millisecond give UTC directly.
+* **An overlapping mcap.** MAVLink carries `time_boot_ms` stamped by the same
+  autopilot that writes `TimeUS`, so a recording that overlaps the log pins the
+  two clocks together — including a recording whose telemetry died partway,
+  which is the case that matters.
+
+Two things that alignment gets right, both learned the hard way:
+
+* **Each recording is judged alone.** A day's folder holds several power
+  cycles and every one restarts `time_boot_ms` at zero; pooling them produced
+  an offset 25 minutes wrong that looked entirely plausible.
+* **It refuses to vouch for itself without corroboration.** Which recording
+  shares a BIN's boot session is decided by whether the two dive profiles agree
+  on the autopilot's clock — an axis no choice of offset can fake. Below
+  r = 0.98 the alignment is reported as unverified rather than used. A wrong
+  offset files imagery into the wrong transect, which is worse than a blank.
+
+---
+
 ## The telemetry CSV
 
 One row per second across the whole recorded span, so descents, ascents and
@@ -259,7 +403,19 @@ panel contents in `PANEL_ROWS`.
 * Video is HEVC Main 10. The pipeline stays 10-bit for 4K and 1080p so the tonal
   range that shooting with Native white balance exists to preserve survives.
 * Light power is **not** on servo 16. `SERVO_OUTPUT_RAW` carries only port 0 (the
-  eight thrusters); light power is `NAMED_VALUE_FLOAT` / `Lights1`.
+  eight thrusters); light power is `NAMED_VALUE_FLOAT` / `Lights1`. In a
+  dataflash log the same signal is `RCIN.C9` and camera tilt is `RCOU.C10`,
+  confirmed against a flight carrying both (r = +0.97 and +0.94).
+* **Altitude has no status field over MAVLink.** When the DVL loses bottom lock
+  ArduPilot reports `RANGEFINDER.distance = 0.00`, which is not an altitude of
+  zero. The dataflash log does carry a status, and shows those samples are
+  `NoData` — about one in eight while flying a transect. Both readers now drop
+  them, so the banner shows the last good value rather than a false 0.00 m.
+* `BARO` in a dataflash log has **two instances**: `[0]` is the pressure inside
+  the electronics tube (~89 kPa, reads as +15 m of altitude) and `[1]` is the
+  water sensor. Read together they correlate with nothing. Depth is
+  `-CTUN.Alt`, `-POS.RelHomeAlt`, or `-BARO[1].Alt`.
+* Dataflash logs angles in **degrees**; MAVLink uses **radians**.
 * The mcap's `log_time` is written in bursts and is *not* the video frame time —
   that lives inside each `foxglove.CompressedVideo` message.
 * The ROV camera stream is strongly variable-rate, which makes it unreliable to
@@ -279,40 +435,70 @@ UTC/
     utc/
         brand.py            Seattle Aquarium palette, fonts, logos
         config.py           layout, encoding, panel contents
+        layout.py           flight folder structure and scaffolding
         discovery.py        finding inputs in a flight folder
-        mcap_extract.py     mcap -> H.264 + telemetry
-        rov_video.py        exact-PTS remux + constant-rate proxy
-        telemetry.py        indexed lookup + export columns
         survey.py           sites, transects, TC-25 resolution
-        sync.py             light-based verification
+        mcap_extract.py     mcap -> H.264 + telemetry, incl. truncated files
+        mcap_health.py      structural check and repaired copies
+        binlog.py           ArduPilot .BIN as a telemetry source
+        telemetry.py        indexed lookup + export columns
+        ingest.py           card scan and import into transect folders
+        sorting.py          sorting an existing offload into transects
+        photos.py           telemetry stamped onto flight stills
+        depthplot.py        dive profile with transects marked
+        rov_video.py        exact-PTS remux + constant-rate proxy
+        videoclip.py        per-transect trims
+        clips.py            short shareable clips and GIFs
         gauges.py           compass and tilt drawing
         overlay.py          telemetry panel and overlay sequences
         compose.py          ffmpeg composition
+        ffmpeg_tools.py     locating ffmpeg, probing, NVENC detection
         csv_export.py       1 Hz CSV
-        photos.py           telemetry stamped onto flight stills
+        sync.py             light-based verification
         pipeline.py         orchestration
+        selftest.py         --selftest health check for a packaged build
         fsutil.py           lock-tolerant publishing of finished files
         power.py            keeps the machine awake during a run
         gui/                CustomTkinter app
     tests/
 ```
 
-Caching: intermediates (~4 GB per flight) go to
-`%LOCALAPPDATA%\utc_cache\` (an existing `ccr_composite_cache\` from before the rename is reused rather than rebuilt), deliberately **outside** the flight
-folder so Dropbox does not sync disposable working files to the whole team. A
-second run skips straight to compositing. Delete that folder to force a rebuild.
+Caching: intermediates go to `%LOCALAPPDATA%\utc_cache\` (an existing
+`ccr_composite_cache\` from before the rename is reused rather than rebuilt),
+deliberately **outside** the flight folder so Dropbox does not sync disposable
+working files to the whole team. Budget generously — a 5.3 GB recording
+produced ~12 GB of intermediates (raw H.264, muxed proxy, constant-rate proxy,
+telemetry CSV, overlay frames). A second run skips straight to compositing.
+Delete that folder to force a rebuild.
 
 ---
 
 ## Tests
 
 ```
-python tests/test_survey.py          TC-25 parsing and transect resolution
-python tests/test_fsutil.py          publishing over files locked by Excel/Dropbox
-python tests/test_discovery_live.py  discovery against the real flight folders
-python tests/test_render_visual.py   panel + gauge convention grid (writes PNGs)
-python tests/test_gui_smoke.py       constructs the GUI, screenshots both themes
+pytest                  the automated suite: hermetic, no flight data, seconds
+pytest --runlive        also the scripts needing real flights or a display
+ruff check utc tests    lint
 ```
 
-`test_survey.py` is the one to run after touching timecode logic — it covers
-DST, transects crossing midnight, chapter spanning, and filename sanitising.
+Both run in CI on every push and pull request (`.github/workflows/utc-ci.yml`,
+Python 3.11 and 3.13), which also builds the executable.
+
+The suite is hermetic by design — it builds its own mcaps, breaks them the same
+way a real recorder does, and synthesises dataflash messages, so none of it
+needs a flight folder. The files that *do* need real data or a screen
+(`*_live.py`, `debug_*`, the visual renderers, the GUI smoke test) are skipped
+unless `--runlive` is given; collecting them on a machine without the data cost
+about ninety seconds and then failed for reasons unrelated to the change.
+
+Worth knowing which test guards what, since several exist because something
+went wrong in the field:
+
+| file | what it protects |
+|---|---|
+| `test_survey.py` | TC-25 parsing, DST, midnight-crossing transects, chapter spanning. Also that a missing timezone database **raises** rather than silently returning a time eight hours wrong. |
+| `test_mcap_recovery.py` | Reading a recording the vehicle never closed, without modifying it. |
+| `test_binlog.py` | The dataflash reader: barometer instances, degrees vs radians, a lost bottom lock that is not an altitude of zero, and refusing an unverified clock. |
+| `test_photos.py` | The banner is never written twice, orientation is baked correctly, and an already-bannered folder says so plainly. |
+| `test_fsutil.py` | Publishing over files locked by Excel or Dropbox. |
+| `test_timeentry.py` | The six-keystroke time field, against a real Tk widget. |

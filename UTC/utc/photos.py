@@ -705,4 +705,13 @@ def banner_folder(
             rep.done += 1
         if progress:
             progress((i + 1) / len(files), f"{folder.name} {i+1}/{len(files)}")
+
+    # "0 bannered, 211 skipped" is accurate but reads as a non-event, and an
+    # operator who has just switched telemetry source needs to know that the
+    # existing banner is what blocked the re-stamp -- not their new source.
+    if rep.done == 0 and rep.skipped and not rep.failed:
+        rep.warnings.append(
+            f"{folder.name}: every still already carries a banner, so nothing "
+            f"was re-stamped. A band cannot be written twice; to replace it, "
+            f"re-import the untouched originals from the camera card.")
     return rep

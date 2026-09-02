@@ -257,7 +257,29 @@ class SurveyPlan:
             errs.append("no sites added")
         for s in self.sites:
             errs += s.validate()
+        errs += self._duplicate_names()
         return errs
+
+    def _duplicate_names(self) -> list[str]:
+        """A transect name reused across sites is an error, not a warning.
+
+        Imagery is filed by transect name alone -- two ROVs flown on the same
+        day, each with a transect called T1, land in one folder and cannot be
+        told apart afterwards except by reading timestamps out of filenames.
+        That happened on 2026-08-31 and was only noticed because the folder
+        held more frames than the transect could account for. Catch it while
+        it is still a typing mistake.
+        """
+        where: dict[str, list[str]] = {}
+        for site in self.sites:
+            for t in site.transects:
+                where.setdefault(t.name, []).append(site.name)
+        return [
+            f"{name!r} is used by more than one site "
+            f"({', '.join(sites)}); imagery is filed by transect name, so "
+            f"give each one its own name"
+            for name, sites in where.items() if len(sites) > 1
+        ]
 
     # ---- persistence ---------------------------------------------------
 
