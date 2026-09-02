@@ -50,10 +50,26 @@ def _footer(epoch: float) -> str:
     return f"Project  |  Site  |  T1  |  {int(epoch) % 86400:05d}"
 
 
+#: The real thresholds are tuned for a ten-minute transect. Rendering that
+#: many frames several times over would turn a suite that runs in seconds into
+#: one that runs in minutes, and CI runs it on every push. Scaling both
+#: constants down exercises exactly the same branches -- chunking, the floor,
+#: cancellation -- on a fraction of the work.
+_TEST_FLOOR, _TEST_CHUNK = 24, 7
+
+
+@pytest.fixture(autouse=True)
+def small_thresholds(monkeypatch):
+    monkeypatch.setattr(overlay, "_PARALLEL_FLOOR", _TEST_FLOOR)
+    monkeypatch.setattr(overlay, "_CHUNK", _TEST_CHUNK)
+
+
 @pytest.fixture
 def cfg():
-    # Small and fast, but still exercising panel + gauges + footer.
-    return Layout()
+    # Gauges are drawn by a separate module with its own tests, and they are
+    # the slowest part of a frame; the panel and footer are what this file is
+    # about.
+    return Layout(show_gauges=False)
 
 
 def _render(tmp: Path, cfg, n_frames: int, workers: int, **kw) -> Path:
@@ -71,14 +87,14 @@ def _render(tmp: Path, cfg, n_frames: int, workers: int, **kw) -> Path:
 
 def test_parallel_output_is_byte_identical_to_serial(tmp_path, cfg):
     """The whole change is only safe if nobody can tell which path ran."""
-    n = overlay._PARALLEL_FLOOR + 40
+    n = _TEST_FLOOR + 40
     one = _render(tmp_path, cfg, n, workers=1)
     many = _render(tmp_path, cfg, n, workers=4)
     assert _digest(one) == _digest(many)
 
 
 def test_every_frame_is_written_exactly_once(tmp_path, cfg):
-    n = overlay._PARALLEL_FLOOR + 7          # not a multiple of the chunk size
+    n = _TEST_FLOOR + 40 + 3        # deliberately not a multiple of the chunk
     out = _render(tmp_path, cfg, n, workers=4)
     panels = sorted(p.name for p in out.glob("panel_*.png"))
     assert len(panels) == n
@@ -91,7 +107,7 @@ def test_a_short_sequence_stays_on_one_process(tmp_path, cfg, monkeypatch):
     called = []
     monkeypatch.setattr(overlay, "_render_parallel",
                         lambda *a, **k: called.append(1))
-    _render(tmp_path, cfg, overlay._PARALLEL_FLOOR - 1, workers=8)
+    _render(tmp_path, cfg, _TEST_FLOOR - 1, workers=8)
     assert not called, "should not have started a pool"
 
 
@@ -108,8 +124,7 @@ def test_cancel_stops_a_parallel_render(tmp_path, cfg):
     cancel = threading.Event()
     cancel.set()                              # already cancelled
     with pytest.raises(CancelledError):
-        _render(tmp_path, cfg, overlay._PARALLEL_FLOOR + 200,
-                workers=4, cancel=cancel)
+        _render(tmp_path, cfg, _TEST_FLOOR + 60, workers=4, cancel=cancel)
 
 
 def test_cancel_stops_a_serial_render(tmp_path, cfg):
@@ -135,7 +150,7 @@ def test_a_pool_that_will_not_start_falls_back_rather_than_failing(
 
     monkeypatch.setattr(overlay, "_render_parallel", boom)
     msgs = []
-    n = overlay._PARALLEL_FLOOR + 10
+    n = _TEST_FLOOR + 10
     overlay.render_sequence(
         tmp_path / "fb", _Store(), 1_788_000_000.0, n / cfg.overlay_fps, cfg,
         footer_text=_footer, workers=4,
@@ -167,12 +182,12 @@ def test_the_sequence_directory_is_rebuilt_not_appended_to(tmp_path, cfg):
     """A shorter re-render must not leave the previous run's tail behind, or
     ffmpeg reads frames from two different transects."""
     out = tmp_path / "seq"
-    long_n = overlay._PARALLEL_FLOOR + 100
+    long_n = _TEST_FLOOR + 40
     overlay.render_sequence(out, _Store(), 1_788_000_000.0,
                             long_n / cfg.overlay_fps, cfg,
                             footer_text=_footer, workers=4)
     assert len(list(out.glob("panel_*.png"))) == long_n
-    short_n = 30
+    short_n = 5
     overlay.render_sequence(out, _Store(), 1_788_000_000.0,
                             short_n / cfg.overlay_fps, cfg,
                             footer_text=_footer, workers=4)

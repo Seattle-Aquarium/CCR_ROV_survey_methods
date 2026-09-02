@@ -8,8 +8,7 @@ top-level script keeps the normal package context intact.
 """
 
 import multiprocessing
-
-from utc.gui.app import main
+import sys
 
 if __name__ == "__main__":
     # Overlay rendering runs across several processes, and on Windows a new
@@ -17,4 +16,14 @@ if __name__ == "__main__":
     # each worker would reach `main()` and open another copy of the GUI, which
     # would then start workers of its own. It must come before anything else.
     multiprocessing.freeze_support()
+
+    # `--selftest` checks that this build is healthy -- bundled ffmpeg, fonts
+    # and timezone data, and that rendering really does run across processes.
+    # Worth having because the ways a packaged build differs from a working
+    # source tree are exactly the ways it fails silently.
+    if "--selftest" in sys.argv:
+        from utc.selftest import run
+        sys.exit(run(sys.argv))
+
+    from utc.gui.app import main
     main()

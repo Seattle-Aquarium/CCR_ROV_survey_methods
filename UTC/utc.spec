@@ -29,7 +29,8 @@ a = Analysis(
     hiddenimports=["PIL._tkinter_finder", "av", "mcap", "tzdata",
                    "pymavlink", "pymavlink.mavutil",
                    "pymavlink.DFReader",
-                   "utc.gui.app", "utc.cli"],
+                   "utc.gui.app", "utc.cli", "utc.selftest",
+                   "multiprocessing.spawn", "multiprocessing.popen_spawn_win32"],
     excludes=["matplotlib", "pandas", "scipy", "pytest"],
     noarchive=False,
 )

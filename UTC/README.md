@@ -105,6 +105,17 @@ Requirements on their side:
   code-signed: *More info* → *Run anyway*. Tell partners to expect this, or it
   reads as the file being unsafe.
 
+If a partner reports trouble, have them run the build's own health check:
+
+```
+Underwater-Telemetry-Compositing.exe --selftest
+```
+
+It verifies the bundled ffmpeg, fonts and timezone database, that `pymavlink`
+imports, and that overlay rendering really does run across processes — then
+writes the result to `%TEMP%\utc_selftest.txt` for them to send on. A windowed
+build discards stdout, so the file is the point.
+
 ### For development
 
 Double-click **`run_UTC.bat`**, or from a terminal:
@@ -206,6 +217,42 @@ YYYY-MM-DD_project_site_transect_resolution.mp4
 ```
 
 The 1 Hz CSV lands in `logs/`.
+
+### How long it takes, and where the time goes
+
+Measured on a 20-core laptop, one 10-minute transect (3,600 overlay frames):
+
+| overlay workers | wall clock | frames/s | vs one core |
+|---|---|---|---|
+| 1 | 613.8 s | 5.9 | — |
+| 4 | 176.0 s | 20.5 | 3.5× |
+| 8 | 158.6 s | 22.7 | 3.9× |
+| 12 *(default)* | 115.7 s | 31.1 | **5.3×** |
+| 16 | 103.3 s | 34.8 | 5.9× |
+
+Drawing the overlay was the pipeline's only serial stretch — ffmpeg already
+uses every core when it encodes, and the trims are stream copies bound by the
+disk. Panels are now drawn across processes: telemetry is sampled and footers
+formatted in the parent, so workers receive plain data and neither the
+telemetry store nor the caller's footer callback has to be picklable.
+
+The default leaves two cores free (capped at 12) because a run lasts tens of
+minutes and the machine is normally still in use. Override with
+`AppConfig.overlay_workers` or the `UTC_OVERLAY_WORKERS` environment variable.
+Scaling is well short of linear — past a dozen workers, PNG compression and the
+disk take over — so 16 buys little over 12 while making the laptop sluggish.
+
+Sequences under 400 frames stay on one process: starting a pool costs more than
+it saves. If a pool cannot start at all, the run falls back to one core and
+says so rather than failing.
+
+> Parallel and serial output is verified byte-identical, frame for frame — a
+> composite must not depend on how many cores drew it.
+
+**Trimming is deliberately not parallelised.** It is an ffmpeg stream copy: one
+flight wrote 9.19 GB across three transects in about 24 seconds, roughly
+400-500 MB/s, which is the disk's limit rather than the CPU's. Running them at
+once would divide that bandwidth, not multiply it.
 
 ### While a run is going
 
@@ -409,6 +456,7 @@ UTC/
         csv_export.py       1 Hz CSV
         sync.py             light-based verification
         pipeline.py         orchestration
+        selftest.py         --selftest health check for a packaged build
         fsutil.py           lock-tolerant publishing of finished files
         power.py            keeps the machine awake during a run
         gui/                CustomTkinter app
