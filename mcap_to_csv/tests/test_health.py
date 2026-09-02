@@ -37,6 +37,15 @@ def build(b, *, seconds=20, flags=DEAD_RECKONING, health=ALL,
         b.add(t, "GPS_RAW_INT",
               {"lat": 0, "lon": 0, "fix_type": {"type": "GPS_FIX_TYPE_NO_GPS"},
                "satellites_visible": 0})
+        # The columns the report traces back to a message. Without these a
+        # "clean" dive would still be reported as having no altitude source,
+        # which would be true of the fixture but not of a real flight.
+        b.add(t, "RANGEFINDER", {"distance": 2.0, "voltage": 0})
+        b.add(t, "ATTITUDE", {"roll": 0.0, "pitch": 0.0, "yaw": 0.0})
+        b.add(t, "VFR_HUD", {"groundspeed": 0.4, "alt": -5.0, "heading": 0})
+        b.add(t, "VISION_POSITION_DELTA",
+              {"time_delta_usec": 1000000, "position_delta": [0.4, 0.0, 0.0],
+               "confidence": 99.0}, sysid=255, compid=0)
     for sev, text in texts:
         b.add(BASE_EPOCH + 1, "STATUSTEXT",
               {"severity": {"type": sev}, "text": text, "id": 0, "chunk_seq": 0})

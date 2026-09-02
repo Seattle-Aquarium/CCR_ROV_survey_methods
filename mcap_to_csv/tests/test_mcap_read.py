@@ -299,7 +299,54 @@ def test_footprint_scales_with_altitude():
     assert calculate_area(-1.0) == 0.0
 
 
-def test_depth_prefers_vfr_then_relative_alt_then_pressure():
+def test_a_constant_vfr_alt_does_not_become_depth():
+    """The 2026-08-26 failure: VFR_HUD.alt sat at -0.61 m for a whole dive that
+    reached 17 m, and the old rule believed it because -0.61 < -0.5."""
+    n = 40
+    df = pd.DataFrame({
+        "VFR_alt": [-0.61] * n,                                  # never moves
+        "Relative_alt_m": list(np.linspace(-0.2, -17.3, n)),     # the real dive
+        "NEDz": [np.nan] * n,
+        "Pressure_abs_hPa": [np.nan] * n,
+    })
+    out = _add_depth(df)
+
+    assert out["Depth_Source"].eq("GLOBAL_POSITION_INT").all()
+    assert out["Depth"].min() == pytest.approx(-17.3)
+    assert out["Depth"].std() > 1.0, "depth is flat -- the constant source won"
+
+
+def test_a_varying_vfr_alt_is_still_used_when_it_is_the_only_source():
+    n = 40
+    df = pd.DataFrame({
+        "VFR_alt": list(np.linspace(-0.6, -12.0, n)),
+        "Relative_alt_m": [np.nan] * n,
+        "NEDz": [np.nan] * n,
+        "Pressure_abs_hPa": [np.nan] * n,
+    })
+    out = _add_depth(df)
+
+    assert out["Depth_Source"].eq("VFR_alt").all()
+    assert out["Depth"].min() == pytest.approx(-12.0)
+
+
+def test_a_constant_source_is_better_than_no_depth_at_all():
+    """If nothing varies, the reading is still reported rather than dropped."""
+    n = 20
+    df = pd.DataFrame({
+        "VFR_alt": [0.0] * n,
+        "Relative_alt_m": [-3.0] * n,          # a genuine hover holds still
+        "NEDz": [np.nan] * n,
+        "Pressure_abs_hPa": [np.nan] * n,
+    })
+    out = _add_depth(df)
+
+    assert out["Depth"].eq(-3.0).all()
+    assert out["Depth_Source"].eq("GLOBAL_POSITION_INT").all()
+
+
+def test_depth_prefers_the_autopilot_depth_then_falls_through():
+    """The autopilot's own baro depth leads, then VFR_alt, then pressure."""
     df = pd.DataFrame({
         "VFR_alt": [-3.0, 0.0, 0.0, np.nan],
         "Relative_alt_m": [-9.0, -4.0, np.nan, np.nan],
@@ -308,13 +355,12 @@ def test_depth_prefers_vfr_then_relative_alt_then_pressure():
     })
     out = _add_depth(df)
 
-    assert out["Depth"].iloc[0] == pytest.approx(-3.0)
-    assert out["Depth_Source"].iloc[0] == "VFR_alt"
-    # a VFR_alt of 0.0 is not a real reading, so row 1 falls through to the
-    # autopilot's own depth even though VFR_alt is present
+    assert out["Depth"].iloc[0] == pytest.approx(-9.0)
+    assert out["Depth_Source"].iloc[0] == "GLOBAL_POSITION_INT"
     assert out["Depth"].iloc[1] == pytest.approx(-4.0)
     assert out["Depth_Source"].iloc[1] == "GLOBAL_POSITION_INT"
-    # row 2 has neither, so the external pressure sensor answers
+    # rows 2 and 3 have no autopilot depth, and a VFR_alt of 0.0 is not a real
+    # reading, so the external pressure sensor answers
     assert out["Depth"].iloc[2] == pytest.approx(0.0, abs=1e-9)
     assert out["Depth_Source"].iloc[2] == "SCALED_PRESSURE2"
     assert out["Depth"].iloc[3] == pytest.approx(-1.0, abs=0.02)

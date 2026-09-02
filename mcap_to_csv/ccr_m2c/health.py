@@ -108,6 +108,7 @@ class HealthReport:
     clipping: tuple[int, int, int] = (0, 0, 0)
     messages: list[tuple[int, str, str, int]] = field(default_factory=list)
     gps_fix_types: dict[str, float] = field(default_factory=dict)
+    feeds: object | None = None          # ccr_m2c.feeds.FeedReport
     had_absolute_position: bool = False
     warnings: list[str] = field(default_factory=list)
 
@@ -148,6 +149,9 @@ class HealthReport:
             out.append(f"Accelerometer clipping occurred ({self.clipping}); "
                        "the IMU saturated, which corrupts attitude.")
 
+        if self.feeds is not None:
+            out.extend(self.feeds.concerns())
+
         cv = self.variances.get("compass_variance")
         if cv and cv[2] > 0.5:
             out.append(
@@ -177,6 +181,10 @@ class HealthReport:
         for name, (med, p95, mx) in self.variances.items():
             mark = "  <-- OVER" if mx > VARIANCE_LIMIT else ""
             add(f"   {name:<22} median {med:6.3f}   p95 {p95:6.3f}   max {mx:6.3f}{mark}")
+
+        if self.feeds is not None:
+            add("")
+            L.extend(self.feeds.lines())
 
         add("")
         add("Sensor health")
@@ -349,6 +357,13 @@ def read_health(paths: Sequence[Path | str], *,
         diff = np.degrees((np.unwrap(A[:, 1]) - d + np.pi) % (2 * np.pi) - np.pi)
         rep.compass["EKF vs DCM yaw, deg (median)"] = float(np.median(np.abs(diff)))
         rep.compass["EKF vs DCM yaw, deg (p95)"] = float(np.percentile(np.abs(diff), 95))
+
+    try:
+        from .feeds import read_feeds
+        rep.feeds = read_feeds(ordered)
+        rep.warnings.extend(rep.feeds.warnings)
+    except Exception as ex:
+        rep.warnings.append(f"could not work out column sources: {_brief(ex)}")
 
     rep.messages = [(r, s, t, c) for (r, s, t), c in
                     sorted(texts.items(), key=lambda kv: (kv[0][0], -kv[1]))][:12]

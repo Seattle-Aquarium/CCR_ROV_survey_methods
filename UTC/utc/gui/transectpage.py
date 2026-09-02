@@ -116,7 +116,77 @@ class TransectPage(ctk.CTkFrame):
         self.note = label(c4.body, "", muted=True)
         self.note.grid(row=1, column=0, sticky="w", pady=(8, 0))
 
+        # ---- 5. sensor health -----------------------------------------
+        c5 = Card(body, "5.  Sensor health",
+                  "Where each column's numbers actually came from, and whether "
+                  "the instruments behind them behaved. Worth a look before "
+                  "trusting a dive: altitude drives Width and Area, and a yaw "
+                  "error rotates the whole DVL track.")
+        c5.grid(row=4, column=0, sticky="ew", pady=(0, 12))
+        c5.body.grid_columnconfigure(0, weight=1)
+
+        hrow = ctk.CTkFrame(c5.body, fg_color="transparent")
+        hrow.grid(row=0, column=0, sticky="w")
+        self.health_btn = button(hrow, "Check sensors", self._check_health,
+                                 "primary", width=150)
+        self.health_btn.pack(side="left")
+        self.health_note = label(hrow, "Reads the recordings; takes a moment.",
+                                 muted=True)
+        self.health_note.pack(side="left", padx=10)
+
+        # Its own box rather than the shared footer log: the report is 40-odd
+        # lines meant to be read together, and the footer scrolls away under
+        # whatever runs next.
+        self.health_box = ctk.CTkTextbox(c5.body, height=260, font=T.FONT_MONO,
+                                         fg_color=T.FIELD_BG, text_color=T.TEXT,
+                                         border_width=1, border_color=T.BORDER,
+                                         corner_radius=6, wrap="none")
+        self.health_box.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        self._set_health("Not checked yet.")
+
         self.refresh()
+
+    # ------------------------------------------------------------------
+
+    def _set_health(self, text: str) -> None:
+        self.health_box.configure(state="normal")
+        self.health_box.delete("1.0", "end")
+        self.health_box.insert("1.0", text)
+        self.health_box.configure(state="disabled")
+
+    def _check_health(self) -> None:
+        mod = _extractor()
+        if mod is None:
+            messagebox.showerror(APP_NAME, _MISSING)
+            return
+        disc = getattr(self.app, "discovery", None)
+        mcaps = list(disc.mcaps) if disc else []
+        if not mcaps:
+            messagebox.showinfo(APP_NAME, "Select a flight folder with .mcap "
+                                          "recordings first.")
+            return
+
+        from ccr_m2c.health import read_health
+
+        def work(progress, cancel):
+            return read_health(mcaps, progress=progress)
+
+        def done(report) -> None:
+            # Back on the main thread, so the textbox can be touched safely.
+            self.health_btn.configure(state="normal")
+            if isinstance(report, Exception) or report is None:
+                self._set_health(f"Could not read the recordings: {report}")
+                return
+            self._set_health("\n".join(report.lines()))
+            n = len(report.concerns())
+            self.health_note.configure(
+                text="Nothing of concern." if not n
+                else f"{n} thing(s) worth looking at — see the end of the report.")
+
+        self._set_health("Reading...")
+        self.health_btn.configure(state="disabled")
+        if not self.app.submit(work, "Checking sensor health", on_done=done):
+            self.health_btn.configure(state="normal")
 
     # ------------------------------------------------------------------
 

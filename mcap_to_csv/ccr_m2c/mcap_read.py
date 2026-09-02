@@ -875,12 +875,30 @@ def _to_frame(buckets: dict[int, _Bucket]) -> tuple[pd.DataFrame, dict[str, int]
     return df, {str(k): int(v) for k, v in counts.items()}
 
 
+#: A depth source has to move. Below this standard deviation, over a whole
+#: recording, it is a fixed offset rather than a measurement.
+MIN_DEPTH_VARIATION_M = 0.10
+
+
+def _varies(values: pd.Series, threshold: float = MIN_DEPTH_VARIATION_M) -> bool:
+    v = values.dropna()
+    return len(v) > 1 and float(v.std()) >= threshold
+
+
 def _add_depth(df: pd.DataFrame) -> pd.DataFrame:
     """Depth, negative-down, from whichever source the recording actually has.
 
-    The order of preference starts where tlog_to_csv.py did -- VFR_HUD.alt, when
-    it is genuinely reporting -- then falls through to sources a .tlog did not
-    need: the autopilot's own baro depth, and finally the raw external pressure.
+    ``GLOBAL_POSITION_INT.relative_alt`` leads: it is the autopilot's own
+    baro-derived depth and the same number UTC's overlays use.
+
+    tlog_to_csv.py preferred ``VFR_HUD.alt``, which was right for a .tlog --
+    there it carried the same value. It is not safe here. On the 2026-08-26
+    vehicle that field sits at a constant -0.61 m for the whole dive: low enough
+    to pass a "is it below -0.5" test, while the ROV was working at 17 m. Taking
+    it produced a Depth column that was flat wrong and looked plausible.
+
+    So a candidate now has to *vary* before it is believed. A depth that never
+    moves across a whole recording is a fixed offset, not a measurement.
     """
     vfr = pd.to_numeric(df.get("VFR_alt"), errors="coerce")
     rel = pd.to_numeric(df.get("Relative_alt_m"), errors="coerce")
@@ -896,7 +914,14 @@ def _add_depth(df: pd.DataFrame) -> pd.DataFrame:
         depth[ok] = values[ok]
         source[ok] = label
 
-    fill(vfr, "VFR_alt", mask=(vfr < -0.5))
+    if _varies(rel):
+        fill(rel, "GLOBAL_POSITION_INT")
+    if _varies(vfr):
+        fill(vfr, "VFR_alt", mask=(vfr < -0.5))
+    if _varies(ned):
+        fill(ned, "NEDz")
+    # Whatever is left: a source that did not vary is still better than nothing,
+    # so they are retried without the guard before falling through to pressure.
     fill(rel, "GLOBAL_POSITION_INT")
     fill(ned, "NEDz")
 

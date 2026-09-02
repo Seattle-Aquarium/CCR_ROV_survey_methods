@@ -140,6 +140,21 @@ file rather than a nominal 1013.25 hPa.
 The `Depth_Source` column records which source produced each row. The preference
 order is unchanged, so a recording where `VFR_HUD` works still behaves as before.
 
+### Depth no longer trusts `VFR_HUD.alt` first
+
+tlog_to_csv.py preferred `VFR_HUD.alt`, which was right for a `.tlog` — there it
+carried the depth. It is not safe here. On the 2026-08-26 vehicle that field
+sits at a constant **−0.61 m for the whole dive**: low enough to pass the old
+"is it below −0.5 m" test, while the ROV was working at 17 m. The result was a
+`Depth` column that was flat wrong and looked entirely plausible.
+
+`GLOBAL_POSITION_INT.relative_alt` — the autopilot's own baro depth, and the
+same number UTC's overlays use — now leads, and any candidate has to *vary*
+across the recording before it is believed. A depth that never moves is a fixed
+offset, not a measurement.
+
+`Depth_Source` still records which one answered, per row.
+
 ### `NEDz` is empty
 
 It was `LOCAL_POSITION_NED.z`. The column is kept so the schema still matches,
