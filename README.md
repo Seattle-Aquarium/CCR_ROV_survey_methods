@@ -96,6 +96,24 @@ Our goal is to create an **open-source reference** that allows other research gr
 
 ## 🧮 Telemetry Processing  
 
+### Underwater Telemetry Compositing (UTC)
+
+A Windows desktop application that manages a survey flight end to end: it builds
+the flight's folder structure, imports stills off the camera card into transect
+folders, stamps MAVLink telemetry onto the imagery, trims and composites the
+video, and exports a 1 Hz telemetry CSV.
+
+**Collaborators need nothing installed.** It ships as a single ~96 MB
+executable carrying its own Python runtime, ffmpeg, fonts and timezone
+database — download, double-click, run. Windows 10/11, 64-bit.
+
+It also reads recordings that failed in the field: an `.mcap` the vehicle never
+closed (power lost mid-dive) is repaired on the fly without modifying the file,
+and when the MAVLink router dies mid-flight the telemetry is recovered from the
+autopilot's own `.BIN` dataflash log instead.
+
+📁 [**`UTC/`**](UTC/) — see [`UTC/README.md`](UTC/README.md) for the workflow,
+how the clocks are tied together, and what to do when a recording fails.
 
 ### Code 
 
