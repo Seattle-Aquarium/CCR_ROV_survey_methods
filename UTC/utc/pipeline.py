@@ -487,6 +487,7 @@ def _render_one(
         ovl_dir, store, r.epoch_start, dur, app.layout,
         footer_text=footer if app.layout.show_footer else None,
         progress=op, cancel=cancel,
+        workers=app.overlay_workers,
     )
 
     def cp(f: float, m: str = "") -> None:

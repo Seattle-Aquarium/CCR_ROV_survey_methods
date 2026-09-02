@@ -229,3 +229,9 @@ class AppConfig:
 
     #: The GoPro audio track is thruster whine.
     keep_audio: bool = False
+
+    #: Processes used to draw overlay frames. 0 = choose automatically, which
+    #: leaves two cores free for whatever else the operator is doing. Drawing
+    #: panels is the pipeline's one serial stretch -- ffmpeg already uses every
+    #: core when it encodes -- so this is where the wall clock is won.
+    overlay_workers: int = 0
