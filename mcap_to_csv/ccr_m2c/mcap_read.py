@@ -879,6 +879,23 @@ def _to_frame(buckets: dict[int, _Bucket]) -> tuple[pd.DataFrame, dict[str, int]
 #: recording, it is a fixed offset rather than a measurement.
 MIN_DEPTH_VARIATION_M = 0.10
 
+#: The order depth sources are tried in, as
+#: (MAVLink message, field, the column it lands in, what it physically is).
+#:
+#: Declared once and used twice: ``_add_depth`` fills the column from it, and
+#: ``feeds.py`` reports provenance from it. They were separate lists until the
+#: order changed in one and not the other, and the health report then spent a
+#: release confidently naming the wrong source.
+DEPTH_PRECEDENCE: tuple[tuple[str, str, str, str], ...] = (
+    ("GLOBAL_POSITION_INT", "relative_alt", "Relative_alt_m",
+     "the autopilot's own baro depth"),
+    ("VFR_HUD", "alt", "VFR_alt",
+     "the HUD's altitude field, which on some vehicles is a fixed offset"),
+    ("LOCAL_POSITION_NED", "z", "NEDz", "the EKF's local-frame z"),
+    ("SCALED_PRESSURE2", "press_abs", "Pressure_abs_hPa",
+     "the external pressure sensor"),
+)
+
 
 def _varies(values: pd.Series, threshold: float = MIN_DEPTH_VARIATION_M) -> bool:
     v = values.dropna()
@@ -900,10 +917,6 @@ def _add_depth(df: pd.DataFrame) -> pd.DataFrame:
     So a candidate now has to *vary* before it is believed. A depth that never
     moves across a whole recording is a fixed offset, not a measurement.
     """
-    vfr = pd.to_numeric(df.get("VFR_alt"), errors="coerce")
-    rel = pd.to_numeric(df.get("Relative_alt_m"), errors="coerce")
-    ned = -pd.to_numeric(df.get("NEDz"), errors="coerce")
-
     depth = pd.Series(np.nan, index=df.index, dtype=float)
     source = pd.Series("", index=df.index, dtype=object)
 
@@ -914,24 +927,34 @@ def _add_depth(df: pd.DataFrame) -> pd.DataFrame:
         depth[ok] = values[ok]
         source[ok] = label
 
-    if _varies(rel):
-        fill(rel, "GLOBAL_POSITION_INT")
-    if _varies(vfr):
-        fill(vfr, "VFR_alt", mask=(vfr < -0.5))
-    if _varies(ned):
-        fill(ned, "NEDz")
-    # Whatever is left: a source that did not vary is still better than nothing,
-    # so they are retried without the guard before falling through to pressure.
-    fill(rel, "GLOBAL_POSITION_INT")
-    fill(ned, "NEDz")
+    def as_depth(message: str, column: str) -> tuple[pd.Series, str, object]:
+        """That source's column, converted to metres negative-down."""
+        raw = pd.to_numeric(df.get(column), errors="coerce")
+        if message == "LOCAL_POSITION_NED":
+            return -raw, "NEDz", None                     # z is positive-down
+        if message == "SCALED_PRESSURE2":
+            if not raw.notna().any():
+                return raw, "SCALED_PRESSURE2", None
+            # Surface pressure comes from a low percentile of the file rather
+            # than a nominal 1013.25 hPa, so a genuinely high- or low-pressure
+            # day does not offset every depth in the record.
+            p0 = float(np.nanpercentile(raw.to_numpy(dtype=float), 1))
+            return (-(raw - p0) * 100.0 / (WATER_DENSITY * GRAVITY),
+                    "SCALED_PRESSURE2", None)
+        if message == "VFR_HUD":
+            # 0.0 is what this field reads when it is not reporting at all
+            return raw, "VFR_alt", (raw < -0.5)
+        return raw, message, None
 
-    press = pd.to_numeric(df.get("Pressure_abs_hPa"), errors="coerce")
-    if press.notna().any():
-        # Surface pressure is taken from a low percentile of the file rather than
-        # a nominal 1013.25 hPa, so a genuinely high- or low-pressure day does
-        # not offset every depth in the record.
-        p0 = float(np.nanpercentile(press.to_numpy(dtype=float), 1))
-        fill(-(press - p0) * 100.0 / (WATER_DENSITY * GRAVITY), "SCALED_PRESSURE2")
+    prepared = [(as_depth(msg, col), msg) for msg, _f, col, _d in DEPTH_PRECEDENCE]
+
+    # First pass: only sources that actually move. Second: whatever is left,
+    # since a source that held still is better than no depth at all.
+    for require_variation in (True, False):
+        for (values, label, mask), _msg in prepared:
+            if require_variation and not _varies(values):
+                continue
+            fill(values, label, mask=mask)
 
     df["Depth"] = depth
     # mask, not replace: replacing "" with NaN on an object column triggers

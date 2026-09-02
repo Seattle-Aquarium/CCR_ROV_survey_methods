@@ -133,6 +133,8 @@ class HealthReport:
                     "the filter was rejecting or fighting that sensor."
                 )
         for sensor, pct in sorted(self.unhealthy.items(), key=lambda kv: -kv[1]):
+            if pct < 1.0:
+                continue     # a handful of samples, not a fault
             # The AHRS bit tracks "no absolute position" rather than a broken
             # attitude solution, so on a no-GPS dive it is always set and saying
             # so here would cry wolf on every survey the team flies.
@@ -185,6 +187,7 @@ class HealthReport:
         if self.feeds is not None:
             add("")
             L.extend(self.feeds.lines())
+            L.extend(self.feeds.transect_lines())
 
         add("")
         add("Sensor health")
@@ -193,6 +196,8 @@ class HealthReport:
                 note = ""
                 if _short(sensor) == "AHRS" and not self.had_absolute_position:
                     note = "   (expected with no GPS/USBL: it means no absolute position)"
+                if pct < 1.0:
+                    continue
                 add(f"   unhealthy {pct:5.1f}% of the dive: {_describe(sensor)}{note}")
         else:
             add("   every enabled sensor stayed healthy")
@@ -237,6 +242,7 @@ class HealthReport:
 
 
 def read_health(paths: Sequence[Path | str], *,
+                transects: Sequence = (),
                 progress: ProgressCB | None = None) -> HealthReport:
     """Collect the diagnostic messages from one or more recordings."""
     ordered, warnings = select_mcaps(paths)
@@ -360,7 +366,7 @@ def read_health(paths: Sequence[Path | str], *,
 
     try:
         from .feeds import read_feeds
-        rep.feeds = read_feeds(ordered)
+        rep.feeds = read_feeds(ordered, transects=transects)
         rep.warnings.extend(rep.feeds.warnings)
     except Exception as ex:
         rep.warnings.append(f"could not work out column sources: {_brief(ex)}")

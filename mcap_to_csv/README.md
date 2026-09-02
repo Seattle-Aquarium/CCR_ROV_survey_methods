@@ -184,6 +184,21 @@ it is rejecting or straining. `compass_variance` matters more than it looks —
 a yaw error rotates the entire DVL track about its start point, and no amount
 of good DVL data corrects for it.
 
+### Scope it to the transects
+
+```bash
+python -m ccr_m2c --health logs/*.mcap --plan utc_plan.json
+```
+
+Most of a dive is not transect. On 2026-09-02 an 85-minute recording held about
+42 minutes of transect, and the whole-dive figures were dominated by the surface
+intervals between them: 638 altitude dropouts, the worst 275 seconds. Inside the
+transects the same recording reads 88–94% coverage with worst gaps of 3–7
+seconds — a completely different, and actually actionable, picture.
+
+Given a plan (or `--transect`), the report adds a per-transect breakdown and
+judges the dropout warnings on the transects alone.
+
 One judgement is built in. Without GPS or a locked USBL, ArduSub reports the
 **AHRS** health bit unhealthy for the whole dive: it means "no absolute
 position", not "the attitude solution is broken". Flagging that as a fault would

@@ -175,7 +175,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.health:
-        rep = read_health(paths, progress=_spin)
+        # With a plan or --transect, the report also scopes itself to the
+        # transects: most of a dive is transit, and whole-dive dropout
+        # counts say nothing about the part being analysed.
+        specs = list(args.transect)
+        if args.plan:
+            try:
+                for site in load_plan(args.plan).sites:
+                    specs.extend(site.transects)
+            except (ValueError, AttributeError) as ex:
+                print(f"  ! could not read the plan: {ex}", file=sys.stderr)
+        rep = read_health(paths, transects=specs, progress=_spin)
         print(_CLEAR, end=_CR, file=sys.stderr)
         print("\n".join(rep.lines()))
         return 0
