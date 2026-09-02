@@ -113,11 +113,20 @@ and when the MAVLink router dies mid-flight the telemetry is recovered from the
 autopilot's own `.BIN` dataflash log instead.
 
 📁 [**`UTC/`**](UTC/) — see [`UTC/README.md`](UTC/README.md) for the workflow,
-how the clocks are tied together, and what to do when a recording fails.
+how the clocks are tied together, what every telemetry column means and where
+it came from, and what to do when a recording fails.
 
 ### Code 
 
 * `mcap_to_csv/`: **The current tool.** BlueOS 1.5 records telemetry as `.mcap` rather than writing `.tlog` files, so this replaces `tlog_to_csv.py` for new dives. Same transect windows, same per-second averaging, same output columns — the CSVs drop straight into the existing VIAME and percent-cover joins — plus a Leaflet map of every transect at the site. Run `run_MCAP_to_CSV.bat`, or build `MCAP-to-CSV.exe` from the included PyInstaller spec. See [mcap_to_csv/README.md](mcap_to_csv/README.md), which also documents what had to change: `LOCAL_POSITION_NED` is not in these recordings, so the DVL track is rebuilt from `VISION_POSITION_DELTA`.
+
+* **Knowing what the numbers are worth.** Both the standalone tool and UTC's
+  Transects step can report where each column's values actually came from and
+  whether the instruments behind them behaved — which aiding sources the EKF
+  had, its innovation variances, the compass, and the dropouts that leave holes
+  in a transect. Run `python -m ccr_m2c --health logs/*.mcap --plan utc_plan.json`,
+  or use step 5 on the Transects page. Column-by-column provenance is in
+  [mcap_to_csv/COLUMNS.md](mcap_to_csv/COLUMNS.md).
 
 * `tlog_to_csv.py`: This script processes `.tlog` files when GPS and DVL data are fused via an Extended Kalman Filter (EKF), producing more accurate tracks than using GPS or DVL alone. Instead of calculating `DVLlat`/`DVLlon`, this script incorporates the fused position data (`GLOBAL_POSITION_INT`) for improved accuracy. Kept for reprocessing dives recorded before the switch to `.mcap`.
 <p align="center">
