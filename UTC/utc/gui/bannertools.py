@@ -183,15 +183,21 @@ class BannerToolsTab(ctk.CTkFrame):
         return SyncConfig().timezone
 
     def _store_for(self, folder: layout.ImageFolder):
-        """Telemetry for the flight that owns this folder, or None."""
+        """Telemetry for the flight that owns this folder, or None.
+
+        Goes through `telemetry_csv_for` rather than reaching into the cache,
+        so a flight the operator switched to its autopilot log gets bannered
+        from that log and not from the mcap it was switched away from.
+        """
         from ..config import AppConfig
-        from ..pipeline import cache_dir_for
+        from ..pipeline import telemetry_csv_for
         from ..telemetry import TelemetryStore
         if folder.flight is None:
             return None
-        csv = cache_dir_for(folder.flight, AppConfig().cache_root) / "telemetry.csv"
-        if not csv.is_file():
+        csv, source = telemetry_csv_for(folder.flight, AppConfig().cache_root)
+        if csv is None:
             return None
+        self._last_source = source
         return TelemetryStore.load(csv)
 
     def _add(self) -> None:
@@ -220,6 +226,12 @@ class BannerToolsTab(ctk.CTkFrame):
         copies = [f.label for f, _, t in jobs if t != f.path]
         note = ("\n\nWriting copies to a sibling folder for:\n  "
                 + "\n  ".join(copies)) if copies else ""
+        # Name the source. The banner is irreversible, and the difference
+        # between an mcap and the autopilot log is exactly what an operator
+        # who switched sources is trying to confirm.
+        src = getattr(self, "_last_source", None)
+        if src:
+            note = f"\n\nTelemetry source: {src}" + note
         if not messagebox.askyesno(
             self.app.title(),
             f"Add the telemetry banner to {len(jobs)} folder(s)?{note}"

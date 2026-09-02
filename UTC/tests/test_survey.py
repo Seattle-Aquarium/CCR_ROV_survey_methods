@@ -146,6 +146,34 @@ def test_plan_validation_catches_overlap_and_dupes():
     assert any("no sites" in e for e in SurveyPlan([]).validate())
 
 
+def test_two_sites_may_not_share_a_transect_name():
+    """The 2026-08-31 bug: two ROVs flown the same day, each with a "T1".
+
+    Imagery is filed by transect name alone, so both sets landed in one folder
+    -- 232 frames in a transect that held 191. Nothing complained, because the
+    duplicate check only ever looked inside a single site.
+    """
+    p = SurveyPlan([
+        Site("Magnolia_Lutris", "PoS", "2026-08-31",
+             [Transect("T1", "10:02:27", "10:12:00")]),
+        Site("Magnolia_Nereo", "PoS", "2026-08-31",
+             [Transect("T1", "12:54:59", "12:57:01")]),
+    ])
+    errs = p.validate()
+    assert any("more than one site" in e for e in errs), errs
+    assert any("Magnolia_Lutris" in e and "Magnolia_Nereo" in e for e in errs), errs
+
+    # renaming the second one clears it -- the times themselves were fine
+    p.sites[1].transects[0].name = "T5"
+    assert p.validate() == []
+
+
+def test_one_site_with_several_transects_is_still_fine():
+    p = SurveyPlan([_site(Transect("T1", "13:00:00", "13:10:00"),
+                          Transect("T2", "13:20:00", "13:30:00"))])
+    assert p.validate() == []
+
+
 def test_plan_roundtrip():
     p = SurveyPlan([_site(Transect("T1", "13:00:00", "13:10:00"))])
     q = SurveyPlan.from_json(p.to_json())

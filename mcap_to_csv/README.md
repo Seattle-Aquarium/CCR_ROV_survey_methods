@@ -15,7 +15,7 @@ the CSVs drop straight into the existing VIAME and percent-cover joins.
 
 **Double-click `run_MCAP_to_CSV.bat`.** Nothing needs installing first beyond
 Python 3.10 or newer: on its first run the launcher builds a private
-environment in `%LOCALAPPDATA%\CCR_ROVenv`, installs this tool into it, and
+environment in `%LOCALAPPDATA%\CCR_ROV\venv`, installs this tool into it, and
 opens the window. That takes a couple of minutes once.
 
 It is also a step inside UTC — the **Transects** page — which is the better

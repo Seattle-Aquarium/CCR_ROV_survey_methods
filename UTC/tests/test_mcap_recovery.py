@@ -243,3 +243,25 @@ def test_a_truncated_read_matches_an_intact_one(good, tmp_path):
     assert recovered.telemetry_rows <= intact.telemetry_rows
     assert recovered.video.frames <= intact.video.frames
     assert abs(recovered.t_start - intact.t_start) < 1.0
+
+
+def test_a_zero_rangefinder_reading_is_dropped():
+    """MAVLink's RANGEFINDER has no status field, so a lost bottom lock
+    arrives as distance 0.0. The dataflash log, which does carry a status,
+    shows these are NoData -- and 0.00 m stamped on a photo is a false
+    measurement, not a missing one.
+    """
+    import csv
+    import io
+
+    def write(payload):
+        buf = io.StringIO()
+        rows = mx._write_telemetry(csv.writer(buf), "RANGEFINDER", 1.0,
+                                   json.dumps({"message": payload}).encode())
+        return rows, buf.getvalue()
+
+    n, text = write({"distance": 0.0, "voltage": 0.0})
+    assert n == 0 and text == "", text
+
+    n, text = write({"distance": 0.87, "voltage": 0.0})
+    assert n > 0 and "RANGEFINDER.distance" in text

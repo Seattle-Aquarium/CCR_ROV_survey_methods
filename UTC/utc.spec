@@ -27,7 +27,10 @@ a = Analysis(
     pathex=[str(ROOT)],
     datas=datas,
     hiddenimports=["PIL._tkinter_finder", "av", "mcap", "tzdata",
-                   "utc.gui.app", "utc.cli"],
+                   "pymavlink", "pymavlink.mavutil",
+                   "pymavlink.DFReader",
+                   "utc.gui.app", "utc.cli", "utc.selftest",
+                   "multiprocessing.spawn", "multiprocessing.popen_spawn_win32"],
     excludes=["matplotlib", "pandas", "scipy", "pytest"],
     noarchive=False,
 )

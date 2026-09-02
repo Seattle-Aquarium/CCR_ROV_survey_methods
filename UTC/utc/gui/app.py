@@ -57,6 +57,7 @@ class App(ctk.CTk):
         self._queue: queue.Queue[tuple] = queue.Queue()
         self._worker: threading.Thread | None = None
         self._cancel = threading.Event()
+        self._on_done = None
         self._logo_img = None
 
         self.grid_columnconfigure(0, weight=1)
@@ -132,6 +133,7 @@ class App(ctk.CTk):
         label to truncation.
         """
         from .bannertools import BannerToolsTab
+        from .healthpage import HealthPage
         from .importpage import ImportPage
         from .nav import Navigator
         from .transectpage import TransectPage
@@ -152,6 +154,7 @@ class App(ctk.CTk):
             ("Transects", "mcap to CSV", TransectPage),
             ("Import photos", "card or folder", ImportPage),
             ("Video", "trim · composite", VideoPage),
+            ("Recording health", "mcap · repair", HealthPage),
             ("Banner tools", "edited JPGs", BannerToolsTab),
         ):
             page = cls(nav.add(name, sub), self)
@@ -319,6 +322,13 @@ class App(ctk.CTk):
             except Exception as ex:
                 self._log(f"Could not read {PLAN_FILENAME}: {ex}")
 
+        for page in getattr(self, "pages", {}).values():
+            if hasattr(page, "refresh"):
+                try:
+                    page.refresh()
+                except Exception as ex:
+                    self._log(f"{type(page).__name__}.refresh failed: {ex}")
+
     def _set_found(self, text: str) -> None:
         self.found.configure(state="normal")
         self.found.delete("1.0", "end")
@@ -439,7 +449,7 @@ class App(ctk.CTk):
     #  the one worker
     # ------------------------------------------------------------------
 
-    def submit(self, work, label: str | None = None) -> bool:
+    def submit(self, work, label: str | None = None, on_done=None) -> bool:
         """Run ``work(progress, cancel)`` on the worker thread.
 
         Every tab goes through here, so there is exactly one worker, one queue,
@@ -453,6 +463,9 @@ class App(ctk.CTk):
             return False
 
         self._cancel.clear()
+        # Called on the main thread once the job lands, so a page can refresh
+        # its own widgets without touching them from the worker.
+        self._on_done = on_done
         self.cancel_btn.configure(state="normal")
         self.progress.set(0.0)
         if label:
@@ -509,6 +522,12 @@ class App(ctk.CTk):
         serve every tab without each needing its own plumbing.
         """
         self._reset_buttons()
+        cb, self._on_done = getattr(self, "_on_done", None), None
+        if cb is not None:
+            try:
+                cb(res)
+            except Exception:
+                self._log("on_done failed:\n" + traceback.format_exc())
 
         if isinstance(res, RunResult):
             self.progress.set(1.0 if res.ok else self.progress.get())

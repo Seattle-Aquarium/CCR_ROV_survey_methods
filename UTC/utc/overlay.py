@@ -15,6 +15,7 @@ holds the most recent panel in between.
 from __future__ import annotations
 
 import math
+import os
 import re
 import shutil
 from collections.abc import Callable, Sequence
@@ -27,6 +28,32 @@ from . import gauges
 from .config import PANEL_ROWS, Layout, Row
 
 ProgressCB = Callable[[float, str], None]
+
+#: Below this many frames, rendering in one process is faster than starting
+#: several. Process startup in a packaged build is not cheap -- each worker
+#: re-launches the executable and re-imports Pillow and NumPy.
+_PARALLEL_FLOOR = 400
+
+#: Frames per unit of work handed to a worker. Large enough that the per-task
+#: overhead disappears, small enough that progress moves and a cancel is acted
+#: on within a second or two.
+_CHUNK = 120
+
+
+def worker_count(requested: int | None = None) -> int:
+    """How many processes to render with.
+
+    Leaves two cores for the rest of the machine: this runs for tens of
+    minutes and the operator is normally still using their laptop. The cap
+    exists because the work is bound by drawing and PNG compression, and past
+    a dozen workers the disk and the process startup cost eat the gain.
+    """
+    if requested and requested > 0:
+        return int(requested)
+    env = os.environ.get("UTC_OVERLAY_WORKERS")
+    if env and env.isdigit() and int(env) > 0:
+        return int(env)
+    return max(1, min((os.cpu_count() or 2) - 2, 12))
 
 
 def _font(size: int, weight: str = "medium") -> ImageFont.FreeTypeFont:
@@ -170,6 +197,87 @@ class OverlaySequence:
     footer_size: tuple[int, int] | None
 
 
+class _Cancelled(Exception):
+    """Internal: the operator pressed Stop. Re-raised as CancelledError."""
+
+
+def _raise_cancelled():
+    from .ffmpeg_tools import CancelledError
+    raise CancelledError("cancelled")
+
+
+def _render_serial(out_dir, cfg, m, fsize, n, frame_of, progress, cancel) -> None:
+    for k in range(n):
+        if cancel is not None and cancel.is_set():
+            _raise_cancelled()
+        _render_frames((out_dir, cfg, m, fsize, [frame_of(k)]))
+        if progress and (k % max(1, n // 40) == 0):
+            progress(k / n, f"overlays {k}/{n}")
+
+
+def _render_parallel(out_dir, cfg, m, fsize, n, frame_of, nw,
+                     progress, cancel) -> None:
+    """Draw the sequence across `nw` processes.
+
+    Work is handed out in chunks rather than per frame, because a frame takes
+    milliseconds and the round trip would dominate. Chunks stay small enough
+    that Stop is acted on promptly -- the operator should not have to wait out
+    a whole transect.
+    """
+    from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+
+    chunks = [list(range(i, min(i + _CHUNK, n))) for i in range(0, n, _CHUNK)]
+    done = 0
+    if progress:
+        progress(0.0, f"overlays 0/{n} on {nw} cores")
+
+    with ProcessPoolExecutor(max_workers=nw) as ex:
+        pending, queued = set(), list(chunks)
+        try:
+            # Keep roughly two chunks in flight per worker: enough that nobody
+            # idles, few enough that a cancel does not have to unwind much.
+            while queued or pending:
+                while queued and len(pending) < nw * 2:
+                    ks = queued.pop(0)
+                    pending.add(ex.submit(
+                        _render_frames,
+                        (out_dir, cfg, m, fsize, [frame_of(k) for k in ks])))
+                finished, pending = wait(pending, timeout=0.5,
+                                         return_when=FIRST_COMPLETED)
+                for fut in finished:
+                    done += fut.result()
+                    if progress:
+                        progress(done / n, f"overlays {done}/{n} on {nw} cores")
+                if cancel is not None and cancel.is_set():
+                    raise _Cancelled
+        except BaseException:
+            for fut in pending:
+                fut.cancel()
+            ex.shutdown(wait=False, cancel_futures=True)
+            raise
+    if progress:
+        progress(1.0, f"overlays {n}/{n}")
+
+
+def _render_frames(job) -> int:
+    """Draw one contiguous run of frames. Runs in a worker process.
+
+    Everything it needs arrives as plain data -- the telemetry samples were
+    taken in the parent and the footer strings formatted there. That keeps the
+    telemetry store, which is tens of megabytes and holds NumPy arrays, out of
+    the pickle entirely, and means the caller's footer callback never has to be
+    picklable.
+    """
+    out_dir, cfg, m, fsize, frames = job
+    for k, vals, ftext in frames:
+        render_panel(vals, cfg, m).save(out_dir / f"panel_{k:06d}.png")
+        if cfg.show_gauges:
+            gauges.render_gauges(vals, cfg).save(out_dir / f"gauge_{k:06d}.png")
+        if fsize is not None and ftext is not None:
+            render_footer(ftext, cfg, fsize).save(out_dir / f"footer_{k:06d}.png")
+    return len(frames)
+
+
 def render_sequence(
     out_dir: Path,
     store,                       # telemetry.TelemetryStore
@@ -180,11 +288,17 @@ def render_sequence(
     footer_text: Callable[[float], str] | None = None,
     progress: ProgressCB | None = None,
     cancel=None,
+    workers: int | None = None,
 ) -> OverlaySequence:
     """Render panel / gauge / footer PNG sequences for one clip.
 
     `epoch_start` is absolute, so the overlay content is driven directly by the
     telemetry clock and never by a position within a video file.
+
+    Frames are independent, so they are drawn across several processes. This is
+    the pipeline's one genuinely serial stretch -- ffmpeg already uses every
+    core when it encodes, but drawing panels is Python holding the GIL, and it
+    pegged exactly one core for tens of minutes while the other nineteen idled.
     """
     out_dir = Path(out_dir)
     if out_dir.exists():
@@ -201,25 +315,30 @@ def render_sequence(
     if cfg.show_footer and footer_text is not None:
         fsize = measure_footer(footer_text(epoch_start), cfg)
 
-    for k in range(n):
-        if cancel is not None and cancel.is_set():
-            from .ffmpeg_tools import CancelledError
-            raise CancelledError("cancelled")
-
+    # Sample the telemetry and format the footers up front, in this process.
+    # Both are cheap next to drawing, and doing them here is what lets the
+    # workers take plain data.
+    def _frame(k: int):
         epoch = epoch_start + k / cfg.overlay_fps
-        vals = store.sample(epoch)
+        ftext = footer_text(epoch) if (fsize is not None and footer_text) else None
+        return (k, store.sample(epoch), ftext)
 
-        render_panel(vals, cfg, m).save(out_dir / f"panel_{k:06d}.png")
-
-        if cfg.show_gauges:
-            gauges.render_gauges(vals, cfg).save(out_dir / f"gauge_{k:06d}.png")
-
-        if fsize is not None and footer_text is not None:
-            render_footer(footer_text(epoch), cfg, fsize).save(
-                out_dir / f"footer_{k:06d}.png")
-
-        if progress and (k % max(1, n // 40) == 0):
-            progress(k / n, f"overlays {k}/{n}")
+    nw = worker_count(workers)
+    if nw > 1 and n >= _PARALLEL_FLOOR:
+        try:
+            _render_parallel(out_dir, cfg, m, fsize, n, _frame, nw,
+                             progress, cancel)
+        except _Cancelled:
+            _raise_cancelled()
+        except Exception as ex:                      # pragma: no cover
+            # A pool that will not start is not a reason to fail the run --
+            # fall back to the single-process path and say so.
+            if progress:
+                progress(0.0, f"parallel render unavailable ({type(ex).__name__}); "
+                              f"drawing on one core")
+            _render_serial(out_dir, cfg, m, fsize, n, _frame, progress, cancel)
+    else:
+        _render_serial(out_dir, cfg, m, fsize, n, _frame, progress, cancel)
 
     panel_px = (m.width + 2 * cfg.border_px, m.height + 2 * cfg.border_px)
     gauge_px = None

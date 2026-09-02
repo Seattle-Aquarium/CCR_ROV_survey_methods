@@ -633,6 +633,14 @@ def _write_telemetry(tw, mt: str, t: float, raw: bytes) -> int:
             tw.writerow([ts, "BATTERY_STATUS.voltage_mv", v, ""])
             n += 1
 
+    # MAVLink's RANGEFINDER carries no status field, so a lost bottom lock
+    # arrives as distance 0.0 -- indistinguishable from a reading except that
+    # it is not one. The dataflash log, which does have a status field, shows
+    # these are NoData for about one sample in eight during a transect. Writing
+    # them through puts "ALT 0.00 m" on the imagery.
+    if mt == "RANGEFINDER" and not m.get("distance"):
+        return n
+
     for k in WANTED.get(mt, ()):
         if k not in m:
             continue
