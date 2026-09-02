@@ -14,6 +14,9 @@ dependencies = [
     # Windows has no system timezone database. Without this,
     # local transect times resolve to the wrong instant.
     "tzdata>=2024.1",
+    # AI Denoise in Lightroom Classic has no scripting interface, so the RAW
+    # develop batch drives its dialog through Windows UI Automation.
+    "pywinauto>=0.6.9; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

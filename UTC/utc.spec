@@ -9,6 +9,10 @@ from PyInstaller.utils.hooks import collect_data_files
 ROOT = Path(SPECPATH)
 
 datas = [(str(ROOT / "assets"), "assets")]
+# The Lightroom plugin is Lua source that gets copied into Lightroom's
+# Modules folder at run time, so it has to survive the freeze as files.
+datas += [(str(ROOT / "utc" / "lightroom" / "plugin"),
+           "utc/lightroom/plugin")]
 datas += collect_data_files("customtkinter")
 # tzdata is a data-only package: without this the packaged app
 # cannot resolve local times and every transect lands wrong.
@@ -27,7 +31,8 @@ a = Analysis(
     pathex=[str(ROOT)],
     datas=datas,
     hiddenimports=["PIL._tkinter_finder", "av", "mcap", "tzdata",
-                   "utc.gui.app", "utc.cli"],
+                   "utc.gui.app", "utc.cli",
+                   "pywinauto", "comtypes", "win32api"],
     excludes=["matplotlib", "pandas", "scipy", "pytest"],
     noarchive=False,
 )

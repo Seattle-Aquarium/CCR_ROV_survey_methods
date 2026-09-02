@@ -134,6 +134,7 @@ class App(ctk.CTk):
         from .bannertools import BannerToolsTab
         from .importpage import ImportPage
         from .nav import Navigator
+        from .processpage import ProcessPage
         from .videopage import VideoPage
 
         nav = Navigator(self)
@@ -144,6 +145,7 @@ class App(ctk.CTk):
         self.pages = {}
         for name, sub, cls in (
             ("Import photos", "card or folder", ImportPage),
+            ("Process photos", "GPR to TIF", ProcessPage),
             ("Video", "trim · composite", VideoPage),
             ("Banner tools", "edited JPGs", BannerToolsTab),
         ):
