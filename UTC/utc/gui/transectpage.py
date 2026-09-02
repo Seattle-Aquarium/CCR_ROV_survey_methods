@@ -118,10 +118,8 @@ class TransectPage(ctk.CTkFrame):
 
         # ---- 5. sensor health -----------------------------------------
         c5 = Card(body, "5.  Sensor health",
-                  "Where each column's numbers actually came from, and whether "
-                  "the instruments behind them behaved. Worth a look before "
-                  "trusting a dive: altitude drives Width and Area, and a yaw "
-                  "error rotates the whole DVL track.")
+                  "Where each column's numbers came from, and whether the "
+                  "instruments behind them behaved.")
         c5.grid(row=4, column=0, sticky="ew", pady=(0, 12))
         c5.body.grid_columnconfigure(0, weight=1)
 
