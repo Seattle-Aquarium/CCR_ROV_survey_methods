@@ -319,24 +319,33 @@ skipped.
 
 One CSV per transect, named `{Transect_ID}.csv`.
 
-The first 31 columns are **byte-for-byte the tlog_to_csv.py column list, in
-order**, so anything reading those files keeps working:
+Columns are **grouped by what they are for** — what and when, where, how it was
+moving, how deep, what the camera saw, then power, pilot settings and the raw
+inputs behind the derived columns:
 
 ```
-Date, Time, Site_name, Transect_number, Transect_ID, Mode_num, Mode,
+Date, Time, Datetime_UTC, Site_name, Transect_number, Transect_ID,
+Mode_num, Mode,
+Latitude, Longitude, EKFlat, EKFlon, DVLlat, DVLlon,
+GPS_fix_type, GPS_satellites, DVLx, DVLy, DVL_source, DVL_confidence,
+Heading, Roll, Pitch, Velocity_mps, Distance,
+Depth, Depth_std, Depth_Source,
+Altitude, Width, Area_m2,
+Water_temp_C,
 Battery_V, Battery_A, Battery_W, Battery_mAh_used, Battery_Wh_used,
-Latitude, Longitude, EKFlat, EKFlon, DVLx, DVLy, DVLlat, DVLlon,
-Altitude, Depth, Depth_std, Depth_Source, Heading, Velocity_mps,
-Width, Area_m2, Distance, NEDz, VFR_alt
+Lights_pct, Cam_tilt,
+Relative_alt_m, VFR_alt, NEDz, Pressure_abs_hPa, Messages
 ```
 
-Then what the mcap makes available that a tlog did not:
+The three coordinate pairs sit together, because comparing them is the whole
+point of having all three. `Width` and `Area_m2` sit with `Altitude`, which they
+are computed from. The raw depth inputs go last: they are there for checking a
+suspicious `Depth`, not for analysis.
 
-```
-Datetime_UTC, Roll, Pitch, Water_temp_C, Pressure_abs_hPa,
-DVL_confidence, DVL_source, Lights_pct, Cam_tilt,
-GPS_fix_type, GPS_satellites, Relative_alt_m, Messages
-```
+> **This order differs from `tlog_to_csv.py`.** The columns are the same 44 and
+> the names are unchanged, so anything selecting by name — the R plotting
+> scripts, `pandas` merges, the VIAME join — is unaffected. Only a consumer
+> reading by column *number* would care, and nothing in this repository does.
 
 **[COLUMNS.md](COLUMNS.md) documents all 44** — what each one means, which
 MAVLink message it came from, and whether it was read from a sensor, fused by the

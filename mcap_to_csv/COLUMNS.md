@@ -21,7 +21,9 @@ A column is only as trustworthy as its shortest path back to an instrument.
 
 ## The columns
 
-In file order. The first 31 match `tlog_to_csv.py` exactly.
+In file order, grouped by what the columns are for. This order differs from
+`tlog_to_csv.py` — the names are unchanged, so anything selecting by name is
+unaffected; only a consumer reading by column number would care.
 
 ### Identity and time
 
@@ -33,7 +35,6 @@ In file order. The first 31 match `tlog_to_csv.py` exactly.
 | `Site_name` | Survey site. | typed in, or from the survey plan | Entered | — |
 | `Transect_number` | Order of this transect within the run, from 1. | this tool | Computed | — |
 | `Transect_ID` | Transect name. Also the CSV filename. | typed in, or from the survey plan | Entered | — |
-| `Messages` | How many MAVLink messages went into this second. A thin row is a dropout. | counted while reading | Computed | count |
 
 ### Vehicle state
 
@@ -41,6 +42,55 @@ In file order. The first 31 match `tlog_to_csv.py` exactly.
 | --- | --- | --- | --- | --- |
 | `Mode_num` | ArduSub flight mode, as a number. | `HEARTBEAT.custom_mode` (system 1, component 1) | Direct | last |
 | `Mode` | The same mode by name — `MANUAL`, `ALT_HOLD`, `SURFTRAK`. | lookup table applied to `Mode_num` | Computed | last |
+
+### Position
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Latitude` | Surface position from the acoustic tracker. Repeats unchanged whenever the tracker has no lock. | `GPS_RAW_INT.lat` ÷ 1e7 — Water Linked UGPS, injected as `GPS_INPUT` | Direct | last |
+| `Longitude` | As above. | `GPS_RAW_INT.lon` ÷ 1e7 | Direct | last |
+| `EKFlat` | Fused global position. **Blank whenever the EKF has no absolute fix**, which is every dive without a locked USBL. | `GLOBAL_POSITION_INT.lat` ÷ 1e7 | Fused | last |
+| `EKFlon` | As above. | `GLOBAL_POSITION_INT.lon` ÷ 1e7 | Fused | last |
+| `DVLlat` | The DVL track as coordinates. Propagated once across the whole dive, so transects keep their true separation. | geodesic walk of the `DVLx`/`DVLy` steps from the dive's first valid fix | Computed | — |
+| `DVLlon` | As above. | as above | Computed | — |
+| `GPS_fix_type` | Fix state of the acoustic tracker. `NO_GPS` means the positions are dead reckoning. | `GPS_RAW_INT.fix_type` | Direct | last |
+| `GPS_satellites` | Locator count the tracker reports. | `GPS_RAW_INT.satellites_visible` | Direct | last |
+| `DVLx` | Metres north of the transect start. Re-zeroed at each transect. | `LOCAL_POSITION_NED.x` when recorded — else `VISION_POSITION_DELTA` integrated and rotated by `ATTITUDE.yaw` | Fused / Computed | last |
+| `DVLy` | Metres east of the transect start. | `LOCAL_POSITION_NED.y`, or the same integration | Fused / Computed | last |
+| `DVL_source` | Which of the two fed `DVLx`/`DVLy` on this dive. | this tool | Computed | — |
+| `DVL_confidence` | The DVL's own confidence in its bottom lock, as a percentage. | `VISION_POSITION_DELTA.confidence` | Direct | mean |
+
+### Attitude and motion
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Heading` | Degrees from north. A yaw error here rotates the whole DVL track. | `ATTITUDE.yaw` → degrees (compass + gyro + accelerometer) | Fused | circular mean |
+| `Roll` | Degrees. | `ATTITUDE.roll` → degrees | Fused | mean |
+| `Pitch` | Degrees. | `ATTITUDE.pitch` → degrees | Fused | mean |
+| `Velocity_mps` | Speed over ground. Cleaner than the HUD's figure, which carries filter spikes. | `VISION_POSITION_DELTA` horizontal magnitude ÷ its own `time_delta_usec`; falls back to `VFR_HUD.groundspeed` | Direct | mean |
+| `Distance` | Metres travelled during this second. Sum it for transect length. | change in `DVLx`/`DVLy` from the previous row; steps under 2 cm count as zero | Computed | — |
+
+### Depth
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Depth` | Metres, **negative down**. | first available of `VFR_HUD.alt` (< −0.5), `GLOBAL_POSITION_INT.relative_alt` ÷ 1000, −`LOCAL_POSITION_NED.z`, or derived from `SCALED_PRESSURE2` | Fused | last |
+| `Depth_std` | Seabed depth on the MLLW datum, so dives at different tide stages compare. | −`Altitude` + `Depth` + NOAA water level | External / Computed | — |
+| `Depth_Source` | Which of those four answered, row by row. | this tool | Computed | — |
+
+### Altitude and camera footprint
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Altitude` | Metres above the seabed. Drives `Width` and `Area_m2`. | `RANGEFINDER.distance` — the DVL A50's own range; falls back to `DISTANCE_SENSOR` id 0 ÷ 100 | Direct | mean |
+| `Width` | Metres of seabed across the frame. | `1.10 m × (Altitude ÷ 0.82 m)` — scales linearly with altitude | **Calibrated** | mean of samples |
+| `Area_m2` | Square metres of seabed in the frame, at that instant. | `0.99 m² × (Altitude ÷ 0.82 m)²` — scales with the square of altitude | **Calibrated** | mean of samples |
+
+### The water
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Water_temp_C` | Water temperature at the depth sensor. | `SCALED_PRESSURE2.temperature` ÷ 100 | Direct | mean |
 
 ### Power
 
@@ -52,62 +102,22 @@ In file order. The first 31 match `tlog_to_csv.py` exactly.
 | `Battery_mAh_used` | Charge used since this transect began, not since power-on. | `BATTERY_STATUS.current_consumed` minus its value in the first row | Computed | last |
 | `Battery_Wh_used` | Energy used since this transect began. | `BATTERY_STATUS.energy_consumed` × 100 ÷ 3600, minus its value in the first row | Computed | last |
 
-### Position
-
-| Column | What it is | Where it comes from | Origin | Per second |
-| --- | --- | --- | --- | --- |
-| `Latitude` | Surface position from the acoustic tracker. Repeats unchanged whenever the tracker has no lock. | `GPS_RAW_INT.lat` ÷ 1e7 — Water Linked UGPS, injected as `GPS_INPUT` | Direct | last |
-| `Longitude` | As above. | `GPS_RAW_INT.lon` ÷ 1e7 | Direct | last |
-| `EKFlat` | Fused global position. **Blank whenever the EKF has no absolute fix**, which is every dive without a locked USBL. | `GLOBAL_POSITION_INT.lat` ÷ 1e7 | Fused | last |
-| `EKFlon` | As above. | `GLOBAL_POSITION_INT.lon` ÷ 1e7 | Fused | last |
-| `DVLx` | Metres north of the transect start. Re-zeroed at each transect. | `LOCAL_POSITION_NED.x` when recorded — else `VISION_POSITION_DELTA` integrated and rotated by `ATTITUDE.yaw` | Fused / Computed | last |
-| `DVLy` | Metres east of the transect start. | `LOCAL_POSITION_NED.y`, or the same integration | Fused / Computed | last |
-| `DVLlat` | The DVL track as coordinates. Propagated once across the whole dive, so transects keep their true separation. | geodesic walk of the `DVLx`/`DVLy` steps from the dive's first valid fix | Computed | — |
-| `DVLlon` | As above. | as above | Computed | — |
-| `DVL_source` | Which of the two fed `DVLx`/`DVLy` on this dive. | this tool | Computed | — |
-
-### Depth and altitude
-
-| Column | What it is | Where it comes from | Origin | Per second |
-| --- | --- | --- | --- | --- |
-| `Altitude` | Metres above the seabed. Drives `Width` and `Area_m2`. | `RANGEFINDER.distance` — the DVL A50's own range; falls back to `DISTANCE_SENSOR` id 0 ÷ 100 | Direct | mean |
-| `Depth` | Metres, **negative down**. | first available of `VFR_HUD.alt` (< −0.5), `GLOBAL_POSITION_INT.relative_alt` ÷ 1000, −`LOCAL_POSITION_NED.z`, or derived from `SCALED_PRESSURE2` | Fused | last |
-| `Depth_Source` | Which of those four answered, row by row. | this tool | Computed | — |
-| `Depth_std` | Seabed depth on the MLLW datum, so dives at different tide stages compare. | −`Altitude` + `Depth` + NOAA water level | External / Computed | — |
-| `NEDz` | Local-frame z, positive down. Blank when the message is not recorded. | `LOCAL_POSITION_NED.z` | Fused | last |
-| `VFR_alt` | The HUD's altitude field. Reads a flat zero on some vehicle configurations. | `VFR_HUD.alt` | Fused | last |
-| `Relative_alt_m` | The autopilot's own baro-derived depth, negative down. | `GLOBAL_POSITION_INT.relative_alt` ÷ 1000 | Fused | last |
-| `Pressure_abs_hPa` | Absolute water pressure. Independent of the EKF, which makes it a useful cross-check on depth. | `SCALED_PRESSURE2.press_abs` (external Bar30) | Direct | mean |
-| `Water_temp_C` | Water temperature at the depth sensor. | `SCALED_PRESSURE2.temperature` ÷ 100 | Direct | mean |
-
-### Attitude and motion
-
-| Column | What it is | Where it comes from | Origin | Per second |
-| --- | --- | --- | --- | --- |
-| `Heading` | Degrees from north. A yaw error here rotates the whole DVL track. | `ATTITUDE.yaw` → degrees (compass + gyro + accelerometer) | Fused | circular mean |
-| `Roll` | Degrees. | `ATTITUDE.roll` → degrees | Fused | mean |
-| `Pitch` | Degrees. | `ATTITUDE.pitch` → degrees | Fused | mean |
-| `Velocity_mps` | Speed over ground. Cleaner than the HUD's figure, which carries filter spikes. | `VISION_POSITION_DELTA` horizontal magnitude ÷ its own `time_delta_usec`; falls back to `VFR_HUD.groundspeed` | Direct | mean |
-| `Distance` | Metres travelled during this second. Sum it for transect length. | change in `DVLx`/`DVLy` from the previous row; steps under 2 cm count as zero | Computed | — |
-| `DVL_confidence` | The DVL's own confidence in its bottom lock, as a percentage. | `VISION_POSITION_DELTA.confidence` | Direct | mean |
-
-### Camera footprint
-
-| Column | What it is | Where it comes from | Origin | Per second |
-| --- | --- | --- | --- | --- |
-| `Width` | Metres of seabed across the frame. | `1.10 m × (Altitude ÷ 0.82 m)` — scales linearly with altitude | **Calibrated** | mean of samples |
-| `Area_m2` | Square metres of seabed in the frame, at that instant. | `0.99 m² × (Altitude ÷ 0.82 m)²` — scales with the square of altitude | **Calibrated** | mean of samples |
-
-### Pilot settings and fix status
+### Pilot settings
 
 | Column | What it is | Where it comes from | Origin | Per second |
 | --- | --- | --- | --- | --- |
 | `Lights_pct` | Light output as a percentage. | `NAMED_VALUE_FLOAT "Lights1"` × 100 | Direct | last |
 | `Cam_tilt` | Camera tilt setting. | `NAMED_VALUE_FLOAT "CamTilt"` | Direct | last |
-| `GPS_fix_type` | Fix state of the acoustic tracker. `NO_GPS` means the positions are dead reckoning. | `GPS_RAW_INT.fix_type` | Direct | last |
-| `GPS_satellites` | Locator count the tracker reports. | `GPS_RAW_INT.satellites_visible` | Direct | last |
 
----
+### Raw inputs and recording quality
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Relative_alt_m` | The autopilot's own baro-derived depth, negative down. | `GLOBAL_POSITION_INT.relative_alt` ÷ 1000 | Fused | last |
+| `VFR_alt` | The HUD's altitude field. Reads a flat zero on some vehicle configurations. | `VFR_HUD.alt` | Fused | last |
+| `NEDz` | Local-frame z, positive down. Blank when the message is not recorded. | `LOCAL_POSITION_NED.z` | Fused | last |
+| `Pressure_abs_hPa` | Absolute water pressure. Independent of the EKF, which makes it a useful cross-check on depth. | `SCALED_PRESSURE2.press_abs` (external Bar30) | Direct | mean |
+| `Messages` | How many MAVLink messages went into this second. A thin row is a dropout. | counted while reading | Computed | count |
 
 ## Rules that apply to every column
 

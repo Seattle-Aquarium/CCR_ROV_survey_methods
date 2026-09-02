@@ -17,7 +17,7 @@ from ccr_m2c.mcap_read import read_mcaps
 from ccr_m2c.pipeline import TransectSpec, run
 from ccr_m2c.tide import add_empty_tide
 from ccr_m2c.transect import (
-    OUTPUT_COLUMNS, TLOG_COLUMNS, build_transect_mask, export_transect,
+    OUTPUT_COLUMNS, build_transect_mask, export_transect,
     sanitize_filename,
 )
 
@@ -30,7 +30,49 @@ def dive(builder):
     return add_empty_tide(res.df), res
 
 
-def test_output_starts_with_the_tlog_columns_in_order(dive, tmp_path):
+#: Every column the CSV has ever carried. The order is free to change, but a
+#: column quietly disappearing would break a downstream join without warning.
+EXPECTED_COLUMNS = {
+    "Date", "Time", "Datetime_UTC", "Site_name", "Transect_number",
+    "Transect_ID", "Mode_num", "Mode", "Battery_V", "Battery_A", "Battery_W",
+    "Battery_mAh_used", "Battery_Wh_used", "Latitude", "Longitude", "EKFlat",
+    "EKFlon", "DVLx", "DVLy", "DVLlat", "DVLlon", "Altitude", "Depth",
+    "Depth_std", "Depth_Source", "Heading", "Velocity_mps", "Width", "Area_m2",
+    "Distance", "NEDz", "VFR_alt", "Roll", "Pitch", "Water_temp_C",
+    "Pressure_abs_hPa", "DVL_confidence", "DVL_source", "Lights_pct",
+    "Cam_tilt", "GPS_fix_type", "GPS_satellites", "Relative_alt_m", "Messages",
+}
+
+
+def test_no_column_is_lost_or_invented():
+    assert set(OUTPUT_COLUMNS) == EXPECTED_COLUMNS
+    assert len(OUTPUT_COLUMNS) == len(set(OUTPUT_COLUMNS)), "a column is repeated"
+
+
+def test_related_columns_sit_together():
+    """The point of the ordering: someone scanning the header should not have to
+    hunt for the other half of a pair."""
+    at = {c: i for i, c in enumerate(OUTPUT_COLUMNS)}
+
+    # the three coordinate pairs, adjacent and in a comparable block
+    for lat, lon in (("Latitude", "Longitude"), ("EKFlat", "EKFlon"),
+                     ("DVLlat", "DVLlon")):
+        assert at[lon] == at[lat] + 1, f"{lat}/{lon} are not adjacent"
+    assert at["DVLlon"] - at["Latitude"] == 5, "the fixes are not one block"
+
+    # fix quality next to the fix it describes
+    assert at["GPS_fix_type"] - at["DVLlon"] == 1
+
+    # the depth trio, and the altitude-derived trio
+    assert [at["Depth_std"], at["Depth_Source"]] == [at["Depth"] + 1, at["Depth"] + 2]
+    assert [at["Width"], at["Area_m2"]] == [at["Altitude"] + 1, at["Altitude"] + 2]
+
+    # raw depth inputs together, after the values derived from them
+    for raw in ("Relative_alt_m", "VFR_alt", "NEDz", "Pressure_abs_hPa"):
+        assert at[raw] > at["Depth_Source"]
+
+
+def test_the_written_csv_uses_that_order(dive, tmp_path):
     df, res = dive
     r = export_transect(df, [("10:00:05", "10:00:20")], 1, "T1", "Site",
                         tmp_path, dvl_source=res.dvl_source)
@@ -38,7 +80,6 @@ def test_output_starts_with_the_tlog_columns_in_order(dive, tmp_path):
 
     written = pd.read_csv(r.path)
     assert list(written.columns) == OUTPUT_COLUMNS
-    assert list(written.columns[:len(TLOG_COLUMNS)]) == TLOG_COLUMNS
     assert written["Site_name"].eq("Site").all()
     assert written["Transect_ID"].eq("T1").all()
     assert written["Transect_number"].eq(1).all()

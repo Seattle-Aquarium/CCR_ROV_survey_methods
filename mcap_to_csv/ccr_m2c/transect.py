@@ -39,26 +39,62 @@ MIN_STEP_M = 0.02     # ignore jitter below 2 cm
 JUMP_THRESH = 5.0     # metres; larger per-second steps are flagged as EKF resets
 RESEED_ON_JUMP = False  # False preserves continuous dead reckoning, drift and all
 
-#: Written first, and byte-for-byte the tlog_to_csv.py column list.
-TLOG_COLUMNS = [
-    "Date", "Time", "Site_name", "Transect_number", "Transect_ID", "Mode_num", "Mode",
+#: Output order, grouped by what the columns are for.
+#:
+#: This deliberately no longer matches tlog_to_csv.py's order. That file grew by
+#: accretion, so its GPS columns sat twelve apart and the four depth sources were
+#: spread across the row -- readable only if you already knew where to look.
+#:
+#: Reordering is safe because nothing reads these files positionally: the R
+#: plotting scripts index by name (``df[[cols[1]]]``), and pandas merges on
+#: column names. A consumer that does use column *numbers* would break, so that
+#: is worth knowing before pointing something new at these files.
+#:
+#: Within the row the flow is: what and when, where, how it was moving, how
+#: deep, what the camera saw, then power, pilot settings, and the raw inputs
+#: behind the derived columns.
+OUTPUT_COLUMNS = [
+    # what and when
+    "Date", "Time", "Datetime_UTC",
+    "Site_name", "Transect_number", "Transect_ID",
+
+    # what the vehicle was doing
+    "Mode_num", "Mode",
+
+    # where -- the three coordinate pairs adjacent, because comparing them is
+    # the whole point of having all three
+    "Latitude", "Longitude",
+    "EKFlat", "EKFlon",
+    "DVLlat", "DVLlon",
+    # ... and how good the surface fix behind Latitude/Longitude was
+    "GPS_fix_type", "GPS_satellites",
+    # ... and the local frame DVLlat/DVLlon is propagated from
+    "DVLx", "DVLy", "DVL_source", "DVL_confidence",
+
+    # how it was moving
+    "Heading", "Roll", "Pitch", "Velocity_mps", "Distance",
+
+    # how deep
+    "Depth", "Depth_std", "Depth_Source",
+
+    # how far off the seabed, and what that put in frame: Width and Area_m2 are
+    # functions of Altitude, so they sit with it
+    "Altitude", "Width", "Area_m2",
+
+    # the water itself
+    "Water_temp_C",
+
+    # power
     "Battery_V", "Battery_A", "Battery_W",
     "Battery_mAh_used", "Battery_Wh_used",
-    "Latitude", "Longitude", "EKFlat", "EKFlon",
-    "DVLx", "DVLy", "DVLlat", "DVLlon",
-    "Altitude", "Depth", "Depth_std", "Depth_Source",
-    "Heading", "Velocity_mps", "Width", "Area_m2",
-    "Distance", "NEDz", "VFR_alt",
-]
 
-#: Everything the mcap makes available that a .tlog did not carry.
-EXTRA_COLUMNS = [
-    "Datetime_UTC", "Roll", "Pitch", "Water_temp_C", "Pressure_abs_hPa",
-    "DVL_confidence", "DVL_source", "Lights_pct", "Cam_tilt",
-    "GPS_fix_type", "GPS_satellites", "Relative_alt_m", "Messages",
-]
+    # what the pilot had set
+    "Lights_pct", "Cam_tilt",
 
-OUTPUT_COLUMNS = TLOG_COLUMNS + EXTRA_COLUMNS
+    # raw inputs behind Depth, kept for checking rather than analysis, and a
+    # per-second message count that shows where the recording thinned out
+    "Relative_alt_m", "VFR_alt", "NEDz", "Pressure_abs_hPa", "Messages",
+]
 
 _FILENAME_INVALID_CHARS = re.compile(r'[<>:"/\\|?*]')
 
