@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ccr-m2c"
+version = "1.0.0"
+description = "Turn BlueOS .mcap recordings into per-transect CSVs and a Leaflet map"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Seattle Aquarium, Coastal Climate Resilience" }]
+
+# Deliberately not published to PyPI: this is installed from a checkout with
+# `pip install -e .`. The import name is prefixed because a *different* package
+# called `m2c` already exists on PyPI, and an unprefixed name would let
+# `python -m m2c` silently run someone else's program.
+dependencies = [
+  "mcap>=1.1",
+  "zstandard>=0.21",
+  "pandas>=2.0",
+  "numpy>=1.24",
+  "pytz>=2023.3",
+  "geopy>=2.3",
+  "scipy>=1.10",
+  "requests>=2.28",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pyinstaller>=6"]
+
+[project.scripts]
+ccr-m2c = "ccr_m2c.cli:main"
+
+[project.gui-scripts]
+ccr-m2c-gui = "ccr_m2c.gui:main"
+
+[tool.setuptools]
+packages = ["ccr_m2c"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

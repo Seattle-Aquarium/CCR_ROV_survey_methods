@@ -1,21 +1,24 @@
 @echo off
 REM ---------------------------------------------------------------------------
-REM  Underwater Telemetry Compositing (UTC) - launcher
+REM  MCAP to CSV - Transect Extractor - launcher
 REM
 REM  Double-click this file. On the first run it builds a private Python
-REM  environment and installs what it needs, which takes a few minutes; after
-REM  that it starts straight away.
+REM  environment and installs what it needs, which takes a couple of minutes;
+REM  after that it starts straight away.
 REM
 REM  You need Python 3.10 or newer installed. Nothing else -- no conda
 REM  environment, no manual pip, no PATH setup.
+REM
+REM  This tool is also a step inside UTC ("Transects"), which is the better
+REM  route when a flight folder and survey plan already exist. This launcher is
+REM  for extracting CSVs on their own.
 REM ---------------------------------------------------------------------------
 setlocal EnableExtensions
 cd /d "%~dp0"
 
-REM The environment lives outside the repo on purpose. This checkout sits in a
-REM OneDrive folder, and a virtualenv there would be thousands of files for the
-REM sync client to chew through forever. Both launchers share one environment,
-REM so whichever runs first does the work.
+REM Shared with UTC, and deliberately outside the repo: this checkout sits in a
+REM OneDrive folder, where a virtualenv would be thousands of files for the sync
+REM client to chew through forever.
 set "ENV_ROOT=%LOCALAPPDATA%\CCR_ROV"
 set "VENV=%ENV_ROOT%\venv"
 set "VPY=%VENV%\Scripts\python.exe"
@@ -23,7 +26,7 @@ set "VPYW=%VENV%\Scripts\pythonw.exe"
 
 REM ---- 1. a working environment already? --------------------------------
 if exist "%VPY%" (
-  "%VPY%" -c "import utc.gui.app" >nul 2>&1
+  "%VPY%" -c "import ccr_m2c.gui" >nul 2>&1
   if not errorlevel 1 goto run
 )
 
@@ -63,7 +66,7 @@ echo First run: setting up a private Python environment.
 echo Using: %SYS_PY%
 echo Into : %VENV%
 echo.
-echo This takes a few minutes and happens only once.
+echo This takes a couple of minutes and happens only once.
 echo.
 if not exist "%ENV_ROOT%" mkdir "%ENV_ROOT%"
 if not exist "%VPY%" (
@@ -71,28 +74,21 @@ if not exist "%VPY%" (
   if errorlevel 1 goto envfail
 )
 "%VPY%" -m pip install --upgrade pip --quiet --disable-pip-version-check
-echo Installing UTC...
+echo Installing the transect extractor...
 "%VPY%" -m pip install -e . --quiet --disable-pip-version-check
 if errorlevel 1 goto envfail
-
-REM The transect extractor is a sibling in this repo and is not on PyPI, so it
-REM is installed from the folder. Without it the "Transects" page cannot run.
-if exist "..\mcap_to_csv\pyproject.toml" (
-  echo Installing the transect extractor...
-  "%VPY%" -m pip install -e "..\mcap_to_csv" --quiet --disable-pip-version-check
-)
 echo.
 echo Setup complete.
 echo.
 
 REM ---- 4. run -------------------------------------------------------------
 :run
-"%VPYW%" -m utc.gui.app
+"%VPYW%" -m ccr_m2c.gui
 if errorlevel 1 (
   echo.
-  echo UTC exited with an error. Running again with the console visible:
+  echo The app exited with an error. Running again with the console visible:
   echo.
-  "%VPY%" -m utc.gui.app
+  "%VPY%" -m ccr_m2c.gui
   echo.
   pause
 )

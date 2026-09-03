@@ -14,3 +14,6 @@ manuscript/
 
 # avoid pushing numerous survey images
 data/Satellite
+
+# per-user GUI state, not source (personal paths, last site used)
+code/.tlog_to_csv_config.json
