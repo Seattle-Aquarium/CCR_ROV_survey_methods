@@ -891,9 +891,10 @@ DEPTH_PRECEDENCE: tuple[tuple[str, str, str, str], ...] = (
      "the autopilot's own baro depth"),
     ("VFR_HUD", "alt", "VFR_alt",
      "the HUD's altitude field, which on some vehicles is a fixed offset"),
-    ("LOCAL_POSITION_NED", "z", "NEDz", "the EKF's local-frame z"),
+    ("LOCAL_POSITION_NED", "z", "NEDz",
+     "the EKF's local-frame z, positive-down and negated here"),
     ("SCALED_PRESSURE2", "press_abs", "Pressure_abs_hPa",
-     "the external pressure sensor"),
+     "the external pressure sensor, converted through a seawater column"),
 )
 
 

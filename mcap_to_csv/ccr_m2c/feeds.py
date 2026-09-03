@@ -62,8 +62,8 @@ FALLBACK_IS_NOTABLE = frozenset({"Altitude"})
 PRECEDENCE: dict[str, tuple[tuple[str, str, str], ...]] = {
     "Altitude": (
         ("RANGEFINDER", "distance", "the DVL A50's own range to the seabed"),
-        ("DISTANCE_SENSOR", "current_distance", "a raw beam reading, used only "
-                                                "when RANGEFINDER is absent"),
+        ("DISTANCE_SENSOR", "current_distance", "the same A50 range before "
+                                                "ArduSub accepted it"),
     ),
     "Depth": _depth_candidates(),
     "DVLx / DVLy": (
@@ -100,17 +100,32 @@ class Feed:
     gap_seconds: float = 0.0
     note: str = ""
 
-    def line(self) -> str:
+    def lines(self) -> list[str]:
+        """Two lines: what this source is, then how it behaved.
+
+        Each candidate carries its own description. Printing one description per
+        *column* put it under whichever source happened to be listed last, so
+        "the autopilot's own baro depth" sat beneath SCALED_PRESSURE2 and read
+        as a label for it.
+        """
         mark = "->" if self.used else "  "
+        # ASCII: this goes to a Windows console, where cp1252 turns an
+        # em-dash into a replacement character.
+        head = f"   {mark} {self.message} -- {self.detail}"
         if not self.samples:
-            return f"   {mark} {self.message:<22} not recorded"
+            return [head, "          not recorded"]
+
         rng = ""
         if self.lo is not None and self.hi is not None:
-            rng = f"  {self.lo:.2f} to {self.hi:.2f}"
-        gaps = (f"  {self.gaps} gap(s) over {GAP_S:.0f}s, worst {self.longest_gap:.1f}s"
-                if self.gaps else "  no gaps")
-        return (f"   {mark} {self.message:<22} {self.samples:>7,} msgs "
-                f"{self.hz:5.1f} Hz{rng}{gaps}")
+            rng = f"   {self.lo:.2f} to {self.hi:.2f}"
+        gaps = (f"   {self.gaps} gap(s) over {GAP_S:.0f}s, worst {self.longest_gap:.1f}s"
+                if self.gaps else "   no gaps")
+        return [head,
+                f"          {self.samples:>7,} msgs  {self.hz:5.1f} Hz{rng}{gaps}"]
+
+    def line(self) -> str:
+        """The one-line form, kept for anything that wants a single string."""
+        return " ".join(x.strip() for x in self.lines())
 
 
 @dataclass
@@ -174,7 +189,7 @@ class FeedReport:
         for column, feeds in self.columns.items():
             win = next((f for f in feeds if f.used), None)
             if win is None:
-                out.append(f"{column} has no source in this recording — the "
+                out.append(f"{column} has no source in this recording -- the "
                            f"column will be empty.")
                 continue
             if win.gaps and not self.per_transect:
@@ -187,7 +202,7 @@ class FeedReport:
                     and feeds and feeds[0] is not win and feeds[0].samples == 0):
                 out.append(
                     f"{column} fell back to {win.message} because "
-                    f"{feeds[0].message} was not recorded — {win.detail}. "
+                    f"{feeds[0].message} was not recorded -- {win.detail}. "
                     f"Width and Area_m2 are derived from it, so this dive is "
                     f"not strictly comparable with ones that used the range."
                 )
@@ -228,10 +243,7 @@ class FeedReport:
             L.append("")
             L.append(f"   {column}")
             for f in feeds:
-                L.append(f.line())
-            win = next((x for x in feeds if x.used), None)
-            if win:
-                L.append(f"      {win.detail}")
+                L.extend(f.lines())
         return L
 
 

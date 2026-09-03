@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import BASE_EPOCH
-from ccr_m2c.feeds import read_feeds
+from ccr_m2c.feeds import PRECEDENCE, Feed, FeedReport, read_feeds
 
 
 def _dive(b, *, seconds=20, rangefinder=True, distance_sensor=True,
@@ -164,3 +164,53 @@ def test_a_constant_depth_source_is_skipped_in_the_report_too(builder):
 def test_rates_are_reported(builder):
     rep = read_feeds([_dive(builder(), seconds=30)])
     assert rep.used("Altitude").hz == pytest.approx(1.0, abs=0.05)
+
+
+# --- how the provenance block reads -----------------------------------------
+
+def test_every_candidate_carries_its_own_description():
+    for column, cands in PRECEDENCE.items():
+        seen: set[str] = set()
+        for message, _field, detail in cands:
+            assert detail, f"{column}/{message} has no description"
+            assert detail not in seen, (
+                f"{column}: {message} reuses another candidate's description")
+            seen.add(detail)
+
+
+def _two_source_report() -> FeedReport:
+    return FeedReport(columns={"Depth": [
+        Feed(message="GLOBAL_POSITION_INT.relative_alt",
+             detail="the autopilot's own baro depth",
+             used=True, samples=100, hz=2.7, lo=-9.7, hi=0.3),
+        Feed(message="SCALED_PRESSURE2.press_abs",
+             detail="the external pressure sensor",
+             samples=50, hz=1.4, lo=1012.8, hi=1981.8),
+    ]})
+
+
+def test_each_source_is_labelled_with_its_own_description():
+    """The description used to be printed once per column, after the last
+    source listed -- so "the autopilot's own baro depth" appeared beneath
+    SCALED_PRESSURE2 and read as a label for it."""
+    text = "\n".join(_two_source_report().lines())
+
+    for line in text.splitlines():
+        if "GLOBAL_POSITION_INT" in line:
+            assert "baro depth" in line
+        if "SCALED_PRESSURE2" in line:
+            assert "external pressure" in line
+
+
+def test_no_description_is_orphaned_at_the_end_of_a_block():
+    text = "\n".join(_two_source_report().lines()).rstrip()
+    assert not text.endswith("the autopilot's own baro depth")
+
+
+def test_the_console_report_stays_ascii():
+    """It is printed to a Windows console, where cp1252 turns an em-dash into a
+    replacement character."""
+    rep = _two_source_report()
+    text = "\n".join(rep.lines() + rep.concerns() + rep.transect_lines())
+    bad = sorted({c for c in text if ord(c) > 127})
+    assert not bad, f"non-ascii in the console report: {bad}"
