@@ -25,7 +25,16 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import binlog, csv_export, discovery, mcap_extract, overlay, rov_video, sorting
+from . import (
+    binlog,
+    csv_export,
+    discovery,
+    mcap_extract,
+    overlay,
+    rov_video,
+    sorting,
+    videoclip,
+)
 from . import compose as compose_mod
 from . import ffmpeg_tools as ff
 from . import sync as sync_mod
@@ -35,7 +44,9 @@ from .survey import (
     Chapter,
     ResolvedTransect,
     SurveyPlan,
+    format_hhmmss,
     local_midnight_epoch,
+    resolve_from_trims,
     resolve_plan,
     utc_offset_hours,
 )
@@ -296,10 +307,17 @@ def _run(
         if not disc.mcaps:
             res.errors.append("No .mcap telemetry found in the flight folder.")
             return _finish(res, started)
-        if not disc.videos:
-            res.errors.append("No downward GoPro video found in the flight folder.")
+        # Per-transect trims are a valid source on their own: a flight whose
+        # full-length footage was never kept, or never uploaded, still has
+        # everything the composite needs.
+        trim_paths = videoclip.find_trims(req.flight_dir)
+        if not disc.videos and not trim_paths:
+            res.errors.append(
+                "No downward GoPro video found in the flight folder, and no "
+                "per-transect trims in videos/transects/.")
             return _finish(res, started)
-        cloud = discovery.check_local(list(disc.mcaps) + disc.video_paths)
+        cloud = discovery.check_local(
+            list(disc.mcaps) + disc.video_paths + list(trim_paths.values()))
         if cloud:
             # Proceeding would appear to hang for hours, so stop and say why.
             res.errors.append(
@@ -308,7 +326,9 @@ def _run(
             )
             return _finish(res, started)
         st.finish("discover", f"found {len(disc.mcaps)} mcap(s), "
-                              f"{len(disc.videos)} video file(s)")
+                              + (f"{len(trim_paths)} transect trim(s)"
+                                 if trim_paths else
+                                 f"{len(disc.videos)} video file(s)"))
 
         errs = req.plan.validate()
         if errs:
@@ -336,10 +356,41 @@ def _run(
         # ---- 3. chapters + transects ---------------------------------
         # Transects are resolved BEFORE the proxy is built, so the proxy can
         # cover only the span they need instead of the whole recording.
-        chapters = describe_chapters(disc.video_paths, ffmpeg)
-        gopro_fps = next((c.fps for c in chapters if c.fps), 23.976)
+        # Prefer per-transect trims when they exist. A trim already is one
+        # transect, so it needs no timecode search -- and it must not get one:
+        # a stream copy keeps the source chapter's timecode, so every trim from
+        # one recording reports the same start and a transect would resolve
+        # against all of them at once.
+        if trim_paths:
+            trims = {name: ch for name, ch in
+                     zip(trim_paths, describe_chapters(list(trim_paths.values()),
+                                                       ffmpeg), strict=True)}
+            gopro_fps = next((c.fps for c in trims.values() if c.fps), 23.976)
+            # No chapters: a trim's timecode is its source recording's, so
+            # there is nothing here the light-based sync check can verify.
+            chapters = []
+            res.resolved = resolve_from_trims(req.plan, trims)
+            res.warnings.append(
+                f"compositing from {len(trims)} per-transect trim(s) in "
+                f"videos/transects/, not from full-length footage")
+        else:
+            chapters = describe_chapters(disc.video_paths, ffmpeg)
+            gopro_fps = next((c.fps for c in chapters if c.fps), 23.976)
 
-        res.resolved = resolve_plan(req.plan, chapters)
+            # Chapters that all claim one start time are trims that lost their
+            # provenance, not chapters. Resolving against them silently
+            # produces a composite several times too long.
+            tcs = {c.tc_start_s for c in chapters if c.tc_start_s is not None}
+            if len(chapters) > 1 and len(tcs) == 1:
+                res.errors.append(
+                    "Every video file reports the same start timecode "
+                    f"({format_hhmmss(next(iter(tcs)))}), so they cannot be "
+                    "placed on the TC-25 clock individually. These look like "
+                    "trimmed copies; put them in videos/transects/<name>/ so "
+                    "UTC can match them to transects by name.")
+                return _finish(res, started)
+
+            res.resolved = resolve_plan(req.plan, chapters)
         for r in res.resolved:
             for w in r.warnings:
                 res.warnings.append(f"{r.site.name}/{r.transect.name}: {w}")
@@ -368,12 +419,23 @@ def _run(
         offset_h = (req.app.sync.utc_offset_hours
                     if req.app.sync.utc_offset_hours is not None
                     else utc_offset_hours(first_date, req.plan.timezone))
-        res.sync = sync_mod.validate(
-            chapters, store.lights_series(), midnight, cache, req.app.sync,
-            ffmpeg=ffmpeg, progress=st.sub("sync"), cancel=cancel,
-        )
-        res.warnings.extend(res.sync.warnings)
-        st.finish("sync", res.sync.message or "sync checked")
+        if chapters:
+            res.sync = sync_mod.validate(
+                chapters, store.lights_series(), midnight, cache, req.app.sync,
+                ffmpeg=ffmpeg, progress=st.sub("sync"), cancel=cancel,
+            )
+            res.warnings.extend(res.sync.warnings)
+            st.finish("sync", res.sync.message or "sync checked")
+        else:
+            # Compositing from trims. The check compares a chapter's timecode
+            # against the ROV's lights, and a trim carries its source
+            # recording's timecode -- so running it would confirm nothing while
+            # looking like it had. Say that rather than report a pass.
+            res.warnings.append(
+                "the light-based TC-25 check was skipped: a trim carries its "
+                "source recording's timecode, so there is nothing to verify. "
+                "Transect times come straight from the plan.")
+            st.finish("sync", "sync check not applicable to trims")
 
         # ---- 6. telemetry CSV ----------------------------------------
         _composites, logs_dir = discovery.output_dirs(req.flight_dir, create=True)

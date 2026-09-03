@@ -41,7 +41,11 @@ _DOWNWARD_DIRS = (
 )
 
 #: Never composite these -- the forward view comes from the mcap instead.
-_EXCLUDE_PARTS = ("forward", "composites", "composite", "archive", "gpr", "photos", "photo")
+#: "transects" holds per-transect trims, which are handled separately: they
+#: carry the source chapter's timecode, so mixing them in with full-length
+#: footage makes a transect resolve against several files at once.
+_EXCLUDE_PARTS = ("forward", "composites", "composite", "archive", "gpr",
+                  "photos", "photo", "transects", "clips")
 
 _MCAP_DIRS = ("logs", "log", "", "mcap", "telemetry")
 

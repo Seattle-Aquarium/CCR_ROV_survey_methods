@@ -136,9 +136,14 @@ def compose_segment(
     start_frame = int(round(overlay_offset_s * seq.fps))
     for prefix, x, y in _overlay_layout(cfg, seq):
         idx += 1
+        # Bound each PNG input to this segment. Without a limit the image
+        # demuxer reads every remaining frame in the sequence, so a part runs
+        # to the end of the whole flight rather than to the end of its own
+        # slice -- which is how a 10-minute transect came out 66 minutes long.
         args += [
             "-framerate", f"{seq.fps:g}",
             "-start_number", str(start_frame),
+            "-t", f"{segment.dur_s:.3f}",
             "-i", str(seq.directory / f"{prefix}_%06d.png"),
         ]
         overlays.append(OverlayInput(prefix, idx, x, y, start_frame))
