@@ -81,6 +81,18 @@ def _checks():
     except Exception as ex:
         yield ("pymavlink", False, f"{type(ex).__name__}: {ex}")
 
+    # The Transects page. Worth its own line because the page imports the
+    # extractor lazily and reports a missing one as a message rather than a
+    # crash -- so a build that shipped without it looks healthy right up until
+    # someone tries to extract a transect.
+    try:
+        from ccr_m2c import tide, transect
+        yield ("transect extractor", True,
+               f"{len(transect.OUTPUT_COLUMNS)} columns, "
+               f"{len(tide.STATIONS)} tide stations")
+    except Exception as ex:
+        yield ("transect extractor", False, f"{type(ex).__name__}: {ex}")
+
     # The one this file exists for.
     yield _overlay_check()
 

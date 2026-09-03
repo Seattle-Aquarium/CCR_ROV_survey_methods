@@ -34,12 +34,6 @@ missing, install it by hand:
 python -m pip install -e ../mcap_to_csv
 ```
 
-> **The packaged `.exe` does not include the extractor.** It needs `pandas` and
-> `scipy`, which `utc.spec` excludes to keep the build near 96 MB, so a
-> collaborator running the executable gets every other screen and a Transects
-> page that says what to install. Extracting transect CSVs is a
-> run-from-source task for now.
-
 ## Folder structure
 
 ```
@@ -105,7 +99,7 @@ flight data.
 
 Hand them **`Underwater-Telemetry-Compositing.exe`** and they double-click it.
 There is nothing else to install — no Python, no ffmpeg, no fonts, no
-timezone database. It is one self-contained file (~96 MB) carrying its own
+timezone database. It is one self-contained file (~131 MB) carrying its own
 copy of everything:
 
 | bundled | why it has to be |
@@ -116,6 +110,7 @@ copy of everything:
 | `tzdata` | Windows ships no IANA database, and without one every transect time resolves to the wrong instant |
 | `pymavlink` | reads the autopilot's `.BIN` dataflash logs |
 | `mcap`, `PyAV`, Pillow, NumPy, CustomTkinter | telemetry, video, imagery, GUI |
+| the transect extractor, with pandas and SciPy | so the Transects page works from the executable, not only from source |
 
 Requirements on their side:
 
@@ -138,7 +133,7 @@ Underwater-Telemetry-Compositing.exe --selftest
 ```
 
 It verifies the bundled ffmpeg, fonts and timezone database, that `pymavlink`
-imports, and that overlay rendering really does run across processes — then
+and the transect extractor import, and that overlay rendering really does run across processes — then
 writes the result to `%TEMP%\utc_selftest.txt` for them to send on. A windowed
 build discards stdout, so the file is the point.
 
@@ -177,7 +172,7 @@ python -m pip install pyinstaller
 pyinstaller utc.spec
 ```
 
-Produces `dist/Underwater-Telemetry-Compositing.exe` (~96 MB), which needs no Python install
+Produces `dist/Underwater-Telemetry-Compositing.exe` (~131 MB), which needs no Python install
 and can be handed to a colleague directly. Windows SmartScreen will warn about
 an unsigned executable the first time: *More info* → *Run anyway*.
 
