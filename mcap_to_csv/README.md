@@ -165,8 +165,12 @@ and stays blank unless the recording carries that message.
 ## Checking the navigation: `--health`
 
 ```bash
-python -m ccr_m2c --health logs/*.mcap
+python -m ccr_m2c --health logs/*.mcap                      # whole dive
+python -m ccr_m2c --health logs/*.mcap --plan utc_plan.json  # and per transect
 ```
+
+**Pass `--plan` (or `--transect`) or you only get the whole dive**, which on a
+real flight is mostly transit and says little about the part being analysed.
 
 The transects are only as good as the navigation behind them, and a recording
 says a great deal about that. This reports which aiding sources the EKF actually

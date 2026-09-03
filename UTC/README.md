@@ -631,6 +631,9 @@ From a terminal, the same report:
 python -m ccr_m2c --health logs/*.mcap --plan utc_plan.json
 ```
 
+Without `--plan` the command reports the whole dive only. The **Transects**
+page always passes the plan it already has, so its report is scoped either way.
+
 ---
 
 ## Layout and appearance

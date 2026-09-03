@@ -165,9 +165,27 @@ class TransectPage(ctk.CTkFrame):
             return
 
         from ccr_m2c.health import read_health
+        from ccr_m2c.pipeline import TransectSpec
+
+        # Scope the report to the transects as well as the whole dive. Most of a
+        # dive is transit -- on 2026-09-02, 85 minutes of recording held about 42
+        # minutes of transect -- so whole-dive dropout counts describe the
+        # surface intervals between them rather than the part being analysed.
+        # The plan is already on screen; not passing it made this page report
+        # numbers nobody could act on.
+        specs: list[TransectSpec] = []
+        try:
+            for site in self.app._plan().sites:
+                specs.extend(
+                    TransectSpec(f"{site.name}_{t.name}", [(t.start_tc, t.end_tc)])
+                    for t in site.transects
+                    if t.start_tc and t.end_tc
+                )
+        except Exception:
+            specs = []          # an unfinished plan still gets the dive-wide view
 
         def work(progress, cancel):
-            return read_health(mcaps, progress=progress)
+            return read_health(mcaps, transects=specs, progress=progress)
 
         def done(report) -> None:
             # Back on the main thread, so the textbox can be touched safely.

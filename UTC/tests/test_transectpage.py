@@ -10,6 +10,7 @@ Skipped where there is no display, like the other GUI tests.
 
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -146,3 +147,60 @@ def test_several_sites_get_the_site_into_the_filename(app):
 
     summary = page.plan_summary.cget("text")
     assert "Alki" in summary and "Centennial" in summary
+
+
+def test_the_health_check_is_scoped_to_the_transects(app, monkeypatch, tmp_path):
+    """The plan is on screen; not passing it made this page report whole-dive
+    dropout counts, which on a real flight describe the transit between
+    transects rather than the part being analysed."""
+    seen: dict = {}
+
+    def fake_read_health(mcaps, transects=(), progress=None):
+        seen["transects"] = list(transects)
+        return SimpleNamespace(lines=lambda: ["report"], concerns=lambda: [])
+
+    monkeypatch.setitem(sys.modules, "ccr_m2c.health",
+                        SimpleNamespace(read_health=fake_read_health))
+    monkeypatch.setattr("utc.gui.transectpage._extractor",
+                        lambda: (SimpleNamespace(), SimpleNamespace()))
+
+    app.flight_dir = tmp_path
+    app.discovery = SimpleNamespace(mcaps=[tmp_path / "a.mcap"])
+    app._apply_plan(SurveyPlan([Site(
+        name="Jack_Block", project="t", date="2026-09-02",
+        transects=[Transect(name="T1", start_tc="09:25:23", end_tc="09:35:37"),
+                   Transect(name="T2", start_tc="09:41:15", end_tc="09:50:42")],
+    )]))
+
+    app.pages["Transects"]._check_health()
+    _pump(app, 40)
+
+    assert "transects" in seen, "read_health was never called"
+    names = [t.transect_id for t in seen["transects"]]
+    assert names == ["Jack_Block_T1", "Jack_Block_T2"]
+    assert seen["transects"][0].windows == [("09:25:23", "09:35:37")]
+
+
+def test_an_unfinished_plan_still_gets_the_dive_wide_report(app, monkeypatch, tmp_path):
+    seen: dict = {}
+
+    def fake_read_health(mcaps, transects=(), progress=None):
+        seen["transects"] = list(transects)
+        return SimpleNamespace(lines=lambda: ["report"], concerns=lambda: [])
+
+    monkeypatch.setitem(sys.modules, "ccr_m2c.health",
+                        SimpleNamespace(read_health=fake_read_health))
+    monkeypatch.setattr("utc.gui.transectpage._extractor",
+                        lambda: (SimpleNamespace(), SimpleNamespace()))
+
+    app.flight_dir = tmp_path
+    app.discovery = SimpleNamespace(mcaps=[tmp_path / "a.mcap"])
+    app._apply_plan(SurveyPlan([Site(
+        name="S", project="t", date="2026-09-02",
+        transects=[Transect(name="T1", start_tc="", end_tc="")],
+    )]))
+
+    app.pages["Transects"]._check_health()
+    _pump(app, 40)
+
+    assert seen.get("transects") == []      # reported, not crashed
