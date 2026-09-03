@@ -10,6 +10,8 @@ Skipped where there is no display, like the other GUI tests.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 ctk = pytest.importorskip("customtkinter")
@@ -37,6 +39,21 @@ def app():
         a.destroy()
     except Exception:
         pass
+
+
+@pytest.fixture
+def installed(monkeypatch):
+    """Pretend the extractor is installed, whatever this environment has.
+
+    _run() checks for the extractor before anything else, so without this a
+    guard test silently exercises the "not installed" branch wherever
+    ccr_m2c is absent -- which is what CI is. One of these failed loudly there;
+    the other passed for the wrong reason, because the not-installed message
+    names ``mcap_to_csv`` and so matched a check for "mcap".
+    """
+    stub = (SimpleNamespace(), SimpleNamespace(STATIONS=[("Test", "9447130")]))
+    monkeypatch.setattr("utc.gui.transectpage._extractor", lambda: stub)
+    return stub
 
 
 def _pump(app, n=20):
@@ -72,7 +89,7 @@ def test_raising_the_page_re_reads_the_plan(app):
     assert "T1" in summary and "T2" in summary
 
 
-def test_it_refuses_without_a_flight_folder(app, monkeypatch):
+def test_it_refuses_without_a_flight_folder(app, monkeypatch, installed):
     said: list[str] = []
     monkeypatch.setattr("utc.gui.transectpage.messagebox.showinfo",
                         lambda t, m: said.append(m))
@@ -85,7 +102,7 @@ def test_it_refuses_without_a_flight_folder(app, monkeypatch):
     assert said and "flight folder" in said[-1].lower()
 
 
-def test_it_refuses_when_the_flight_has_no_mcaps(app, monkeypatch, tmp_path):
+def test_it_refuses_when_the_flight_has_no_mcaps(app, monkeypatch, tmp_path, installed):
     said: list[str] = []
     monkeypatch.setattr("utc.gui.transectpage.messagebox.showinfo",
                         lambda t, m: said.append(m))
@@ -97,6 +114,7 @@ def test_it_refuses_when_the_flight_has_no_mcaps(app, monkeypatch, tmp_path):
     app.pages["Transects"]._run()
 
     assert said and "mcap" in said[-1].lower()
+    assert "not installed" not in said[-1].lower()
 
 
 def test_a_missing_extractor_explains_itself(app, monkeypatch, tmp_path):

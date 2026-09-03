@@ -6,9 +6,9 @@ name: UTC
 on:
   push:
     branches: [main]
-    paths: ["UTC/**", ".github/workflows/utc-ci.yml"]
+    paths: ["UTC/**", "mcap_to_csv/**", ".github/workflows/utc-ci.yml"]
   pull_request:
-    paths: ["UTC/**", ".github/workflows/utc-ci.yml"]
+    paths: ["UTC/**", "mcap_to_csv/**", ".github/workflows/utc-ci.yml"]
   workflow_dispatch:
 
 defaults:
@@ -40,6 +40,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest ruff
+
+      - name: Install the transect extractor
+        # The Transects page drives this sibling package, and run_UTC.bat
+        # installs it alongside UTC. Without it here the page's tests would
+        # exercise only its "not installed" path -- which is how a guard test
+        # came to pass for the wrong reason.
+        run: pip install -e ../mcap_to_csv
 
       - name: Lint
         run: ruff check utc tests

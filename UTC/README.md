@@ -34,6 +34,12 @@ missing, install it by hand:
 python -m pip install -e ../mcap_to_csv
 ```
 
+> **The packaged `.exe` does not include the extractor.** It needs `pandas` and
+> `scipy`, which `utc.spec` excludes to keep the build near 96 MB, so a
+> collaborator running the executable gets every other screen and a Transects
+> page that says what to install. Extracting transect CSVs is a
+> run-from-source task for now.
+
 ## Folder structure
 
 ```
