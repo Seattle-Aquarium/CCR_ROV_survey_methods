@@ -231,6 +231,12 @@ class LightingController:
         for i in range(len(self._lights)):
             if self.set_light_level(i, level):
                 success += 1
+
+            # Arbitrary pause to let each light respond
+            # This could either be tuned to better match the
+            # actual time to respond, or the code to catch
+            # replies from the lights could be made more robust.
+            time.sleep_us(50000)
         return success
 
     def get_light_level(self, light_index):
