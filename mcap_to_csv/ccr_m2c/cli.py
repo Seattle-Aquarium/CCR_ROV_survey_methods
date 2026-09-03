@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 from .health import read_health
+from .vehicle import read_vehicle
 from .mcap_read import probe_mcaps, read_mcaps
 from .mapping import write_map_from_csvs
 from .pipeline import TransectSpec, run
@@ -33,6 +34,7 @@ log = logging.getLogger(__name__)
 #: report on stdout and `> run.log` captures the report without the spinner.
 _CR = "\r"
 _CLEAR = " " * 78
+NL = "\n"
 
 
 def _spin(fraction: float, message: str) -> None:
@@ -81,9 +83,20 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="ccr_m2c",
         description="Turn BlueOS .mcap recordings into per-transect CSVs and a map.")
-    p.add_argument("inputs", nargs="*", help=".mcap files or globs")
+    p.add_argument("inputs", nargs="*",
+                   help=".mcap files or globs; --params also accepts .BIN logs")
     p.add_argument("--inspect", action="store_true",
                    help="print what the recordings contain, then exit")
+    p.add_argument("--params", action="store_true",
+                   help="report the vehicle's firmware and parameters, then exit; "
+                        "give it the .BIN logs as well as the .mcap files, since "
+                        "the .BIN carries the complete parameter set")
+    p.add_argument("--grep", metavar="TEXT",
+                   help="with --params, show only parameters whose name contains "
+                        "this")
+    p.add_argument("--all", action="store_true",
+                   help="with --params, show every parameter rather than the "
+                        "notable ones")
     p.add_argument("--health", action="store_true",
                    help="report what the EKF was using and how the sensors behaved, "
                         "then exit")
@@ -173,6 +186,12 @@ def main(argv: list[str] | None = None) -> int:
     if not paths:
         print("no .mcap files given", file=sys.stderr)
         return 2
+
+    if args.params:
+        rep = read_vehicle(paths, progress=_spin)
+        print(_CLEAR, end=_CR, file=sys.stderr)
+        print(NL.join(rep.lines(grep=args.grep or "", full=args.all)))
+        return 0
 
     if args.health:
         # With a plan or --transect, the report also scopes itself to the

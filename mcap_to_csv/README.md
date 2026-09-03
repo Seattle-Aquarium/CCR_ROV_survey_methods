@@ -162,6 +162,37 @@ and stays blank unless the recording carries that message.
 
 ---
 
+## What the vehicle was: `--params`
+
+```bash
+python -m ccr_m2c --params logs/*.BIN logs/*.mcap      # firmware + parameters
+python -m ccr_m2c --params logs/*.BIN --grep RNGFND    # just the rangefinder
+python -m ccr_m2c --params logs/*.BIN --all            # every parameter
+```
+
+A survey CSV records what the ROV measured. This records the machine that
+measured it, so that when two dives disagree months later you can check whether
+anything about the vehicle changed between them.
+
+**Give it the `.BIN` logs.** The autopilot's dataflash log writes every
+parameter at boot and an explicit version record, unconditionally. An mcap only
+carries parameters a ground station happened to download during that recording:
+on 2026-09-02 the `.BIN` held all 1,038 and `ArduSub V4.5.0 (03c12698)`, while
+the mcap from the same dive held 6 and no version at all. Pass both and the
+`.BIN` supplies the configuration while the mcap supplies the BlueOS side —
+board, OS and kernel, which the `.BIN` does not carry.
+
+Reading `.BIN` files needs `pymavlink`. It is not a dependency of this package;
+without it the `.BIN` is skipped with a note and the mcap is used instead.
+
+The report never lets a partial answer look complete. An mcap-only run says
+`6 of the vehicle's 1038 were captured -- a partial download`, a missing version
+explains that `AUTOPILOT_VERSION` is a reply rather than a broadcast, and the
+BlueOS release is reported as not recorded rather than guessed at from the
+Debian version underneath it.
+
+---
+
 ## Checking the navigation: `--health`
 
 ```bash
