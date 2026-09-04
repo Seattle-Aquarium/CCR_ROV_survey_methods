@@ -10,3 +10,5 @@ numpy>=1.24          # telemetry indexing and the sync check
 customtkinter>=5.2   # GUI
 tzdata>=2024.1       # Windows ships no timezone database; without this every
                      # transect time resolves to the wrong instant
+pywinauto>=0.6.9     # drives Lightroom's Enhance dialog: AI Denoise has
+                     # no scripting interface in any current version

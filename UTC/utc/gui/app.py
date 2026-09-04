@@ -136,6 +136,7 @@ class App(ctk.CTk):
         from .healthpage import HealthPage
         from .importpage import ImportPage
         from .nav import Navigator
+        from .processpage import ProcessPage
         from .transectpage import TransectPage
         from .videopage import VideoPage
 
@@ -153,6 +154,7 @@ class App(ctk.CTk):
             # and the same windows go on to drive the video overlays.
             ("Transects", "mcap to CSV", TransectPage),
             ("Import photos", "card or folder", ImportPage),
+            ("Process photos", "GPR to TIF", ProcessPage),
             ("Video", "trim · composite", VideoPage),
             ("Recording health", "mcap · repair", HealthPage),
             ("Banner tools", "edited JPGs", BannerToolsTab),

@@ -14,6 +14,10 @@ EXTRACTOR = ROOT.parent / "mcap_to_csv"
 
 binaries = []
 datas = [(str(ROOT / "assets"), "assets")]
+# The Lightroom plugin is Lua source that gets copied into Lightroom's
+# Modules folder at run time, so it has to survive the freeze as files.
+datas += [(str(ROOT / "utc" / "lightroom" / "plugin"),
+           "utc/lightroom/plugin")]
 datas += collect_data_files("customtkinter")
 # tzdata is a data-only package: without this the packaged app
 # cannot resolve local times and every transect lands wrong.
@@ -68,7 +72,9 @@ a = Analysis(
                    "pymavlink", "pymavlink.mavutil",
                    "pymavlink.DFReader",
                    "utc.gui.app", "utc.cli", "utc.selftest",
-                   "multiprocessing.spawn", "multiprocessing.popen_spawn_win32"]
+                   "multiprocessing.spawn", "multiprocessing.popen_spawn_win32",
+                   # RAW develop drives Lightroom through Windows UI Automation
+                   "pywinauto", "comtypes", "win32api"]
                   # The Transects page imports the extractor lazily, inside the
                   # function that runs it, so nothing in the source tree points
                   # at it for the dependency scanner to follow.
