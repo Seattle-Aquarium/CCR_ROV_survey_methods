@@ -10,3 +10,8 @@ numpy>=1.24          # telemetry indexing and the sync check
 customtkinter>=5.2   # GUI
 tzdata>=2024.1       # Windows ships no timezone database; without this every
                      # transect time resolves to the wrong instant
+
+# The Transects page drives the transect extractor, a sibling package in this
+# repo rather than something on PyPI. run_UTC.bat installs it automatically;
+# installing UTC by hand needs it too, or that page reports itself unavailable:
+#     python -m pip install -e ../mcap_to_csv

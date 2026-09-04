@@ -16,9 +16,10 @@ import pytest
 
 tk = pytest.importorskip("tkinter")
 
-from conftest import straight_north_dive
-from ccr_m2c.mcap_read import McapInfo
-from ccr_m2c.pipeline import TransectSpec, run
+from conftest import straight_north_dive  # noqa: E402
+
+from ccr_m2c.mcap_read import McapInfo  # noqa: E402
+from ccr_m2c.pipeline import TransectSpec, run  # noqa: E402
 
 
 @pytest.fixture(scope="module")

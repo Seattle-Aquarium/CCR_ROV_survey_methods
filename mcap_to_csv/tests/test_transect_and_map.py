@@ -9,15 +9,17 @@ import re
 import numpy as np
 import pandas as pd
 import pytest
-
 from conftest import BASE_EPOCH, straight_north_dive
+
 from ccr_m2c import mapping
 from ccr_m2c.fsutil import _numbered, publish
 from ccr_m2c.mcap_read import read_mcaps
 from ccr_m2c.pipeline import TransectSpec, run
 from ccr_m2c.tide import add_empty_tide
 from ccr_m2c.transect import (
-    OUTPUT_COLUMNS, build_transect_mask, export_transect,
+    OUTPUT_COLUMNS,
+    build_transect_mask,
+    export_transect,
     sanitize_filename,
 )
 
@@ -368,3 +370,26 @@ def test_run_with_no_windows_takes_the_whole_log(builder, tmp_path):
 
     assert len(result.saved) == 1
     assert len(pd.read_csv(result.saved[0].path)) == 30
+
+
+def test_a_window_through_midnight_selects_both_sides():
+    """A transect from 23:50 to 00:10 is twenty minutes, not an empty set.
+
+    UTC's own `Transect` already reads it that way, so the extractor returning
+    nothing was a silent disagreement between the two halves of the toolchain
+    -- and an empty result looks exactly like a mistyped time.
+    """
+    import pandas as pd
+
+    from ccr_m2c.transect import build_transect_mask
+
+    df = pd.DataFrame({"Time": ["23:45:00", "23:55:00", "00:05:00",
+                                "00:15:00", "12:00:00"]})
+
+    wrapped = build_transect_mask(df, [("23:50:00", "00:10:00")])
+    assert list(df.loc[wrapped, "Time"]) == ["23:55:00", "00:05:00"]
+
+    # the ordinary case must be untouched
+    same_day = build_transect_mask(df, [("23:45:00", "23:55:00")])
+    assert list(df.loc[same_day, "Time"]) == ["23:45:00", "23:55:00"]
+    assert int(build_transect_mask(df, [("11:00:00", "13:00:00")]).sum()) == 1

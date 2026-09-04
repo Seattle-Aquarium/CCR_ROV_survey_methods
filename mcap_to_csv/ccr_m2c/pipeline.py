@@ -12,9 +12,9 @@ is reported as partial, and the transects are still written.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Sequence
 
 import pandas as pd
 
@@ -22,7 +22,10 @@ from . import mapping
 from .mcap_read import ReadResult, read_mcaps
 from .tide import add_empty_tide, fetch_tide_dataframe, merge_tide
 from .transect import (
-    TransectResult, export_transect, georeference_dvl, whole_log_window,
+    TransectResult,
+    export_transect,
+    georeference_dvl,
+    whole_log_window,
 )
 
 log = logging.getLogger(__name__)

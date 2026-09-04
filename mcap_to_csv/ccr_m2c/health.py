@@ -27,19 +27,20 @@ annotated instead.
 from __future__ import annotations
 
 import collections
-import json
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
+from mcap.reader import make_reader
 
 from .mcap_read import (
-    ProgressCB, _brief, _iter_indexed, _iter_sequential, select_channels,
+    ProgressCB,
+    _brief,
+    _iter_indexed,
     select_mcaps,
 )
-from mcap.reader import make_reader
 
 HEALTH_TYPES = (
     "EKF_STATUS_REPORT", "SYS_STATUS", "VIBRATION", "AHRS", "AHRS2",
@@ -126,7 +127,7 @@ class HealthReport:
                 "relative to each other but the whole set can sit off the true "
                 "location, and rotates with any compass error."
             )
-        for name, (med, p95, mx) in self.variances.items():
+        for name, (_med, _p95, mx) in self.variances.items():
             if mx > VARIANCE_LIMIT:
                 out.append(
                     f"{name.replace('_', ' ')} peaked at {mx:.2f} (above {VARIANCE_LIMIT:.0f}); "
@@ -270,9 +271,9 @@ def read_health(paths: Sequence[Path | str], *,
         try:
             with open(path, "rb") as fh:
                 reader = make_reader(fh)
-                chosen = {k: v for k, v in select_channels(reader).items()}
-                # select_channels only returns types the extractor wants; the
-                # diagnostic ones are found the same way, from the topic names.
+                # select_channels returns only the types the extractor
+                # wants, which is not what health cares about -- the
+                # diagnostic topics are found from the topic names instead.
                 summary = reader.get_summary()
                 topics = {}
                 if summary:

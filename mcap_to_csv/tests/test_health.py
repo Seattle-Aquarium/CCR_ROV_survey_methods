@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-
 from conftest import BASE_EPOCH
-from ccr_m2c.health import HealthReport, read_health
+
+from ccr_m2c.health import read_health
 
 MAG = "MAV_SYS_STATUS_SENSOR_3D_MAG"
 AHRS = "MAV_SYS_STATUS_AHRS"

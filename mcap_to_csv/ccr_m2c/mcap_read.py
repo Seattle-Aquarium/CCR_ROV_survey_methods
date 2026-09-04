@@ -42,15 +42,14 @@ from __future__ import annotations
 import json
 import logging
 import math
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Sequence
 
 import numpy as np
 import pandas as pd
 import pytz
-
 from mcap.reader import make_reader
 from mcap.records import Channel, Message
 from mcap.stream_reader import StreamReader
@@ -258,7 +257,7 @@ def select_mcaps(paths: Sequence[Path | str]) -> tuple[list[Path], list[str]]:
     good.sort(key=lambda i: i.start or 0.0)
 
     runs: list[list[McapInfo]] = [[good[0]]]
-    for prev, cur in zip(good, good[1:]):
+    for prev, cur in zip(good, good[1:], strict=False):   # pairwise
         gap = (cur.start or 0.0) - (prev.start or 0.0)
         if gap > STRAY_GAP_HOURS * 3600:
             runs.append([])

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-
 from conftest import BASE_EPOCH
+
 from ccr_m2c.feeds import read_feeds
 
 

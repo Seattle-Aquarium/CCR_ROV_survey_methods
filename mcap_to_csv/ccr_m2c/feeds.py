@@ -17,16 +17,20 @@ from __future__ import annotations
 
 import collections
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
-
 from mcap.reader import make_reader
 
 from .mcap_read import (
-    DEPTH_PRECEDENCE, _brief, _iter_indexed, _msg_type, _sysid_rank, select_mcaps,
+    DEPTH_PRECEDENCE,
+    _brief,
+    _iter_indexed,
+    _msg_type,
+    _sysid_rank,
+    select_mcaps,
 )
 
 
@@ -361,7 +365,9 @@ def read_feeds(paths: Sequence[Path | str],
         # First candidate with data wins, mirroring the extractor. Depth carries
         # the extra rules _add_depth applies, so the source named here is the
         # one that will actually appear in Depth_Source.
-        for feed, (message, field_, _d) in zip(feeds, candidates):
+        # One Feed was appended per candidate just above, so these are
+        # the same length by construction.
+        for feed, (message, field_, _d) in zip(feeds, candidates, strict=True):
             if feed.samples == 0:
                 continue
             if column == "Depth":
