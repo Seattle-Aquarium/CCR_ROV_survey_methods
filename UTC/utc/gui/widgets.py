@@ -23,13 +23,54 @@ class Card(ctk.CTkFrame):
         head.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(head, text=title, font=T.FONT_H1, text_color=T.HEADING
                      ).grid(row=0, column=0, sticky="w")
+        self._subtitle = None
         if subtitle:
-            ctk.CTkLabel(head, text=subtitle, font=T.FONT_SMALL,
-                         text_color=T.TEXT_MUTED, justify="left", anchor="w"
-                         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
+            self._subtitle = ctk.CTkLabel(head, text=subtitle, font=T.FONT_SMALL,
+                                          text_color=T.TEXT_MUTED,
+                                          justify="left", anchor="w")
+            self._subtitle.grid(row=1, column=0, columnspan=2, sticky="ew",
+                                pady=(2, 0))
+            # A label will not wrap unless it is given a width, and the card's
+            # width is not known until it has been laid out. Without this a long
+            # subtitle runs off the right edge of the window instead of flowing
+            # onto a second line -- and the end of the sentence is simply lost.
+            self.bind("<Configure>", self._fit_subtitle, add="+")
+
         self.body = ctk.CTkFrame(self, fg_color="transparent")
         self.body.grid(row=1, column=0, sticky="nsew", padx=T.PAD, pady=(4, T.PAD))
         self.body.grid_columnconfigure(0, weight=1)
+
+    def _fit_subtitle(self, event) -> None:
+        """Keep the subtitle wrapped to the card's current width.
+
+        The width has to be divided by the display scaling before it is handed
+        over: CustomTkinter multiplies wraplength by the same factor on its way
+        to the underlying label. On a 150% display, passing the measured pixel
+        width asks for a wrap point half again wider than the card, so the
+        longest subtitles never wrapped at all.
+        """
+        if self._subtitle is None:
+            return
+        # The head frame is inset by T.PAD on each side, and a few pixels
+        # more go to the card's own border and rounding. Erring narrow
+        # costs nothing; erring wide clips the last word of the line.
+        width = event.width - 2 * T.PAD - 16
+        if width < 120:
+            return
+        try:
+            scaling = ctk.ScalingTracker.get_widget_scaling(self)
+        except Exception:
+            scaling = 1.0
+        target = int(width / (scaling or 1.0))
+
+        # Re-wrapping changes the label's height, which fires <Configure> again;
+        # ignoring changes of a few pixels stops that becoming a loop.
+        try:
+            current = int(self._subtitle.cget("wraplength"))
+        except (TypeError, ValueError):
+            current = 0
+        if abs(current - target) > 8:
+            self._subtitle.configure(wraplength=target)
 
 
 def entry(master, placeholder: str = "", width: int = 140, **kw) -> ctk.CTkEntry:

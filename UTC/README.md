@@ -4,15 +4,35 @@ File management and telemetry overlays for ROV survey flights: create a flight's
 folder structure, sort its imagery into transects, stamp telemetry onto stills,
 and build one composite video per transect.
 
-The app has five screens on a left-hand rail, following the life of a flight:
+The app has six screens on a left-hand rail, following the life of a flight:
 
 | Screen | What it does |
 |---|---|
 | **Flight setup** | Create a flight's folders, then enter its transect times once. Draws a dive profile with the transects marked, so a mistyped time is obvious before anything is processed. |
+| **Transects** | Cut the `.mcap` telemetry into one CSV per transect, plus a map of the site. Uses the times from Flight setup, so they are entered once. |
 | **Import photos** | Pull stills off the camera card straight into transect folders, renamed and bannered. Copies, never moves. |
 | **Video** | Trim each transect from the GoPro, build composites, and cut short shareable clips. |
 | **Recording health** | Check each `.mcap` for damage, repair the ones the vehicle never closed, and — when a recording is beyond saving — read telemetry from the autopilot's own `.BIN` log instead. |
 | **Banner tools** | Add the telemetry banner to any folder of stills, later. |
+
+## Transects (mcap to CSV)
+
+The **Transects** page runs the extractor in [`mcap_to_csv/`](../mcap_to_csv/)
+against the flight that is already open. It reads the survey plan from Flight
+setup and the recordings from the flight folder, so the transect windows are
+typed once and drive both the CSVs and the video overlays — two copies of those
+times drifting apart is the kind of error that only shows up when the analysis
+disagrees with the footage.
+
+It writes one CSV per transect plus a Leaflet map of the site. Column meanings
+and provenance are in [COLUMNS.md](../mcap_to_csv/COLUMNS.md).
+
+`run_UTC.bat` installs the extractor alongside UTC. If the page reports it
+missing, install it by hand:
+
+```bash
+python -m pip install -e ../mcap_to_csv
+```
 
 ## Folder structure
 
@@ -79,7 +99,7 @@ flight data.
 
 Hand them **`Underwater-Telemetry-Compositing.exe`** and they double-click it.
 There is nothing else to install — no Python, no ffmpeg, no fonts, no
-timezone database. It is one self-contained file (~96 MB) carrying its own
+timezone database. It is one self-contained file (~131 MB) carrying its own
 copy of everything:
 
 | bundled | why it has to be |
@@ -90,6 +110,7 @@ copy of everything:
 | `tzdata` | Windows ships no IANA database, and without one every transect time resolves to the wrong instant |
 | `pymavlink` | reads the autopilot's `.BIN` dataflash logs |
 | `mcap`, `PyAV`, Pillow, NumPy, CustomTkinter | telemetry, video, imagery, GUI |
+| the transect extractor, with pandas and SciPy | so the Transects page works from the executable, not only from source |
 
 Requirements on their side:
 
@@ -112,22 +133,33 @@ Underwater-Telemetry-Compositing.exe --selftest
 ```
 
 It verifies the bundled ffmpeg, fonts and timezone database, that `pymavlink`
-imports, and that overlay rendering really does run across processes — then
+and the transect extractor import, and that overlay rendering really does run across processes — then
 writes the result to `%TEMP%\utc_selftest.txt` for them to send on. A windowed
 build discards stdout, so the file is the point.
 
 ### For development
 
-Double-click **`run_UTC.bat`**, or from a terminal:
+Double-click **`run_UTC.bat`**. Nothing needs installing first beyond Python
+3.10 or newer: on its first run the launcher builds a private environment in
+`%LOCALAPPDATA%\CCR_ROV\venv`, installs UTC and the transect extractor into it,
+and starts the app. That takes a few minutes once; after that it opens straight
+away.
+
+The environment sits outside the repo deliberately — this checkout lives in a
+OneDrive folder, and a virtualenv there would be thousands of files for the sync
+client to chew through forever. `run_MCAP_to_CSV.bat` shares the same
+environment, so whichever runs first does the work.
+
+The launcher tests each Python it finds rather than taking the first one on
+disk. A partial install still leaves a `python.exe` that cannot find its own
+standard library, and choosing it produces a misleading `_tkinter` DLL error
+rather than an obvious "this Python is broken".
+
+From a terminal instead:
 
 ```
+python -m pip install -e .
 python -m utc.gui.app
-```
-
-First time only:
-
-```
-python -m pip install -r requirements.txt
 ```
 
 `ffmpeg` does not need installing separately — the `imageio-ffmpeg` wheel ships
@@ -140,7 +172,7 @@ python -m pip install pyinstaller
 pyinstaller utc.spec
 ```
 
-Produces `dist/Underwater-Telemetry-Compositing.exe` (~96 MB), which needs no Python install
+Produces `dist/Underwater-Telemetry-Compositing.exe` (~131 MB), which needs no Python install
 and can be handed to a colleague directly. Windows SmartScreen will warn about
 an unsigned executable the first time: *More info* → *Run anyway*.
 
@@ -364,7 +396,23 @@ Two things that alignment gets right, both learned the hard way:
 
 ---
 
-## The telemetry CSV
+## The two CSVs
+
+UTC writes two different telemetry files, and it is worth knowing which is which
+before opening one:
+
+| File | Written by | Covers | Rows |
+|---|---|---|---|
+| `logs/<date>_<project>_telemetry_1Hz.csv` | **Video** (alongside the composites) | the whole flight, including surface time | one per second of the recording |
+| `transects/<Transect_ID>.csv` | **Transects** | one transect each | one per second of that transect |
+
+The flight CSV is the diagnostic record of the dive. The transect CSVs are the
+analysis product: georeferenced, tide-standardised, and shaped to drop into the
+VIAME and percent-cover joins.
+
+---
+
+## The flight telemetry CSV
 
 One row per second across the whole recorded span, so descents, ascents and
 between-transect manoeuvring stay in the record. Rows outside a transect are
@@ -379,6 +427,209 @@ confidence and per-beam ranges, vibration, light power, gain and camera tilt.
 Values are held forward from the last sample — these are sampled states, not
 continuous signals — but only up to a staleness limit. A DVL that drops out
 leaves blanks rather than a flat line, so a dead sensor cannot look healthy.
+
+---
+
+## The transect CSV columns
+
+What the **Transects** step writes: 44 columns, one row per second, local times
+in US/Pacific. Grouped by what they are for — what and when, where, how it was
+moving, how deep, what the camera saw, then power, pilot settings, and the raw
+inputs behind the derived columns.
+
+**Read the Origin column before trusting a figure.** It is the difference
+between a measurement and an estimate:
+
+| Origin | Meaning |
+| --- | --- |
+| **Direct** | Read straight off one sensor, or reported by the autopilot. Unit conversion only. |
+| **Fused** | The autopilot's EKF combined several sensors. Smoother than any one of them, and no longer traceable to a single instrument. |
+| **Computed** | Derived from other columns. No new information — inherits the trustworthiness of its inputs. |
+| **Calibrated** | Computed using a constant measured off the camera rig, not the vehicle. Wrong if the camera, lens or housing changes and the constant does not. |
+| **Entered** | Typed in, or read from the survey plan. |
+| **External** | From outside the vehicle — the NOAA tide station. |
+
+<!-- transect-columns: generated by mcap_to_csv/tools/column_docs.py -->
+
+**Identity and time**
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Date` | Local calendar date. | mcap `log_time` → US/Pacific | Computed | — |
+| `Time` | Local clock time, `HH:MM:SS`. This is what transect windows are written in. | mcap `log_time` → US/Pacific | Computed | — |
+| `Datetime_UTC` | The same instant in UTC, for joins that must not depend on daylight saving. | mcap `log_time` | Computed | — |
+| `Site_name` | Survey site. | typed in, or from the survey plan | Entered | — |
+| `Transect_number` | Order of this transect within the run, from 1. | this tool | Computed | — |
+| `Transect_ID` | Transect name. Also the CSV filename. | typed in, or from the survey plan | Entered | — |
+
+**Vehicle state**
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Mode_num` | ArduSub flight mode, as a number. | `HEARTBEAT.custom_mode` (system 1, component 1) | Direct | last |
+| `Mode` | The same mode by name — `MANUAL`, `ALT_HOLD`, `SURFTRAK`. | lookup table applied to `Mode_num` | Computed | last |
+
+**Position**
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Latitude` | Surface position from the acoustic tracker. Repeats unchanged whenever the tracker has no lock. | `GPS_RAW_INT.lat` ÷ 1e7 — Water Linked UGPS, injected as `GPS_INPUT` | Direct | last |
+| `Longitude` | As above. | `GPS_RAW_INT.lon` ÷ 1e7 | Direct | last |
+| `EKFlat` | Fused global position. **Blank whenever the EKF has no absolute fix**, which is every dive without a locked USBL. | `GLOBAL_POSITION_INT.lat` ÷ 1e7 | Fused | last |
+| `EKFlon` | As above. | `GLOBAL_POSITION_INT.lon` ÷ 1e7 | Fused | last |
+| `DVLlat` | The DVL track as coordinates. Propagated once across the whole dive, so transects keep their true separation. | geodesic walk of the `DVLx`/`DVLy` steps from the dive's first valid fix | Computed | — |
+| `DVLlon` | As above. | as above | Computed | — |
+| `GPS_fix_type` | Fix state of the acoustic tracker. `NO_GPS` means the positions are dead reckoning. | `GPS_RAW_INT.fix_type` | Direct | last |
+| `GPS_satellites` | Locator count the tracker reports. | `GPS_RAW_INT.satellites_visible` | Direct | last |
+| `DVLx` | Metres north of the transect start. Re-zeroed at each transect. | `LOCAL_POSITION_NED.x` when recorded — else `VISION_POSITION_DELTA` integrated and rotated by `ATTITUDE.yaw` | Fused / Computed | last |
+| `DVLy` | Metres east of the transect start. | `LOCAL_POSITION_NED.y`, or the same integration | Fused / Computed | last |
+| `DVL_source` | Which of the two fed `DVLx`/`DVLy` on this dive. | this tool | Computed | — |
+| `DVL_confidence` | The DVL's own confidence in its bottom lock, as a percentage. | `VISION_POSITION_DELTA.confidence` | Direct | mean |
+
+**Attitude and motion**
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Heading` | Degrees from north. A yaw error here rotates the whole DVL track. | `ATTITUDE.yaw` → degrees (compass + gyro + accelerometer) | Fused | circular mean |
+| `Roll` | Degrees. | `ATTITUDE.roll` → degrees | Fused | mean |
+| `Pitch` | Degrees. | `ATTITUDE.pitch` → degrees | Fused | mean |
+| `Velocity_mps` | Speed over ground. Cleaner than the HUD's figure, which carries filter spikes. | `VISION_POSITION_DELTA` horizontal magnitude ÷ its own `time_delta_usec`; falls back to `VFR_HUD.groundspeed` | Direct | mean |
+| `Distance` | Metres travelled during this second. Sum it for transect length. | change in `DVLx`/`DVLy` from the previous row; steps under 2 cm count as zero | Computed | — |
+
+**Depth**
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Depth` | Metres, **negative down**. | first available of `VFR_HUD.alt` (< −0.5), `GLOBAL_POSITION_INT.relative_alt` ÷ 1000, −`LOCAL_POSITION_NED.z`, or derived from `SCALED_PRESSURE2` | Fused | last |
+| `Depth_std` | Seabed depth on the MLLW datum, so dives at different tide stages compare. | −`Altitude` + `Depth` + NOAA water level | External / Computed | — |
+| `Depth_Source` | Which of those four answered, row by row. | this tool | Computed | — |
+
+**Altitude and camera footprint**
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Altitude` | Metres above the seabed. Drives `Width` and `Area_m2`. | `RANGEFINDER.distance` — the DVL A50's own range; falls back to `DISTANCE_SENSOR` id 0 ÷ 100 | Direct | mean |
+| `Width` | Metres of seabed across the frame. | `1.10 m × (Altitude ÷ 0.82 m)` — scales linearly with altitude | **Calibrated** | mean of samples |
+| `Area_m2` | Square metres of seabed in the frame, at that instant. | `0.99 m² × (Altitude ÷ 0.82 m)²` — scales with the square of altitude | **Calibrated** | mean of samples |
+
+**The water**
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Water_temp_C` | Water temperature at the depth sensor. | `SCALED_PRESSURE2.temperature` ÷ 100 | Direct | mean |
+
+**Power**
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Battery_V` | Pack voltage. | `BATTERY_STATUS.voltages[0]` ÷ 1000; falls back to `SYS_STATUS.voltage_battery` | Direct | mean |
+| `Battery_A` | Current draw. | `BATTERY_STATUS.current_battery` ÷ 100 | Direct | mean |
+| `Battery_W` | Power draw. Genuinely instantaneous — voltage and current arrive in the same message. | `Battery_V × Battery_A`, per message | Computed | mean |
+| `Battery_mAh_used` | Charge used since this transect began, not since power-on. | `BATTERY_STATUS.current_consumed` minus its value in the first row | Computed | last |
+| `Battery_Wh_used` | Energy used since this transect began. | `BATTERY_STATUS.energy_consumed` × 100 ÷ 3600, minus its value in the first row | Computed | last |
+
+**Pilot settings**
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Lights_pct` | Light output as a percentage. | `NAMED_VALUE_FLOAT "Lights1"` × 100 | Direct | last |
+| `Cam_tilt` | Camera tilt setting. | `NAMED_VALUE_FLOAT "CamTilt"` | Direct | last |
+
+**Raw inputs and recording quality**
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Relative_alt_m` | The autopilot's own baro-derived depth, negative down. | `GLOBAL_POSITION_INT.relative_alt` ÷ 1000 | Fused | last |
+| `VFR_alt` | The HUD's altitude field. Reads a flat zero on some vehicle configurations. | `VFR_HUD.alt` | Fused | last |
+| `NEDz` | Local-frame z, positive down. Blank when the message is not recorded. | `LOCAL_POSITION_NED.z` | Fused | last |
+| `Pressure_abs_hPa` | Absolute water pressure. Independent of the EKF, which makes it a useful cross-check on depth. | `SCALED_PRESSURE2.press_abs` (external Bar30) | Direct | mean |
+| `Messages` | How many MAVLink messages went into this second. A thin row is a dropout. | counted while reading | Computed | count |
+
+<!-- /transect-columns -->
+
+### Three things that catch people out
+
+**The last four columns are diagnostics, not analysis.** `Relative_alt_m`,
+`VFR_alt`, `NEDz` and `Pressure_abs_hPa` are the raw candidates `Depth` chooses
+from, row by row; `Depth_Source` records which one answered. They are in the file
+so a suspicious `Depth` can be checked against the alternatives — and that is not
+hypothetical. On 2026-08-26 `VFR_alt` sat at a constant −0.61 m for a whole dive
+that reached 17 m, and comparing it against `Relative_alt_m` is the only reason
+that was caught. Use `Depth` (or `Depth_std`) for analysis.
+
+**`NEDz` has the opposite sign** to everything else: positive-down, where
+`Depth`, `Relative_alt_m` and `VFR_alt` are negative-down. It is also blank on
+recordings that do not carry `LOCAL_POSITION_NED`, which is many of them.
+
+**Do not sum `Area_m2`** to get ground covered. At survey speed that counts the
+same patch of seabed once per second the ROV was over it, inflating the total by
+orders of magnitude. Use mean `Width` × total `Distance`.
+
+Full provenance for every column, including the per-second averaging rules and
+the camera calibration constants, is in
+[mcap_to_csv/COLUMNS.md](../mcap_to_csv/COLUMNS.md).
+
+---
+
+## Sensor health
+
+Step 5 on the **Transects** page. The transect CSVs are only as good as the
+navigation behind them, and a recording says a great deal about that if asked.
+
+> Not to be confused with the **Recording health** screen, which asks whether the
+> `.mcap` *file* is intact and repairable. This asks whether the *instruments*
+> inside a readable recording were working.
+
+It reports four things:
+
+**Which aiding sources the EKF actually had.** The line to read first is
+*absolute horizontal position*. If it says `NO -- dead reckoning only`, the
+filter never accepted a GPS or USBL fix and every horizontal position in the
+output came from the DVL: the transects are correct relative to one another, but
+the whole set can sit off the true location and rotates with any compass error.
+
+**Where each column's numbers came from**, and how each source behaved — sample
+rate, value range, and the dropouts that leave holes. This is the same
+precedence the extractor uses, so the source named here is the one that appears
+in `Depth_Source` and `DVL_source`.
+
+**Innovation variances.** How the filter reports it is fighting a sensor, before
+anything visibly breaks. Below 1.0 it is accepting the reading; above, it is
+rejecting or straining. `compass_variance` matters more than it looks — a yaw
+error rotates the entire DVL track about its start point, and no amount of good
+DVL data corrects for it.
+
+**Sensor health, vibration, and the autopilot's own warnings**, then a short list
+of what is actually worth acting on.
+
+### Give it the transects
+
+With a survey plan loaded, the report also measures each column *inside* each
+transect, and judges its warnings on those alone. This matters more than it
+sounds. A dive is mostly not transect:
+
+| 2026-09-02 Jack Block Park | Whole dive | Inside the transects |
+|---|---|---|
+| Altitude dropouts | 638, worst **275 s** | worst **2.9–6.9 s** |
+| Coverage | — | 88–94% |
+
+85 minutes of recording held about 42 minutes of transect, so the whole-dive
+figures were measuring the surface intervals between them and said nothing about
+the data being analysed.
+
+### One judgement is built in
+
+Without GPS or a locked USBL, ArduSub reports the **AHRS** health bit unhealthy
+for the entire dive. It means *"no absolute position"*, not *"the attitude
+solution is broken"*. Raising that as a fault would fire on every survey the team
+flies and teach everyone to ignore the list, so it is annotated instead — unless
+the dive did have an absolute fix, where it is a real concern.
+
+From a terminal, the same report:
+
+```bash
+python -m ccr_m2c --health logs/*.mcap --plan utc_plan.json
+```
 
 ---
 

@@ -347,6 +347,31 @@ class VideoPage(ctk.CTkFrame):
                 if "composites" not in p.parts and "transects" not in p.parts]
         return describe_chapters(vids)
 
+    def _trims(self) -> dict[str, Path]:
+        from .. import videoclip
+        if not self.app.flight_dir:
+            return {}
+        return videoclip.find_trims(Path(self.app.flight_dir))
+
+    @staticmethod
+    def _describe_trims(trims: dict[str, Path]) -> str:
+        """Say what will be composited, and why no timecode is shown.
+
+        A trim is a stream copy, so it carries the source chapter's timecode --
+        every trim from one recording reports the same start. They are matched
+        to transects by folder name instead, which is why the timecode is not
+        worth printing here.
+        """
+        from ..layout import transect_sort_key
+        lines = [f"{len(trims)} per-transect trim(s) in videos/transects/ --"
+                 f" composites will be built from these.",
+                 "Matched to transects by folder name, not by timecode.", ""]
+        for name in sorted(trims, key=transect_sort_key):
+            f = trims[name]
+            mb = f.stat().st_size / 1e6 if f.is_file() else 0
+            lines.append(f"   {name:5s} {f.name}   {mb:,.0f} MB")
+        return "\n".join(lines)
+
     def _scan(self) -> None:
         self._say("Reading timecode …")
         self.update_idletasks()
@@ -355,8 +380,20 @@ class VideoPage(ctk.CTkFrame):
         except Exception as ex:
             messagebox.showerror(self.app.title(), f"Could not read it: {ex}")
             return
+        # Per-transect trims are a valid source in their own right, and a
+        # flight whose full-length footage was never kept has nothing else.
+        # Report them rather than saying there is no video: the composite step
+        # prefers them anyway, so "nothing found" would be plainly wrong.
+        trims = self._trims()
         if not ch:
-            self._say("No video files found here.")
+            if trims:
+                self._say(self._describe_trims(trims))
+                return
+            self._say("No video files found here, and no per-transect trims "
+                      "in videos/transects/.")
+            return
+        if trims:
+            self._say(self._describe_trims(trims))
             return
         from ..survey import format_hhmmss
         lines = [f"{len(ch)} file(s) in {self.source}"]

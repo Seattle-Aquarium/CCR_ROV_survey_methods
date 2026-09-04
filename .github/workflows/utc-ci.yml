@@ -6,9 +6,9 @@ name: UTC
 on:
   push:
     branches: [main]
-    paths: ["UTC/**", ".github/workflows/utc-ci.yml"]
+    paths: ["UTC/**", "mcap_to_csv/**", ".github/workflows/utc-ci.yml"]
   pull_request:
-    paths: ["UTC/**", ".github/workflows/utc-ci.yml"]
+    paths: ["UTC/**", "mcap_to_csv/**", ".github/workflows/utc-ci.yml"]
   workflow_dispatch:
 
 defaults:
@@ -41,6 +41,13 @@ jobs:
           pip install -r requirements.txt
           pip install pytest ruff
 
+      - name: Install the transect extractor
+        # The Transects page drives this sibling package, and run_UTC.bat
+        # installs it alongside UTC. Without it here the page's tests would
+        # exercise only its "not installed" path -- which is how a guard test
+        # came to pass for the wrong reason.
+        run: pip install -e ../mcap_to_csv
+
       - name: Lint
         run: ruff check utc tests
 
@@ -64,8 +71,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
+          # Bundled into the .exe so the Transects page works for someone who
+          # only has the executable. Not editable: PyInstaller cannot follow an
+          # editable install's import hook.
+          pip install ../mcap_to_csv
       - name: Build the executable
         run: pyinstaller --noconfirm utc.spec
+      - name: Check it runs
+        # A build can succeed and still produce an .exe that dies on its first
+        # import -- which is how a missing DLL was found. The self-test covers
+        # ffmpeg, fonts, timezones, pymavlink and the transect extractor.
+        run: dist/Underwater-Telemetry-Compositing.exe --selftest
+
       - name: Check it exists
         shell: pwsh
         run: |

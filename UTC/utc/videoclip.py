@@ -80,6 +80,29 @@ def clip_name(resolved: ResolvedTransect) -> str:
     return f"{resolved.output_stem('4K')}_source.mp4"
 
 
+def find_trims(flight: Path) -> dict[str, Path]:
+    """Per-transect trims already on disk, keyed by transect name.
+
+    Keyed by the folder they sit in rather than by anything inside the file.
+    A trim is a stream copy, and a stream copy carries the *source* chapter's
+    timecode track unchanged -- so every trim from one GoPro recording claims
+    the same start time. Trusting that made a transect resolve against all four
+    trims at once and produced a 66-minute composite of a 10-minute transect.
+    The folder name is the one piece of provenance that survives the copy.
+    """
+    root = Path(flight) / layout.VIDEOS / layout.TRANSECTS
+    if not root.is_dir():
+        return {}
+    out: dict[str, Path] = {}
+    for d in sorted(root.iterdir()):
+        if not d.is_dir():
+            continue
+        hits = sorted(d.glob("*_source.mp4")) or sorted(d.glob("*.mp4"))
+        if hits:
+            out[d.name] = hits[0]
+    return out
+
+
 def trim_transect(
     resolved: ResolvedTransect,
     out_path: Path,

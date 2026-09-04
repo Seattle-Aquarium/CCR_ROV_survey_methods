@@ -1,0 +1,12 @@
+# MCAP to CSV - Transect Extractor
+# Install with:  python -m pip install -r requirements.txt
+mcap>=1.1          # BlueOS telemetry container
+zstandard>=0.21    # mcap chunks are zstd-compressed
+pandas>=2.0        # the per-second table
+numpy>=1.24
+pytz>=2023.3       # US/Pacific, with daylight saving
+geopy>=2.3         # geodesic propagation of the DVL track
+scipy>=1.10        # cubic spline over the NOAA one-minute tide
+requests>=2.28     # NOAA tide API
+# tkinter is part of the standard library on Windows and macOS.
+# On Debian/Ubuntu: sudo apt install python3-tk

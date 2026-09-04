@@ -441,6 +441,55 @@ def resolve_transect(
     )
 
 
+def resolve_from_trims(
+    plan: SurveyPlan,
+    trims: dict[str, Chapter],
+) -> list[ResolvedTransect]:
+    """Resolve a plan against per-transect trims instead of GoPro chapters.
+
+    A trim already *is* one transect, so there is nothing to search for: it
+    contributes a single segment starting at its own first frame. That matters
+    because a trim cannot be placed on the TC-25 clock by its timecode track --
+    a stream copy keeps the source chapter's timecode, so every trim from one
+    recording reports the same start.
+
+    The pairing is by transect name, which is how the trim folders are laid
+    out. A transect with no trim resolves to nothing and is reported, exactly
+    as an uncovered transect would be.
+    """
+    out: list[ResolvedTransect] = []
+    for site in plan.sites:
+        midnight = local_midnight_epoch(site.date_obj(), plan.timezone)
+        for t in site.transects:
+            want = t.duration_s()
+            ch = trims.get(t.name)
+            warnings: list[str] = []
+            segments: list[Segment] = []
+            covered = 0.0
+            if ch is None:
+                warnings.append(
+                    f"no trimmed video found for {t.name}; expected one in "
+                    f"videos/transects/{t.name}/")
+            else:
+                have = ch.duration or 0.0
+                dur = min(have, want) if have else want
+                segments = [Segment(chapter=ch, in_s=0.0, dur_s=dur)]
+                covered = dur
+                # A trim shorter than its transect means the trim was cut from
+                # footage that ran out, not that the times are wrong.
+                if have and have + 1.0 < want:
+                    warnings.append(
+                        f"the trim is {have:.0f}s but {t.name} is {want:.0f}s; "
+                        f"only the footage that exists will be composited")
+            out.append(ResolvedTransect(
+                site=site, transect=t, segments=segments,
+                epoch_start=midnight + t.start_s(),
+                epoch_end=midnight + t.start_s() + want,
+                covered_s=covered, requested_s=want, warnings=warnings,
+            ))
+    return out
+
+
 def resolve_plan(
     plan: SurveyPlan, chapters: Sequence[Chapter]
 ) -> list[ResolvedTransect]:
