@@ -125,7 +125,8 @@ class TransectBlock:
         id_row.pack(fill="x", padx=4, pady=(2, 0))
         ttk.Label(id_row, text="Transect ID:").pack(side="left")
         self.transect_id_var = tk.StringVar()
-        ttk.Entry(id_row, textvariable=self.transect_id_var, width=30).pack(side="left", padx=(4, 0))
+        ttk.Entry(id_row, textvariable=self.transect_id_var, width=30).pack(
+            side="left", padx=(4, 0))
         ttk.Label(id_row, text="(used as the output CSV filename, e.g. EBM_S24_T4)",
                   foreground="grey").pack(side="left", padx=(6, 0))
 
@@ -250,9 +251,11 @@ class App:
 
         btn_row = ttk.Frame(files_frame)
         btn_row.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        ttk.Button(btn_row, text="Add File(s)...", command=self.add_files).pack(side="left", padx=(0, 4))
+        ttk.Button(btn_row, text="Add File(s)...",
+                   command=self.add_files).pack(side="left", padx=(0, 4))
         ttk.Button(btn_row, text="Add Folder...", command=self.add_folder).pack(side="left", padx=4)
-        ttk.Button(btn_row, text="Remove Selected", command=self.remove_selected).pack(side="left", padx=4)
+        ttk.Button(btn_row, text="Remove Selected",
+                   command=self.remove_selected).pack(side="left", padx=4)
         ttk.Button(btn_row, text="Clear All", command=self.clear_files).pack(side="left", padx=4)
 
         self.span_var = tk.StringVar(value="")
@@ -265,11 +268,13 @@ class App:
         # ---- site info ----
         ttk.Label(root, text="Site name:").grid(row=5, column=0, sticky="e", **pad)
         self.site_var = tk.StringVar(value=self.cfg.get("site_name", ""))
-        ttk.Entry(root, textvariable=self.site_var, width=30).grid(row=5, column=1, sticky="w", **pad)
+        ttk.Entry(root, textvariable=self.site_var, width=30).grid(
+            row=5, column=1, sticky="w", **pad)
 
         ttk.Label(root, text="Survey date (YYYYMMDD):").grid(row=6, column=0, sticky="e", **pad)
         self.date_var = tk.StringVar(value=self.cfg.get("survey_date", ""))
-        ttk.Entry(root, textvariable=self.date_var, width=30).grid(row=6, column=1, sticky="w", **pad)
+        ttk.Entry(root, textvariable=self.date_var, width=30).grid(
+            row=6, column=1, sticky="w", **pad)
 
         ttk.Label(root, text="Tide station:").grid(row=7, column=0, sticky="e", **pad)
         self.station_var = tk.StringVar(value=self.cfg.get("station_display", STATIONS[0][0]))
@@ -278,7 +283,8 @@ class App:
 
         ttk.Label(root, text="Save location (folder):").grid(row=8, column=0, sticky="e", **pad)
         self.save_var = tk.StringVar(value=self.cfg.get("save_location", ""))
-        ttk.Entry(root, textvariable=self.save_var, width=52).grid(row=8, column=1, sticky="ew", **pad)
+        ttk.Entry(root, textvariable=self.save_var, width=52).grid(
+            row=8, column=1, sticky="ew", **pad)
         ttk.Button(root, text="Browse...", command=self.browse_save).grid(row=8, column=2, **pad)
 
         self.map_var = tk.BooleanVar(value=self.cfg.get("make_map", True))

@@ -49,10 +49,18 @@ jobs:
         run: pip install -e ../mcap_to_csv
 
       - name: Lint
-        run: ruff check utc tests
+        # Both packages. The extractor was unlinted when it landed, which hid
+        # a handful of real findings including zip() calls with no strict=.
+        run: |
+          ruff check utc tests
+          ruff check ../mcap_to_csv/ccr_m2c ../mcap_to_csv/tests ../mcap_to_csv/tools
 
       - name: Test
         # ffmpeg comes from the imageio-ffmpeg wheel, so nothing to install.
+        run: pytest -q
+
+      - name: Test the transect extractor
+        working-directory: mcap_to_csv
         run: pytest -q
 
   build:

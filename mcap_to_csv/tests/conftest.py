@@ -36,7 +36,7 @@ class McapBuilder:
         return self._channels[topic]
 
     def add(self, t: float, msg_type: str, fields: dict,
-            sysid: int = 1, compid: int = 1) -> "McapBuilder":
+            sysid: int = 1, compid: int = 1) -> McapBuilder:
         topic = f"mavlink/{sysid}/{compid}/{msg_type}"
         payload = {
             "header": {"system_id": sysid, "component_id": compid,

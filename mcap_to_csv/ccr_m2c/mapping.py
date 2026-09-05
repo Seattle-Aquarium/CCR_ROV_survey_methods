@@ -21,9 +21,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -65,7 +65,9 @@ def _coords(df: pd.DataFrame, pairs: Sequence[tuple[str, str]]) -> list[list[flo
         if not ok.any():
             continue
         out: list[list[float]] = []
-        for a, b in zip(lat[ok], lon[ok]):
+        # Same mask on both, so they cannot differ in length; strict
+        # says so rather than leaving it to be assumed.
+        for a, b in zip(lat[ok], lon[ok], strict=True):
             point = [round(float(a), 7), round(float(b), 7)]
             if not out or point != out[-1]:
                 out.append(point)

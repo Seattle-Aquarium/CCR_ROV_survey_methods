@@ -7,11 +7,17 @@ import math
 import numpy as np
 import pandas as pd
 import pytest
-
 from conftest import BASE_EPOCH, straight_north_dive
+
 from ccr_m2c.mcap_read import (
-    _add_depth, _msg_type, _sysid_rank, calculate_area, calculate_width,
-    probe_mcaps, read_mcaps, select_mcaps,
+    _add_depth,
+    _msg_type,
+    _sysid_rank,
+    calculate_area,
+    calculate_width,
+    probe_mcaps,
+    read_mcaps,
+    select_mcaps,
 )
 
 
@@ -217,9 +223,14 @@ def test_a_recording_with_a_damaged_index_is_still_read(builder, tmp_path):
     """A dive cut short cannot be re-flown, so it must not be written off."""
     path = _damage_index(straight_north_dive(builder(), seconds=120).close())
 
-    # the indexed reader cannot open it at all
+    # the indexed reader cannot open it at all. Naming the library's own base
+    # class rather than Exception keeps this honest: a typo in the test body
+    # would otherwise satisfy it just as well as the failure being tested. In
+    # practice this is RecordLengthLimitExceeded -- the same error a real
+    # power-loss recording produced in the field.
+    from mcap.exceptions import McapError
     from mcap.reader import make_reader
-    with pytest.raises(Exception):
+    with pytest.raises(McapError):
         with open(path, "rb") as fh:
             make_reader(fh).get_summary()
 

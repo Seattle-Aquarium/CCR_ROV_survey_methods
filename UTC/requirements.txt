@@ -12,3 +12,8 @@ tzdata>=2024.1       # Windows ships no timezone database; without this every
                      # transect time resolves to the wrong instant
 pywinauto>=0.6.9     # drives Lightroom's Enhance dialog: AI Denoise has
                      # no scripting interface in any current version
+
+# The Transects page drives the transect extractor, a sibling package in this
+# repo rather than something on PyPI. run_UTC.bat installs it automatically;
+# installing UTC by hand needs it too, or that page reports itself unavailable:
+#     python -m pip install -e ../mcap_to_csv

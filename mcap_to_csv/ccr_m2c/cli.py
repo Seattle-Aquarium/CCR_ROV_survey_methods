@@ -21,8 +21,8 @@ import sys
 from pathlib import Path
 
 from .health import read_health
-from .mcap_read import probe_mcaps, read_mcaps
 from .mapping import write_map_from_csvs
+from .mcap_read import probe_mcaps, read_mcaps
 from .pipeline import TransectSpec, run
 from .survey import load_plan
 from .tide import STATIONS
@@ -192,11 +192,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.inspect:
         return _inspect(paths)
-
-    # Progress goes to stderr and the log to stdout, so the carriage returns of
-    # the one do not chew through the lines of the other -- and `> run.log`
-    # captures the report without the spinner.
-    spin = lambda f, m: print(f"  {f * 100:5.1f}%  {m:<60}", end="\r", file=sys.stderr)
 
     if args.plan:
         try:

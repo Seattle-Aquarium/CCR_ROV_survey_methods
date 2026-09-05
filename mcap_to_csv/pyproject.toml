@@ -40,3 +40,28 @@ packages = ["ccr_m2c"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+# Deliberately 100 rather than UTC's 88. The substantive rule families below
+# match UTC exactly -- those are the ones that catch bugs. Holding this package
+# to 88 as well would have meant re-wrapping 74 lines of freshly written code,
+# burying the handful of real fixes in a reformatting diff. Worth narrowing to
+# 88 later, as a change of its own.
+line-length = 100
+target-version = "py310"
+exclude = ["build", "dist", "assets"]
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle
+    "F",     # pyflakes — undefined names, unused imports
+    "I",     # import sorting
+    "B",     # bugbear — likely bugs
+    "UP",    # pyupgrade
+]
+
+[tool.ruff.lint.per-file-ignores]
+# mapping.py embeds the Leaflet map's CSS and JavaScript as string literals.
+# Their lines are long, and a "# noqa" there would be inserted into the
+# generated HTML rather than read by ruff -- so the file is exempted here.
+"ccr_m2c/mapping.py" = ["E501"]

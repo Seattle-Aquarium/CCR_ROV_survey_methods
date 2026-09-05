@@ -19,12 +19,11 @@ appended after that point.
 from __future__ import annotations
 
 import logging
-import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -137,13 +136,22 @@ class TransectResult:
 
 
 def build_transect_mask(df_all: pd.DataFrame, windows: Sequence[tuple[str, str]]) -> pd.Series:
-    """Rows whose local time-of-day falls in any of the given windows."""
+    """Rows whose local time-of-day falls in any of the given windows.
+
+    A window whose end is earlier than its start runs through midnight, and is
+    the union of two spans rather than an empty one. UTC's own `Transect`
+    already treats it that way; without this the extractor silently returned
+    no rows, which looks exactly like a mistyped time.
+    """
     times = pd.to_datetime(df_all["Time"], format="%H:%M:%S").dt.time
     mask = pd.Series(False, index=df_all.index)
     for start_str, end_str in windows:
         t_start = datetime.strptime(start_str, "%H:%M:%S").time()
         t_end = datetime.strptime(end_str, "%H:%M:%S").time()
-        mask |= (times >= t_start) & (times <= t_end)
+        if t_end >= t_start:
+            mask |= (times >= t_start) & (times <= t_end)
+        else:
+            mask |= (times >= t_start) | (times <= t_end)
     return mask
 
 
