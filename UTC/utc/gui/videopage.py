@@ -20,6 +20,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
+from .. import sidebyside
 from . import theme as T
 from .widgets import Card, button, entry, label
 
@@ -212,6 +213,76 @@ class VideoPage(ctk.CTkFrame):
 
         button(c.body, "Make clip", self._clip_go, "primary", width=140
                ).grid(row=5, column=0, sticky="w", pady=(12, 0))
+
+        # ---- 5. two videos side by side ------------------------------
+        c5 = Card(body, "5.  Two videos side by side",
+                  "Compare two flights in one frame. Either side can be a "
+                  "video file or a folder of mcaps (the ROV's forward "
+                  "camera). Output goes to videos/composites/.")
+        c5.grid(row=4, column=0, sticky="ew", pady=(12, 0))
+        c5.body.grid_columnconfigure(0, weight=1)
+
+        self.sbs_rows = {}
+        for i, which in enumerate(("left", "right")):
+            r = ctk.CTkFrame(c5.body, fg_color="transparent")
+            r.grid(row=i, column=0, sticky="ew", pady=(0, 6))
+            r.grid_columnconfigure(1, weight=1)
+            label(r, which, muted=True).grid(row=0, column=0, padx=(0, 8),
+                                             sticky="w")
+            src = entry(r, "a video file, or a folder of .mcap", width=460)
+            src.grid(row=0, column=1, sticky="ew", padx=(0, 8))
+            button(r, "Folder…", lambda w=which: self._sbs_pick(w, True),
+                   "ghost", width=90).grid(row=0, column=2)
+            button(r, "File…", lambda w=which: self._sbs_pick(w, False),
+                   "ghost", width=80).grid(row=0, column=3, padx=(6, 0))
+            label(r, "start", muted=True).grid(row=0, column=4, padx=(14, 6))
+            start = entry(r, "10:02:27", width=100)
+            start.grid(row=0, column=5)
+            note = ctk.CTkLabel(r, text="", font=T.FONT_SMALL,
+                                text_color=T.TEXT_MUTED, anchor="w")
+            note.grid(row=0, column=6, sticky="w", padx=(10, 0))
+            self.sbs_rows[which] = {"src": src, "start": start, "note": note}
+
+        srow = ctk.CTkFrame(c5.body, fg_color="transparent")
+        srow.grid(row=2, column=0, sticky="w", pady=(6, 0))
+        label(srow, "seconds", muted=True).grid(row=0, column=0, padx=(0, 6))
+        self.sbs_secs = entry(srow, "90", width=80)
+        self.sbs_secs.grid(row=0, column=1, padx=(0, 16))
+        self.sbs_labels = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(srow, text="caption each side", variable=self.sbs_labels,
+                        font=T.FONT_BODY, text_color=T.TEXT, fg_color=T.ACCENT,
+                        hover_color=T.ACCENT_HOVER,
+                        checkmark_color=T.ACCENT_TEXT,
+                        border_color=T.FIELD_BORDER, corner_radius=4
+                        ).grid(row=0, column=2, padx=(0, 18))
+
+        frow5 = ctk.CTkFrame(c5.body, fg_color="transparent")
+        frow5.grid(row=3, column=0, sticky="w", pady=(8, 0))
+        self.sbs_fmt = ctk.StringVar(value="1080p")
+        for i, (key, fmt) in enumerate(sidebyside.SBS_FORMATS.items()):
+            ctk.CTkRadioButton(frow5, text=fmt.label, value=key,
+                               variable=self.sbs_fmt, font=T.FONT_BODY,
+                               text_color=T.TEXT, fg_color=T.ACCENT,
+                               hover_color=T.ACCENT_HOVER,
+                               border_color=T.FIELD_BORDER
+                               ).grid(row=0, column=i, padx=(0, 18))
+        ctk.CTkLabel(
+            c5.body,
+            text=("Start is hh:mm:ss for a time of day, or m:ss for an offset "
+                  "into the file. Each side keeps its own start, so two "
+                  "different transects can be compared from their own "
+                  "beginnings. A source with no trustworthy clock — a trim or "
+                  "a composite — takes an offset only."),
+            font=T.FONT_SMALL, text_color=T.TEXT_MUTED, anchor="w",
+            justify="left", wraplength=900
+        ).grid(row=4, column=0, sticky="w", pady=(6, 0))
+
+        self.sbs_note = ctk.CTkLabel(c5.body, text="", font=T.FONT_SMALL,
+                                     text_color=T.TEXT_MUTED, anchor="w",
+                                     justify="left", wraplength=900)
+        self.sbs_note.grid(row=5, column=0, sticky="w", pady=(6, 0))
+        button(c5.body, "Build side by side", self._sbs_go, "primary",
+               width=180).grid(row=6, column=0, sticky="w", pady=(12, 0))
 
     def _clip_pick_dir(self) -> None:
         d = filedialog.askdirectory(title="Folder of videos")
@@ -407,6 +478,92 @@ class VideoPage(ctk.CTkFrame):
                          "placed against the transects.")
         self._say("\n".join(lines))
 
+
+    # ------------------------------------------------------------------
+    #  5. side by side
+    # ------------------------------------------------------------------
+
+    def _sbs_pick(self, which: str, want_dir: bool) -> None:
+        row = self.sbs_rows[which]
+        start = row["src"].get().strip() or str(self.app.flight_dir or "")
+        if want_dir:
+            p = filedialog.askdirectory(
+                title=f"Folder of .mcap for the {which} side",
+                initialdir=start or None)
+        else:
+            p = filedialog.askopenfilename(
+                title=f"Video for the {which} side",
+                initialdir=start or None,
+                filetypes=[("Video", "*.mp4 *.mov *.mkv *.m4v"),
+                           ("All files", "*.*")])
+        if p:
+            row["src"].delete(0, "end")
+            row["src"].insert(0, p)
+            row["note"].configure(text="")
+
+    def _sbs_go(self) -> None:
+        from .. import sidebyside as sbs
+        from ..config import AppConfig
+
+        picks = {}
+        for which, row in self.sbs_rows.items():
+            raw = row["src"].get().strip()
+            if not raw:
+                messagebox.showinfo(self.app.title(),
+                                    f"Choose a source for the {which} side.")
+                return
+            picks[which] = (Path(raw), row["start"].get().strip())
+
+        secs = sbs.parse_time(self.sbs_secs.get())
+        if secs is None or secs[1] <= 0:
+            messagebox.showerror(self.app.title(),
+                                 "Length has to be a number of seconds, or "
+                                 "m:ss — for example 90 or 1:30.")
+            return
+        seconds = secs[1]
+        fmt = self.sbs_fmt.get()
+        want_labels = bool(self.sbs_labels.get())
+        cfg = AppConfig()
+        flight = Path(self.app.flight_dir) if self.app.flight_dir else \
+            picks["left"][0].parent
+        out_dir = sbs.output_dir(flight)
+
+        def work(progress, cancel):
+            sides = {}
+            for i, which in enumerate(("left", "right")):
+                path, when = picks[which]
+                # Probing an mcap folder builds a proxy, which is most of the
+                # work; give each side half the bar.
+                lo, hi = i * 0.45, i * 0.45 + 0.45
+
+                def sub(f, m="", lo=lo, hi=hi):
+                    progress(lo + (hi - lo) * f, m)
+
+                sides[which] = sbs.probe_side(
+                    path, label=_sbs_label(path, when),
+                    cache_root=cfg.cache_root,
+                    # A clock time lets the mcaps be narrowed before any are
+                    # read, so a folder holding a whole day only decodes the
+                    # recording that covers the window.
+                    when=when, seconds=seconds,
+                    progress=sub, cancel=cancel)
+            left, right = sides["left"], sides["right"]
+            in_l = left.in_point(picks["left"][1])
+            in_r = right.in_point(picks["right"][1])
+            return sbs.make_side_by_side(
+                left, right, in_l, in_r, seconds, out_dir, fmt,
+                labels=want_labels,
+                progress=lambda f, m="": progress(0.9 + f * 0.1, m),
+                cancel=cancel)
+
+        self.app.submit(work, f"Building a {fmt} side-by-side…",
+                        on_done=self._sbs_done)
+
+    def _sbs_done(self, rep) -> None:
+        if rep is None or isinstance(rep, Exception):
+            return
+        self.sbs_note.configure(text=rep.summary())
+
     # ------------------------------------------------------------------
 
     def _go(self) -> None:
@@ -467,3 +624,19 @@ class VideoPage(ctk.CTkFrame):
         if do_comp:
             bits.append(f"compositing {', '.join(rends)}")
         self.app.submit(work, " and ".join(bits).capitalize() + "…")
+
+
+def _sbs_label(path: Path, when: str) -> str:
+    """Name a pane after its source, so the caption says which ROV it is.
+
+    A folder of mcaps is named by the folder (2026_08_31_mcap_Lutris ->
+    Lutris); a video by its stem. The time is appended when one was given, so
+    two panes from the same vehicle stay distinguishable.
+    """
+    base = path.stem if path.is_file() else path.name
+    for chunk in ("_mcap_", "_mcap", "mcap_"):
+        if chunk in base:
+            base = base.split(chunk)[-1] or base
+            break
+    base = base.strip("_- ") or "source"
+    return f"{base} {when}".strip() if when else base
