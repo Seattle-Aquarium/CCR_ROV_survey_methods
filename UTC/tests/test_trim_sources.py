@@ -106,12 +106,21 @@ def test_a_short_trim_is_used_as_far_as_it_goes_and_flagged():
 
 
 def test_epochs_come_from_the_plan_not_the_file():
-    """The trim carries no usable clock, so the transect time is the truth."""
+    """The trim carries no usable clock, so the transect time is the truth.
+
+    Read back in the *flight's* timezone, not the machine's. Bare
+    `fromtimestamp` uses whatever zone the runner happens to sit in, so this
+    passed in Seattle and failed in CI, which runs on UTC -- 09:25:23 PDT read
+    back as 16:25:23. The product code was right; the assertion was parochial.
+    """
     import datetime as dt
+    from zoneinfo import ZoneInfo
+
     plan = SurveyPlan([_site(Transect("T1", "09:25:23", "09:35:37"))])
     (r,) = resolve_from_trims(plan, {"T1": _trim(614.4)})
-    started = dt.datetime.fromtimestamp(r.epoch_start).strftime("%H:%M:%S")
-    assert started == "09:25:23"
+    local = dt.datetime.fromtimestamp(r.epoch_start,
+                                      ZoneInfo(plan.timezone))
+    assert local.strftime("%H:%M:%S") == "09:25:23"
     assert r.epoch_end - r.epoch_start == pytest.approx(614.0)
 
 

@@ -148,7 +148,7 @@ graph TD
 
 A["<a href='https://github.com/Seattle-Aquarium/Coastal_Climate_Resilience' target='_blank' style='font-size: 16px; font-weight: bold;'>Coastal_Climate_Resilience</a><br><font color='darkgray'>the main landing pad for the CCR research program</font>"]
 
-A --> E["<a href='https://github.com/Seattle-Aquarium/CCR_analytical_resources' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_ROV_telemetry_processing</a><br><font color='darkgray'>analytical tools for working with ROV telemetry data</font>"]
+A --> E["<a href='https://github.com/Seattle-Aquarium/CCR_ROV_survey_methods' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_ROV_survey_methods</a><br><font color='darkgray'>this repository: survey methods, UTC, and the transect extractor</font>"]
 
 A --> F["<a href='https://github.com/Seattle-Aquarium/CCR_benthic_analyses' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_benthic_analyses</a><br><font color='darkgray'>code to work with ROV-derived benthic community data</font>"]
 
