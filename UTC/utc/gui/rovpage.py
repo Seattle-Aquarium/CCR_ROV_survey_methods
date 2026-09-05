@@ -62,13 +62,37 @@ class RovPage(ctk.CTkFrame):
         self.vstate.grid(row=1, column=0, sticky="ew", pady=(10, 0))
         self._say(self.vstate, "Not connected.")
 
-        # ---- 2. where it goes ----------------------------------------
-        c2 = Card(body, "2.  Where the recordings go",
+        # ---- 2. before the dive --------------------------------------
+        c2a = Card(body, "2.  Before the dive",
+                   "Two things worth knowing while the ROV is still on deck: "
+                   "whether there is room on it for the dive you have planned, "
+                   "and whether the Pi is already throttling. A recorder that "
+                   "fills mid-transect does not warn anyone — it stops.")
+        c2a.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        c2a.body.grid_columnconfigure(0, weight=1)
+        r2a = ctk.CTkFrame(c2a.body, fg_color="transparent")
+        r2a.grid(row=0, column=0, sticky="w")
+        label(r2a, "planning to record", muted=True).grid(row=0, column=0,
+                                                          padx=(0, 8))
+        self.planned = entry(r2a, "minutes", width=90)
+        self.planned.grid(row=0, column=1)
+        label(r2a, "minutes", muted=True).grid(row=0, column=2, padx=(8, 18))
+        button(r2a, "Check the vehicle", self._check_ready, "primary",
+               width=160).grid(row=0, column=3)
+        button(r2a, "Save a snapshot", self._snapshot, "ghost", width=150
+               ).grid(row=0, column=4, padx=(8, 0))
+        self.rstate = ctk.CTkLabel(c2a.body, text="", font=T.FONT_SMALL,
+                                   text_color=T.TEXT_MUTED, anchor="w",
+                                   justify="left", wraplength=880)
+        self.rstate.grid(row=1, column=0, sticky="w", pady=(10, 0))
+
+        # ---- 3. where it goes ----------------------------------------
+        c2 = Card(body, "3.  Where the recordings go",
                   "A portable SSD is the fastest route home: it skips the "
                   "upload and the re-download entirely. The folder is laid "
                   "out as flights/<date>_<site>/logs so it drops straight "
                   "into Dropbox later.")
-        c2.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        c2.grid(row=2, column=0, sticky="ew", pady=(0, 12))
         c2.body.grid_columnconfigure(0, weight=1)
         r2 = ctk.CTkFrame(c2.body, fg_color="transparent")
         r2.grid(row=0, column=0, sticky="ew")
@@ -85,13 +109,13 @@ class RovPage(ctk.CTkFrame):
                                    justify="left", wraplength=880)
         self.dstate.grid(row=1, column=0, sticky="w", pady=(8, 0))
 
-        # ---- 3. which recordings -------------------------------------
-        c3 = Card(body, "3.  Which recordings",
+        # ---- 4. which recordings -------------------------------------
+        c3 = Card(body, "4.  Which recordings",
                   "Judged on the span actually recorded, never on the file "
                   "name or its date — BlueOS rewrites old recordings when it "
                   "repairs them, which is how a previous day's file comes to "
                   "look like today's.")
-        c3.grid(row=2, column=0, sticky="ew", pady=(0, 12))
+        c3.grid(row=3, column=0, sticky="ew", pady=(0, 12))
         c3.body.grid_columnconfigure(0, weight=1)
         r3 = ctk.CTkFrame(c3.body, fg_color="transparent")
         r3.grid(row=0, column=0, sticky="w")
@@ -116,9 +140,9 @@ class RovPage(ctk.CTkFrame):
         self.listing.grid(row=1, column=0, sticky="ew", pady=(10, 0))
         self._say(self.listing, "Nothing listed yet.")
 
-        # ---- 4. fetch -------------------------------------------------
-        c4 = Card(body, "4.  Copy", "")
-        c4.grid(row=3, column=0, sticky="ew")
+        # ---- 5. fetch -------------------------------------------------
+        c4 = Card(body, "5.  Copy", "")
+        c4.grid(row=4, column=0, sticky="ew")
         button(c4.body, "Copy to the drive", self._fetch, "primary", width=180
                ).grid(row=0, column=0, sticky="w")
         self.fstate = ctk.CTkLabel(c4.body, text="", font=T.FONT_SMALL,
@@ -162,6 +186,79 @@ class RovPage(ctk.CTkFrame):
             return
         self._probe = rep
         self._say(self.vstate, rep.report())
+
+    # ------------------------------------------------------------------
+    #  before the dive
+    # ------------------------------------------------------------------
+
+    def _planned_seconds(self) -> float:
+        """How long the dive is expected to record.
+
+        Typed minutes win; otherwise the plan's own span from the first
+        transect to the last, which is roughly what arming to disarming
+        writes.
+        """
+        raw = self.planned.get().strip()
+        if raw:
+            try:
+                return max(0.0, float(raw)) * 60
+            except ValueError:
+                pass
+        wins = self._windows()
+        if not wins:
+            return 0.0
+        return max(w[2] for w in wins) - min(w[1] for w in wins)
+
+    def _check_ready(self) -> None:
+        from .. import blueos
+
+        host = self.host.get().strip() or None
+        secs = self._planned_seconds()
+        self.rstate.configure(text="Asking the vehicle…",
+                              text_color=T.TEXT_MUTED)
+
+        def work(progress, cancel):
+            if progress:
+                progress(0.3, "reading free space and the Pi's state…")
+            return blueos.check_readiness(host=host, planned_seconds=secs)
+
+        self.app.submit(work, "Checking the vehicle…", on_done=self._ready)
+
+    def _ready(self, r) -> None:
+        if r is None or isinstance(r, Exception):
+            self.rstate.configure(text=f"Could not check the vehicle: {r}",
+                                  text_color=T.WARN)
+            return
+        self.rstate.configure(text="\n".join(r.lines()),
+                              text_color=T.TEXT_MUTED if r.ok else T.WARN)
+
+    def _snapshot(self) -> None:
+        """Write the vehicle's configuration beside the flight it flew."""
+        from .. import blueos
+
+        flight = self.app.flight_dir
+        if not flight:
+            messagebox.showinfo(self.app.title(),
+                                "Choose a flight folder first — the snapshot "
+                                "is written into its logs folder.")
+            return
+        host = self.host.get().strip() or None
+        secs = self._planned_seconds()
+
+        def work(progress, cancel):
+            return blueos.save_snapshot(Path(flight), host,
+                                        planned_seconds=secs)
+
+        self.app.submit(work, "Recording what the vehicle is…",
+                        on_done=self._snapshotted)
+
+    def _snapshotted(self, path) -> None:
+        if path is None or isinstance(path, Exception):
+            self.rstate.configure(text=f"Snapshot failed: {path}",
+                                  text_color=T.WARN)
+            return
+        self.rstate.configure(text=f"Written to {path}",
+                              text_color=T.TEXT_MUTED)
 
     # ------------------------------------------------------------------
     #  the drive

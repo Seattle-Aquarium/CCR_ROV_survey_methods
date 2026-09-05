@@ -95,6 +95,11 @@ class Probe:
     answers: list[Answer] = field(default_factory=list)
     range_supported: bool | None = None
     notes: list[str] = field(default_factory=list)
+    #: Filled in by `probe`; declared here so a bare Probe() is still usable.
+    space: Space = field(default_factory=lambda: Space())
+    platform: Platform = field(default_factory=lambda: Platform())
+    parameter_count: int = 0
+    parameters_from: str = ""
 
     def report(self) -> str:
         out = [f"BlueOS probe  --  {time.strftime('%Y-%m-%d %H:%M:%S')}", ""]
@@ -109,6 +114,16 @@ class Probe:
                 f"BlueOS       : {self.version or 'unknown'}",
                 f"vehicle type : {self.vehicle or 'unknown'}",
                 f"range reads  : {_range_word(self.range_supported)}", ""]
+        out += ["before a dive:",
+                f"    space    : {self.space.verdict()[1]}",
+                f"    the Pi   : {self.platform.note()}"]
+        if self.platform.first_event:
+            out.append(f"    throttled: {self.platform.first_event} .. "
+                       f"{self.platform.last_event}")
+        out.append(f"    params   : {self.parameter_count} read"
+                   + (f" from {self.parameters_from}"
+                      if self.parameters_from else " -- no endpoint answered"))
+        out.append("")
         if self.services:
             out += [f"registered services ({len(self.services)}):"]
             for s in self.services:
@@ -186,7 +201,7 @@ def probe(host: str | None = None,
     out.reachable = True
     base = f"http://{out.host}"
 
-    steps = len(CORE_PROBES) + len(FILE_PROBES) + 1
+    steps = len(CORE_PROBES) + len(FILE_PROBES) + 2
     done = 0
 
     def tick(msg: str) -> None:
@@ -216,6 +231,22 @@ def probe(host: str | None = None,
         a = _get(base + path)
         out.answers.append(a)
         tick("file endpoints…")
+
+    # The pre-dive readings. Recorded here too so that one run beside the
+    # vehicle settles which of the candidate endpoints this BlueOS actually
+    # serves, rather than each feature discovering it separately.
+    out.space = read_space(out.host, out.answers)
+    out.platform = read_platform(out.host, out.answers)
+    params, out.parameters_from = read_parameters(out.host, out.answers)
+    out.parameter_count = len(params)
+    tick("disk, platform, parameters…")
+    if not out.space.found:
+        out.notes.append(
+            "Free space could not be read. Tried: "
+            + ", ".join(DISK_PROBES))
+    if not out.parameters_from:
+        out.notes.append(
+            "No parameter endpoint answered. Tried: " + ", ".join(PARAM_PROBES))
 
     # Can a recording's header be read without pulling the whole file? This
     # decides whether UTC can judge a recording's span on the vehicle, which
@@ -248,6 +279,372 @@ def _first_string(body: str, keys: tuple[str, ...]) -> str:
             if isinstance(v, str):
                 return v
     return ""
+
+
+# --------------------------------------------------------------------------
+#  before the dive: is the vehicle fit to fly?
+# --------------------------------------------------------------------------
+
+#: Roughly what a dive writes per second, measured from this programme's own
+#: recordings: 4.73 GB over 56m49s and 5.30 GB over 67m32s, both about
+#: 1.4 MB/s. Used to turn free space into the only number that matters on a
+#: deck -- how many more minutes can be recorded.
+BYTES_PER_SECOND = 1_400_000
+
+#: Candidates for each reading. None is promised. The first that answers wins
+#: and the probe reports which, so Wednesday's run against the real vehicle
+#: settles these rather than a guess doing it.
+DISK_PROBES = (
+    "/system-information/system/disk",
+    "/system-information/v1.0/system/disk",
+    "/disk-usage/v1.0/disk",
+)
+PLATFORM_PROBES = (
+    "/system-information/platform",
+    "/system-information/system/platform",
+)
+MEMORY_PROBES = (
+    "/system-information/system/memory",
+    "/system-information/v1.0/system/memory",
+)
+#: The full parameter set. ardupilot-manager is the likeliest; mavlink2rest
+#: exposes PARAM_VALUE, and the bag of holding stores what BlueOS itself has
+#: saved. All three are tried.
+PARAM_PROBES = (
+    "/ardupilot-manager/v1.0/parameters",
+    "/mavlink2rest/v1/mavlink/vehicles/1/components/1/messages/PARAM_VALUE",
+    "/bag-of-holding/v1.0/bag/ardupilot",
+)
+
+
+def _first_ok(base: str, paths: Iterable[str],
+              sink: list | None = None) -> Answer | None:
+    """The first candidate endpoint that answers, or None.
+
+    Every attempt is appended to `sink` when one is given, misses included.
+    Which candidates were tried and what they returned is the whole point of
+    running the probe beside a real vehicle -- a reading that quietly fell
+    through to the third candidate is something to know.
+    """
+    for path in paths:
+        a = _get(base + path)
+        if sink is not None:
+            sink.append(a)
+        if a.ok:
+            return a
+    return None
+
+
+@dataclass
+class Space:
+    """Room left where the recorder writes."""
+
+    path: str = ""
+    free_bytes: int = 0
+    total_bytes: int = 0
+    found: bool = False
+    source: str = ""
+
+    @property
+    def minutes_left(self) -> float:
+        return self.free_bytes / BYTES_PER_SECOND / 60
+
+    def verdict(self, planned_seconds: float = 0.0) -> tuple[bool, str]:
+        """Is there room for the dive that is planned?
+
+        Answered in minutes of recording rather than gigabytes, because that
+        is the question actually being asked on the deck. A recorder that
+        fills mid-transect does not warn anyone -- it just stops, and the
+        transect is gone.
+        """
+        if not self.found:
+            return True, "free space on the vehicle could not be read"
+        free_gib = self.free_bytes / 2 ** 30
+        room = (f"{free_gib:,.1f} GiB free -- about {self.minutes_left:,.0f} "
+                f"minutes of recording")
+        if planned_seconds <= 0:
+            return True, room
+        need = planned_seconds * BYTES_PER_SECOND
+        planned_min = planned_seconds / 60
+        if self.free_bytes < need:
+            return False, (
+                f"Only {free_gib:,.1f} GiB free on the vehicle, but the plan "
+                f"is {planned_min:,.0f} minutes -- about {need / 2 ** 30:,.1f} "
+                f"GiB. The recorder will stop part way through. Move older "
+                f"recordings off the ROV before diving.")
+        if self.free_bytes < need * 2:
+            return True, (
+                f"{free_gib:,.1f} GiB free: enough for the {planned_min:,.0f} "
+                f"minutes planned, but not much more. Worth clearing space "
+                f"before a long day.")
+        return True, room
+
+
+def read_space(host: str, sink: list | None = None) -> Space:
+    """Free space where the recorder writes."""
+    out = Space()
+    a = _first_ok(f"http://{host}", DISK_PROBES, sink)
+    if a is None:
+        return out
+    out.source = a.url
+    try:
+        data = json.loads(a.body)
+    except Exception:
+        return out
+
+    best: tuple[int, str, int, int] | None = None
+    for entry in (data if isinstance(data, list) else [data]):
+        if not isinstance(entry, dict):
+            continue
+        free = _num(entry, ("available_space_B", "free_bytes", "free",
+                            "available"))
+        if free is None:
+            continue
+        total = _num(entry, ("total_space_B", "total_bytes", "total", "size"))
+        mount = str(entry.get("mount_point") or entry.get("path")
+                    or entry.get("name") or "")
+        # Prefer the volume the recordings are written to over, say, a boot
+        # partition that is small and always nearly full.
+        score = 2 if ("userdata" in mount or mount == "/") else 1
+        if best is None or score > best[0]:
+            best = (score, mount, int(free), int(total or 0))
+
+    if best is not None:
+        out.found = True
+        _, out.path, out.free_bytes, out.total_bytes = best
+    return out
+
+
+def _num(d: dict, keys: tuple[str, ...]) -> float | None:
+    for k in keys:
+        v = d.get(k)
+        if isinstance(v, (int, float)):
+            return float(v)
+    return None
+
+
+@dataclass
+class Platform:
+    """What the Pi says about its own condition."""
+
+    model: str = ""
+    ram_used: float = 0.0                    # fraction of total
+    throttle: dict = field(default_factory=dict)     # kind -> count
+    occurring: list = field(default_factory=list)    # happening right now
+    first_event: str = ""
+    last_event: str = ""
+    found: bool = False
+
+    @property
+    def undervoltage(self) -> bool:
+        """A failing tether or supply, as distinct from a hot Pi."""
+        return any("olt" in k for k in
+                   list(self.throttle) + [str(o) for o in self.occurring])
+
+    def note(self) -> str:
+        """One line, honest about what it does and does not mean."""
+        if not self.found:
+            return "the Pi's own state could not be read"
+        bits = [self.model or "Raspberry Pi"]
+        if self.ram_used:
+            bits.append(f"RAM {self.ram_used * 100:.0f}%")
+        if self.occurring:
+            kinds = ", ".join(sorted({str(o) for o in self.occurring}))
+            bits.append(f"THROTTLING NOW: {kinds}")
+        elif self.throttle:
+            n = sum(self.throttle.values())
+            kinds = ", ".join(sorted(self.throttle))
+            bits.append(f"{n} past throttle events ({kinds})")
+        else:
+            bits.append("no throttling logged")
+        return "   ".join(bits)
+
+    def advice(self) -> str:
+        """What, if anything, to do about it."""
+        if self.undervoltage:
+            return ("Under-voltage is logged. That is a power problem, not a "
+                    "heat one -- check the tether and the supply before "
+                    "diving; it corrupts recordings.")
+        if self.occurring:
+            return ("The Pi is capping its own clock right now, which is heat. "
+                    "It sits in a sealed tube with no airflow, so this builds "
+                    "over a dive. Expect dropped frames rather than an error.")
+        if self.throttle:
+            return ("Clock capping has been logged this boot. It is thermal, "
+                    "and it is normal for a Pi in a sealed tube -- worth "
+                    "watching rather than acting on.")
+        return ""
+
+
+def read_platform(host: str, sink: list | None = None) -> Platform:
+    """Model, memory, and the Pi's own throttle log.
+
+    ``FrequencyCapping`` is the Pi capping its clock because it is hot;
+    ``UnderVoltage`` is the supply sagging. They look alike in a CPU graph and
+    mean entirely different things, so they are reported apart. This programme
+    has seen the first and not the second.
+    """
+    out = Platform()
+    a = _first_ok(f"http://{host}", PLATFORM_PROBES, sink)
+    if a is not None:
+        try:
+            data = json.loads(a.body)
+        except Exception:
+            data = None
+        if isinstance(data, dict):
+            body = data.get("Ok") if isinstance(data.get("Ok"), dict) else data
+            pi = body.get("raspberry") if isinstance(body, dict) else None
+            if isinstance(pi, dict):
+                out.found = True
+                out.model = str(pi.get("model") or "")
+                events = pi.get("events") or {}
+                stamps = []
+                for e in (events.get("list") or []):
+                    kind = e.get("type") if isinstance(e, dict) else str(e)
+                    out.throttle[str(kind)] = out.throttle.get(str(kind), 0) + 1
+                    if isinstance(e, dict) and e.get("time"):
+                        stamps.append(str(e["time"]))
+                out.occurring = [
+                    (o.get("type") if isinstance(o, dict) else o)
+                    for o in (events.get("occurring") or [])]
+                if stamps:
+                    out.first_event, out.last_event = min(stamps), max(stamps)
+
+    m = _first_ok(f"http://{host}", MEMORY_PROBES, sink)
+    if m is not None:
+        try:
+            ram = json.loads(m.body).get("ram") or {}
+            total = _num(ram, ("total_kB", "total_B", "total"))
+            used = _num(ram, ("used_kB", "used_B", "used"))
+            if total:
+                out.ram_used = (used or 0) / total
+                out.found = True
+        except Exception:
+            pass
+    return out
+
+
+def read_parameters(host: str, sink: list | None = None) -> tuple[dict, str]:
+    """The vehicle's parameter set, and the endpoint it came from.
+
+    Worth keeping per flight because it is the configuration that produced
+    the data. "Was the rangefinder's quality filter on in August?" is a
+    lookup if this was captured and guesswork if it was not.
+    """
+    a = _first_ok(f"http://{host}", PARAM_PROBES, sink)
+    if a is None:
+        return {}, ""
+    try:
+        data = json.loads(a.body)
+    except Exception:
+        return {}, a.url
+
+    if isinstance(data, list):
+        out = {}
+        for e in data:
+            if isinstance(e, dict):
+                name = e.get("param_id") or e.get("name") or e.get("id")
+                if name:
+                    out[str(name).rstrip("\x00").strip()] = (
+                        e.get("param_value", e.get("value")))
+        return out, a.url
+    if isinstance(data, dict):
+        # mavlink2rest wraps each message; unwrap one level if it did.
+        inner = data.get("message") if isinstance(data.get("message"), dict) else None
+        if inner and "param_id" in inner:
+            return ({str(inner["param_id"]).rstrip("\x00").strip():
+                     inner.get("param_value")}, a.url)
+        return data, a.url
+    return {}, a.url
+
+
+@dataclass
+class Readiness:
+    """Everything checked before a dive, in one place."""
+
+    host: str = ""
+    reachable: bool = False
+    version: str = ""
+    space: Space = field(default_factory=Space)
+    platform: Platform = field(default_factory=Platform)
+    planned_seconds: float = 0.0
+
+    @property
+    def ok(self) -> bool:
+        return self.reachable and self.space.verdict(self.planned_seconds)[0]
+
+    def lines(self) -> list[str]:
+        if not self.reachable:
+            return ["No vehicle answered. Check the tether."]
+        out = [self.space.verdict(self.planned_seconds)[1], self.platform.note()]
+        tip = self.platform.advice()
+        if tip:
+            out.append(tip)
+        return out
+
+
+def check_readiness(host: str | None = None,
+                    planned_seconds: float = 0.0) -> Readiness:
+    """Space and Pi health, together, before anyone gets wet."""
+    found = host or find_host()
+    out = Readiness(planned_seconds=planned_seconds)
+    if found is None:
+        return out
+    out.host, out.reachable = found, True
+    a = _get(f"http://{found}/version-chooser/v1.0/version/current")
+    if a.ok:
+        out.version = _first_string(a.body, ("version", "tag", "name"))
+    out.space = read_space(found)
+    out.platform = read_platform(found)
+    return out
+
+
+def save_snapshot(flight_dir: Path, host: str | None = None, *,
+                  planned_seconds: float = 0.0) -> Path:
+    """Record what the vehicle *was*, beside the flight it flew.
+
+    Versions, parameters and the Pi's state at dive time. Behaviour has
+    already changed underneath this programme twice -- the recorder's repair
+    sweep rewriting old files, and a BlueOS beta -- and tying a data anomaly
+    to a version change is straightforward with this and close to impossible
+    without it. Written into the flight's own ``logs`` folder, so it travels
+    with the data.
+    """
+    import datetime as dt
+
+    found = host or find_host()
+    snap: dict = {
+        "taken": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "host": found or "",
+        "reachable": found is not None,
+    }
+    if found is not None:
+        rep = probe(host=found)
+        space = read_space(found)
+        plat = read_platform(found)
+        params, source = read_parameters(found)
+        ok, verdict = space.verdict(planned_seconds)
+        snap.update({
+            "blueos_version": rep.version,
+            "vehicle_type": rep.vehicle,
+            "services": rep.services,
+            "disk": {"path": space.path, "free_bytes": space.free_bytes,
+                     "total_bytes": space.total_bytes, "source": space.source,
+                     "enough_room": ok, "verdict": verdict},
+            "platform": {"model": plat.model, "ram_used": plat.ram_used,
+                         "throttle_events": plat.throttle,
+                         "throttling_now": plat.occurring,
+                         "first_event": plat.first_event,
+                         "last_event": plat.last_event},
+            "parameters": params,
+            "parameters_from": source,
+            "parameter_count": len(params),
+        })
+
+    out = Path(flight_dir) / "logs" / "vehicle_snapshot.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(snap, indent=2, sort_keys=True), encoding="utf-8")
+    return out
 
 
 def run(argv: list[str] | None = None) -> int:
