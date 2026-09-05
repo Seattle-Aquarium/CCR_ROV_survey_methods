@@ -137,6 +137,7 @@ class App(ctk.CTk):
         from .importpage import ImportPage
         from .nav import Navigator
         from .processpage import ProcessPage
+        from .rovpage import RovPage
         from .transectpage import TransectPage
         from .videopage import VideoPage
 
@@ -152,6 +153,10 @@ class App(ctk.CTk):
         for name, sub, cls in (
             # Transects first: the CSVs need only the plan and the mcaps,
             # and the same windows go on to drive the video overlays.
+            # First in the rail because it comes first in the day: the
+            # recordings have to be off the vehicle before anything
+            # else can run.
+            ("Get from ROV", "download · SSD", RovPage),
             ("Transects", "mcap to CSV", TransectPage),
             ("Import photos", "card or folder", ImportPage),
             ("Process photos", "GPR to TIF", ProcessPage),

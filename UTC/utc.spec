@@ -72,6 +72,7 @@ a = Analysis(
                    "pymavlink", "pymavlink.mavutil",
                    "pymavlink.DFReader",
                    "utc.gui.app", "utc.cli", "utc.selftest", "utc.blueos",
+                   "utc.rovfetch", "utc.gui.rovpage",
                    "multiprocessing.spawn", "multiprocessing.popen_spawn_win32",
                    # RAW develop drives Lightroom through Windows UI Automation
                    "pywinauto", "comtypes", "win32api"]
