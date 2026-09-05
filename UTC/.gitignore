@@ -18,3 +18,8 @@ tests/out/
 # packaging / tooling
 *.egg-info/
 .ruff_cache/
+
+# RAW develop test imagery -- inputs and exports, ~420 MB. The live script
+# takes a folder argument, so nothing here needs to be in the repo.
+tests/GPR/
+tests/TIF/
