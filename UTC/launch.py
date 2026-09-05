@@ -25,5 +25,12 @@ if __name__ == "__main__":
         from utc.selftest import run
         sys.exit(run(sys.argv))
 
+    # `--probe-rov` asks the ROV what it offers, read-only. Run it once beside
+    # the vehicle and send the report back; it is how the download feature
+    # gets built against what BlueOS actually serves rather than a guess.
+    if "--probe-rov" in sys.argv:
+        from utc.blueos import run as probe_run
+        sys.exit(probe_run(sys.argv))
+
     from utc.gui.app import main
     main()

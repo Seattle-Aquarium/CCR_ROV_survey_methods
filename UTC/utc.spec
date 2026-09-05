@@ -71,7 +71,7 @@ a = Analysis(
     hiddenimports=["PIL._tkinter_finder", "av", "mcap", "tzdata",
                    "pymavlink", "pymavlink.mavutil",
                    "pymavlink.DFReader",
-                   "utc.gui.app", "utc.cli", "utc.selftest",
+                   "utc.gui.app", "utc.cli", "utc.selftest", "utc.blueos",
                    "multiprocessing.spawn", "multiprocessing.popen_spawn_win32",
                    # RAW develop drives Lightroom through Windows UI Automation
                    "pywinauto", "comtypes", "win32api"]
