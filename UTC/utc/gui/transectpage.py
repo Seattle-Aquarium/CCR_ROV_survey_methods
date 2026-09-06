@@ -4,7 +4,7 @@ Transect CSVs, as a step in the flight.
 The extractor itself lives in the sibling ``mcap_to_csv`` package and has its
 own standalone window. This page is the same tool driven from the flight that
 is already open: the folder, the mcaps and the survey plan all come from
-"Flight setup", so the transect windows are typed once and both the CSVs and
+"Flight & transects", so the windows are typed once and both the CSVs and
 the video overlays are cut from the same numbers. Two copies of those times
 drifting apart is exactly the kind of error nobody notices until the analysis
 disagrees with the footage.
@@ -66,7 +66,7 @@ class TransectPage(ctk.CTkFrame):
 
         # ---- 2. what will be cut -------------------------------------
         c2 = Card(body, "2.  Transects",
-                  "Taken from the survey plan on Flight setup. Edit them there "
+                  "Taken from the survey plan on Aboard ROV. Edit them there "
                   "and they change here too — and in the video overlays.")
         c2.grid(row=1, column=0, sticky="ew", pady=(0, 12))
         self.plan_summary = label(c2.body, "", muted=True)
@@ -195,7 +195,7 @@ class TransectPage(ctk.CTkFrame):
 
         if not self.app.flight_dir:
             self.found.configure(text="No flight folder selected yet — "
-                                      "choose one on Flight setup.")
+                                      "choose one on Aboard ROV.")
         elif not mcaps:
             self.found.configure(
                 text="No .mcap files in this flight. They normally sit in a "
@@ -261,12 +261,12 @@ class TransectPage(ctk.CTkFrame):
         errors = plan.validate() if hasattr(plan, "validate") else []
         if errors:
             messagebox.showerror(APP_NAME,
-                                 "Please fix these on Flight setup first:\n\n• "
+                                 "Please fix these on Aboard ROV first:\n\n• "
                                  + "\n• ".join(errors))
             return
         sites = [s for s in plan.sites if s.transects]
         if not sites:
-            messagebox.showinfo(APP_NAME, "No transects are defined on Flight setup.")
+            messagebox.showinfo(APP_NAME, "No transects are defined on Aboard ROV.")
             return
 
         choice = self.station.get()

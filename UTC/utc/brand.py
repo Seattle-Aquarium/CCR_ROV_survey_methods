@@ -51,6 +51,69 @@ STONE_TINTS = {
 }
 
 
+# --------------------------------------------------------------------------
+#  Gradients  (guidelines p.19, "Gradient palette and hierarchy")
+# --------------------------------------------------------------------------
+#
+# The One Ocean Gradient is described there as "a core part of our visual
+# expression ... emblematic of how we see the ocean: as one continuous,
+# dynamic environment". The page is also specific about where each family may
+# be used, and those rules are encoded in the names below rather than left to
+# memory:
+#
+#   DEEP and MEDIUM   -> backgrounds.
+#   BRIGHT 2-colour   -> UI elements only, layered over darker backgrounds,
+#                        and best kept to smaller elements.
+#   BRIGHT 3-colour   -> larger elements, where there is room to breathe.
+#   ALT               -> only over a bright-gradient background, or the hover
+#                        state of a button. Never with photographic content.
+#
+# The full One Ocean gradient must never be used in its entirety (p.16).
+
+#: Backgrounds. Dark enough to carry White type at AA across their whole run.
+DEEP_GRADIENTS = {
+    "salish_fathom": (SALISH, FATHOM),
+    "fathom_mediterranean": (FATHOM, MEDITERRANEAN),
+    "salish_mediterranean": (SALISH, MEDITERRANEAN),
+}
+
+#: Backgrounds, brighter. These reach values that White type cannot sit on, so
+#: type over them belongs at the darker end.
+MEDIUM_GRADIENTS = {
+    "salish_algae": (SALISH, ALGAE),
+    "mediterranean_seafoam": (MEDITERRANEAN, SEAFOAM),
+}
+
+#: UI elements over a darker ground -- a rule, a stripe, a small indicator.
+BRIGHT_GRADIENTS = {
+    "algae_seafoam": (ALGAE, SEAFOAM),
+    "seafoam_purple": (SEAFOAM, PURPLE_STAR),
+}
+
+BRIGHT_GRADIENTS_3 = {
+    "mediterranean_seafoam_algae": (MEDITERRANEAN, SEAFOAM, ALGAE),
+    "algae_seafoam_purple": (ALGAE, SEAFOAM, PURPLE_STAR),
+    "algae_seafoam_coral": (ALGAE, SEAFOAM, CORAL),
+}
+
+#: Reserved. p.19 names the hover state of a button as a sanctioned use.
+ALT_GRADIENTS = {
+    "mediterranean_purple": (MEDITERRANEAN, PURPLE_STAR),
+    "mediterranean_purple_coral": (MEDITERRANEAN, PURPLE_STAR, CORAL),
+}
+
+#: The two-colour geometry from the spec diagram on p.19: the first colour at
+#: 0, the second reached at 95, and the 50/50 blend landing at 70 rather than
+#: halfway. The bias is what stops a two-colour gradient reading as a flat
+#: wash -- it holds the first colour and then moves.
+TWO_COLOR_END = 0.95
+TWO_COLOR_MIDPOINT = 0.70
+
+#: Both angles are sanctioned; this is the one the guidelines' own background
+#: panels read as, top-left to bottom-right.
+GRADIENT_ANGLE = 45.0
+
+
 @dataclass(frozen=True)
 class Theme:
     """One resolved colour scheme. `name` matches customtkinter's appearance mode."""
@@ -291,6 +354,30 @@ def logo_path(variant: str = "white") -> str | None:
 def hex_to_rgb(h: str) -> tuple[int, int, int]:
     h = h.lstrip("#")
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
+
+
+def relative_luminance(h: str) -> float:
+    """WCAG relative luminance of a colour."""
+    def channel(v: int) -> float:
+        c = v / 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (channel(v) for v in hex_to_rgb(h))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(a: str, b: str) -> float:
+    """WCAG contrast ratio between two colours, 1.0 to 21.0.
+
+    The guidelines set the bar on p.20: 4.5:1 for type, 3:1 for large type
+    (>=18pt, or >=14pt bold) and for meaningful images. Worth having in code
+    rather than in a person's head -- the chrome sits on a gradient, so a
+    colour that reads on one end of it can vanish at the other, and that is
+    exactly what happened to the rail's muted ink at 1.6:1 on Mediterranean.
+    """
+    la, lb = relative_luminance(a), relative_luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
 
 
 def rgba(h: str, alpha: float) -> tuple[int, int, int, int]:

@@ -42,7 +42,7 @@ def check_layout(app: App) -> list[str]:
     win_w = app.winfo_width()
     if win_w <= 1 or app.nav.rail.winfo_height() <= 100:
         return ["window never realised; layout could not be checked"]
-    for name in list(app.pages) + ["Flight setup"]:
+    for name in app.nav.sections:
         app.nav.select(name)
         app.update_idletasks()
         page = app.nav._pages[name]

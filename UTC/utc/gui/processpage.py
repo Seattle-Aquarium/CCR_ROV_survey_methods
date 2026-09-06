@@ -487,11 +487,10 @@ class ProcessPage(ctk.CTkFrame):
         nav = getattr(self.app, "nav", None)
         if nav is None:
             return
-        for name in ["Flight setup"] + list(getattr(self.app, "pages", {})):
-            try:
-                nav.set_enabled(name, not on)
-            except Exception:
-                pass
+        try:
+            nav.set_locked(on)
+        except Exception:
+            pass
 
     def _watch_run(self) -> None:
         """Release the lock once the worker finishes, however it finished.

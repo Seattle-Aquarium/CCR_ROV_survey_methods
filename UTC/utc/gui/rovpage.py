@@ -1,5 +1,5 @@
 """
-Get from ROV: pull the right recordings onto a drive you can carry home.
+Vehicle & files: pull the right recordings onto a drive you can carry home.
 
 Three field failures came from choosing files by hand — a flight whose
 covering recording was never downloaded, a file from a previous day that
@@ -74,7 +74,7 @@ class RovPage(ctk.CTkFrame):
         r2a.grid(row=0, column=0, sticky="w")
         label(r2a, "planning to record", muted=True).grid(row=0, column=0,
                                                           padx=(0, 8))
-        self.planned = entry(r2a, "minutes", width=90)
+        self.planned = entry(r2a, "e.g. 45", width=90)
         self.planned.grid(row=0, column=1)
         label(r2a, "minutes", muted=True).grid(row=0, column=2, padx=(8, 18))
         button(r2a, "Check the vehicle", self._check_ready, "primary",

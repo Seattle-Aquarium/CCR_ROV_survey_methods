@@ -20,7 +20,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from .. import discovery
+from .. import brand, discovery
 from ..config import AppConfig
 from ..pipeline import RunResult
 from ..survey import (
@@ -29,14 +29,38 @@ from ..survey import (
     SurveyPlan,
     plan_path,
 )
+from . import gradients as G
 from . import theme as T
 from .widgets import Card, SiteFrame, button, entry
 
 APP_NAME = "Underwater Telemetry Compositing"
 #: Short form, for window chrome and generated file names.
 APP_ABBREV = "UTC"
+
+#: What the banner says. Deliberately separate from APP_NAME, which still names
+#: the window, the dialogs and the files this writes -- renaming the programme
+#: is a decision for later, and nothing on disk should move in the meantime.
+DISPLAY_TITLE = "Program title TBD"
+
+#: The four chapters, said once. Long form first; the banner falls back to the
+#: short one when the window is too narrow to set it without clipping.
+#: One segment per chapter, in the rail's order. Measured to fit the default
+#: window; below that the banner falls back to naming the four chapters.
+SUBTITLE = ("Connect and fetch files  ·  telemetry, message and log health  ·  "
+            "import and finish photos  ·  assemble and export video")
+SUBTITLE_SHORT = "Aboard ROV  ·  Flight report  ·  Photos  ·  Video"
+ATTRIBUTION = ("Seattle Aquarium  ·  Coastal Climate Resilience  ·  "
+               "Conservation Programs and Partnerships")
 # Plan filename and legacy fallback live in survey.py, so the CLI and the
 # GUI cannot drift apart on which file they read.
+
+
+def _font_kw(font: tuple) -> dict:
+    """A Tk font tuple as keyword arguments for tkinter.font.Font."""
+    kw = {"family": font[0], "size": font[1]}
+    if len(font) > 2 and "bold" in font[2:]:
+        kw["weight"] = "bold"
+    return kw
 
 
 class App(ctk.CTk):
@@ -58,7 +82,6 @@ class App(ctk.CTk):
         self._worker: threading.Thread | None = None
         self._cancel = threading.Event()
         self._on_done = None
-        self._logo_img = None
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -74,45 +97,142 @@ class App(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _build_header(self) -> None:
-        h = ctk.CTkFrame(self, fg_color=T.SURFACE, corner_radius=0, height=76)
-        h.grid(row=0, column=0, sticky="ew")
-        h.grid_columnconfigure(2, weight=1)
-        h.grid_propagate(False)
+        """The banner, drawn on a canvas over a brand gradient.
 
-        self.logo_label = ctk.CTkLabel(h, text="")
-        self.logo_label.grid(row=0, column=0, rowspan=2, padx=(18, 14), pady=12)
-        self._load_logo()
+        A canvas rather than a frame of labels because a CustomTkinter widget
+        over an image paints its own rectangle -- "transparent" there means the
+        master's flat colour, not what is behind it. On a canvas the type sits
+        on the gradient directly. The one real widget, the theme switch, is
+        told the colour of the pixel underneath it so its edges disappear.
+        """
+        import tkinter
 
-        ctk.CTkLabel(h, text=APP_NAME, font=T.FONT_TITLE, text_color=T.HEADING
-                     ).grid(row=0, column=1, sticky="sw", pady=(14, 0))
-        ctk.CTkLabel(h, text="Telemetry overlays for ROV transect video and stills",
-                     font=T.FONT_SMALL, text_color=T.TEXT_MUTED
-                     ).grid(row=1, column=1, sticky="nw", pady=(0, 14))
+        self.header = tkinter.Canvas(self, highlightthickness=0, borderwidth=0,
+                                     height=104,
+                                     background=T.HEADER_GRADIENT["dark"][0])
+        self.header.grid(row=0, column=0, sticky="ew")
+        self.header.bind("<Configure>", lambda _e: self._paint_header())
 
         self.theme_switch = ctk.CTkSwitch(
-            h, text="Dark mode", command=self._toggle_theme,
-            font=T.FONT_SMALL, text_color=T.TEXT,
-            progress_color=T.ACCENT, button_color=T.SURFACE_ALT,
+            self.header, text="Dark mode", command=self._toggle_theme,
+            font=T.FONT_SMALL, text_color=T.CHROME_TEXT,
+            progress_color=brand.ALGAE, button_color=brand.WHITE,
+            fg_color=T.CHROME_TEXT_DIM,
         )
         self.theme_switch.select()
-        self.theme_switch.grid(row=0, column=3, rowspan=2, padx=18)
+        self._header_photo = None
+        self._rule_photo = None
+        self._load_logo()
 
     def _load_logo(self) -> None:
+        """The White logo at full resolution, for the banner to size itself.
+
+        Kept as a PIL image rather than the CTkImage the rest of the
+        application uses, because the banner is a canvas. Full resolution
+        because the banner's height comes from its own type, so the size it
+        wants is not known until it draws.
+        """
+        self._logo_pil = None
+        self._logo_at = None
         path = T.logo_for(self.mode)
         if not path:
-            self.logo_label.configure(text="Seattle Aquarium", font=T.FONT_H2,
-                                      text_color=T.HEADING)
             return
         try:
             from PIL import Image
-            im = Image.open(path).convert("RGBA")
-            h = 46
-            w = max(1, int(im.width * h / im.height))
-            self._logo_img = ctk.CTkImage(light_image=im, dark_image=im, size=(w, h))
-            self.logo_label.configure(image=self._logo_img, text="")
+            self._logo_pil = Image.open(path).convert("RGBA")
         except Exception:
-            self.logo_label.configure(text="Seattle Aquarium", font=T.FONT_H2,
-                                      text_color=T.HEADING)
+            self._logo_pil = None
+
+    def _paint_header(self) -> None:
+        """Draw the banner at the current width.
+
+        Laid out by measuring rather than by fixed offsets: the subtitle is a
+        full sentence and the window can be dragged down to 980px, so the line
+        that does not fit is swapped for a shorter one instead of being clipped
+        halfway through a word.
+        """
+        from tkinter import font as tkfont
+
+        from PIL import ImageTk
+
+        c = self.header
+        s = T.scale_of(self)
+        w = max(1, c.winfo_width())
+        pad = int(16 * s)
+        rule_h = max(1, int(T.RULE_HEIGHT * s))
+
+        f_title = tkfont.Font(**_font_kw(T.scale_font(T.FONT_BANNER, s)))
+        f_sub = tkfont.Font(**_font_kw(T.scale_font(T.FONT_BANNER_SUB, s)))
+        title_h = f_title.metrics("linespace")
+        sub_h = f_sub.metrics("linespace")
+
+        # The banner is as tall as its own type, rather than a number chosen on
+        # one machine. At 2.5x display scaling a fixed height clipped the
+        # attribution line off the bottom entirely.
+        h = pad + title_h + int(6 * s) + sub_h + int(3 * s) + sub_h + pad + rule_h
+        if int(c.cget("height")) != h:
+            c.configure(height=h)
+
+        c.delete("all")
+        colours = T.HEADER_GRADIENT.get(self.mode, T.HEADER_GRADIENT["dark"])
+        img = G.render((w, h), colours)
+        self._header_photo = ImageTk.PhotoImage(img)
+        c.create_image(0, 0, image=self._header_photo, anchor="nw")
+
+        x = pad + int(4 * s)
+        logo = self._logo_scaled(int((h - rule_h) * 0.46))
+        if logo is not None:
+            self._logo_photo = ImageTk.PhotoImage(logo)
+            c.create_image(x, (h - rule_h) // 2, image=self._logo_photo,
+                           anchor="w")
+            x += logo.width + int(20 * s)
+        else:
+            c.create_text(x, (h - rule_h) // 2, anchor="w",
+                          text="Seattle Aquarium",
+                          font=T.scale_font(T.FONT_H2, s), fill=T.CHROME_TEXT)
+            x += int(160 * s)
+
+        # Leave room for the switch against the right edge, and drop to the
+        # short subtitle rather than clipping a sentence mid-word.
+        avail = max(int(120 * s), w - x - int(170 * s))
+        sub = SUBTITLE if f_sub.measure(SUBTITLE) <= avail else SUBTITLE_SHORT
+        attrib = ATTRIBUTION if f_sub.measure(ATTRIBUTION) <= avail else ""
+
+        y = pad
+        c.create_text(x, y, anchor="nw", text=DISPLAY_TITLE,
+                      font=T.scale_font(T.FONT_BANNER, s), fill=T.CHROME_TEXT)
+        y += title_h + int(6 * s)
+        c.create_text(x, y, anchor="nw", text=sub,
+                      font=T.scale_font(T.FONT_BANNER_SUB, s),
+                      fill=T.CHROME_TEXT_MUTED)
+        y += sub_h + int(3 * s)
+        if attrib:
+            c.create_text(x, y, anchor="nw", text=attrib,
+                          font=T.scale_font(T.FONT_BANNER_SUB, s),
+                          fill=T.CHROME_TEXT_DIM)
+
+        # A three-colour bright gradient along the foot of the banner. p.19
+        # sanctions exactly this: a bright gradient as a UI element layered
+        # over a darker ground.
+        rule = G.render((w, rule_h), T.RULE_GRADIENT, angle=0.0)
+        self._rule_photo = ImageTk.PhotoImage(rule)
+        c.create_image(0, h - rule_h, image=self._rule_photo, anchor="nw")
+
+        sx, sy = w - pad, (h - rule_h) // 2
+        self.theme_switch.configure(bg_color=G.sample(img, sx - int(70 * s), sy))
+        c.create_window(sx, sy, window=self.theme_switch, anchor="e")
+
+    def _logo_scaled(self, height: int):
+        """The logo at a pixel height, cached so a resize is not a resample."""
+        if self._logo_pil is None:
+            return None
+        height = max(8, int(height))
+        if getattr(self, "_logo_at", None) != (id(self._logo_pil), height):
+            from PIL import Image
+            w = max(1, int(self._logo_pil.width * height / self._logo_pil.height))
+            self._logo_ready = self._logo_pil.resize((w, height), Image.LANCZOS)
+            self._logo_at = (id(self._logo_pil), height)
+        return self._logo_ready
 
     def _toggle_theme(self) -> None:
         self.mode = "dark" if self.theme_switch.get() else "light"
@@ -120,17 +240,26 @@ class App(ctk.CTk):
         self.theme_switch.configure(text="Dark mode" if self.mode == "dark"
                                     else "Light mode")
         self._load_logo()
+        self._paint_header()
+        if hasattr(self, "nav"):
+            self.nav.refresh_theme()
 
     # ------------------------------------------------------------------
     #  body
     # ------------------------------------------------------------------
 
     def _build_body(self) -> None:
-        """A left rail, one page per stage of a flight's life.
+        """Four chapters, in the order a survey day happens.
 
-        Vertical rather than tabs across the top: pages are added by growing
-        downward, so a fifth never has to fight for horizontal room or lose its
-        label to truncation.
+        Aboard ROV is the boat: the flight and its transect times, the vehicle,
+        and the copy onto the drive. Flight report is the desk afterwards --
+        what the recordings say and whether they are sound. Then the two media
+        chapters, which are the same shape as each other: bring it in, work it
+        up, get it out.
+
+        Grouping rather than one rail entry per tool. Eight entries had stopped
+        describing anything; four describe the day, and a chapter can grow a
+        fifth tool without the rail growing at all.
         """
         from .bannertools import BannerToolsTab
         from .healthpage import HealthPage
@@ -141,33 +270,43 @@ class App(ctk.CTk):
         from .transectpage import TransectPage
         from .videopage import VideoPage
 
-        # Pages that read the flight re-read it when opened: the folder and
-        # the survey plan are both edited on Flight setup, and a page built
+        # Pages that read the flight re-read it when opened: the folder and the
+        # survey plan are both edited on Flight & transects, and a page built
         # once at startup would still show the state from then.
         nav = Navigator(self, on_select=self._page_shown)
-        nav.grid(row=1, column=0, sticky="nsew", padx=(0, 16), pady=(4, 8))
+        nav.grid(row=1, column=0, sticky="nsew")
         self.nav = nav
-
-        self._build_flight_page(nav.add("Flight setup", "folder · transects"))
         self.pages = {}
-        for name, sub, cls in (
-            # Transects first: the CSVs need only the plan and the mcaps,
-            # and the same windows go on to drive the video overlays.
-            # First in the rail because it comes first in the day: the
-            # recordings have to be off the vehicle before anything
-            # else can run.
-            ("Get from ROV", "download · SSD", RovPage),
-            ("Transects", "mcap to CSV", TransectPage),
-            ("Import photos", "card or folder", ImportPage),
-            ("Process photos", "GPR to TIF", ProcessPage),
-            ("Video", "trim · composite", VideoPage),
-            ("Recording health", "mcap · repair", HealthPage),
-            ("Banner tools", "edited JPGs", BannerToolsTab),
-        ):
-            page = cls(nav.add(name, sub), self)
-            page.grid(row=0, column=0, sticky="nsew")
-            self.pages[name] = page
-        nav.select("Flight setup")
+
+        # 1. On the boat. The flight comes first even though the chapter is
+        #    named for the vehicle: the site and date are what every folder
+        #    downstream is named from, and the snapshot needs somewhere to land.
+        aboard = nav.add_chapter("Aboard ROV")
+        self._build_flight_page(aboard.add("Flight & transects"))
+        self._mount(aboard, "Vehicle & files", RovPage)
+
+        # 2. Back at the desk. Transects lead: the CSVs need only the plan and
+        #    the mcaps, and the same windows go on to drive the video overlays.
+        report = nav.add_chapter("Flight report")
+        self._mount(report, "Transects", TransectPage)
+        self._mount(report, "Recording health", HealthPage)
+
+        # 3 and 4. Bring it in, work it up, get it out.
+        photos = nav.add_chapter("Photos")
+        self._mount(photos, "Import photos", ImportPage)
+        self._mount(photos, "Process photos", ProcessPage)
+        self._mount(photos, "Banner tools", BannerToolsTab)
+
+        videos = nav.add_chapter("Videos")
+        self._mount(videos, "Video", VideoPage)
+
+        nav.select("Flight & transects")
+
+    def _mount(self, chapter, name: str, cls) -> None:
+        """Build one tool into its chapter and remember it by name."""
+        page = cls(chapter.add(name), self)
+        page.grid(row=0, column=0, sticky="nsew")
+        self.pages[name] = page
 
     def _page_shown(self, name: str) -> None:
         """Let a page re-read the flight when the rail raises it."""
@@ -439,7 +578,7 @@ class App(ctk.CTk):
         self.submit(work, "Reading telemetry for the transect preview…")
 
     def _show_profile(self, img, stats, warns) -> None:
-        """Put the rendered profile on the Flight setup page."""
+        """Put the rendered profile on the Flight & transects page."""
         self._profile_img = ctk.CTkImage(light_image=img, dark_image=img,
                                          size=img.size)
         self.preview_img.configure(image=self._profile_img, text="")

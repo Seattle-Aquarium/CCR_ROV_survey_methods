@@ -63,9 +63,8 @@ def test_no_subtitle_is_wider_than_its_card(app, size):
     _settle(app)
 
     too_wide = []
-    for page in list(app.pages) + ["Flight setup"]:
-        if page in app.pages:
-            app.nav.select(page)
+    for page in app.nav.sections:
+        app.nav.select(page)
         _settle(app, 12)
         for card in _cards(app):
             subtitle = getattr(card, "_subtitle", None)

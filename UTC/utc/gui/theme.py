@@ -73,6 +73,90 @@ FONT_MONO = (MONO, 11)
 RADIUS = 8
 PAD = 12
 
+# --------------------------------------------------------------------------
+#  Chrome: the banner and the rail
+# --------------------------------------------------------------------------
+#
+# The banner and the rail are drawn in brand gradients and stay dark in both
+# appearance modes, while the content area between them flips. Two reasons.
+#
+# The first is the guidelines: deep gradients are for backgrounds, and every
+# colour in them is dark enough to carry White type at AA. There is no light
+# gradient in the palette, and inventing one would mean tinting a brand colour,
+# which p.18 forbids.
+#
+# The second is that it says something true about the application. The rail is
+# the order of a survey day, and it runs across every mode and every page; a
+# constant dark chrome around a changing content area is that idea drawn.
+
+#: Deep gradients, per mode. Both pairs carry White type at AA throughout.
+HEADER_GRADIENT = {
+    "dark": brand.DEEP_GRADIENTS["salish_fathom"],
+    "light": brand.DEEP_GRADIENTS["salish_mediterranean"],
+}
+
+#: The rail runs top to bottom, so its gradient does too.
+RAIL_GRADIENT = HEADER_GRADIENT
+RAIL_ANGLE = 90.0
+
+#: A three-colour bright gradient, three pixels tall, dividing the banner from
+#: the work below it. p.19 sanctions exactly this: a bright gradient as a UI
+#: element layered over a darker background.
+RULE_GRADIENT = brand.BRIGHT_GRADIENTS_3["algae_seafoam_purple"]
+RULE_HEIGHT = 3
+
+#: The selected chapter's marker -- a small UI element on a dark ground, which
+#: is what the two-colour bright gradients are for.
+STRIPE_GRADIENT = brand.BRIGHT_GRADIENTS["algae_seafoam"]
+
+#: Chrome type. Flat values rather than (light, dark) pairs: the ground under
+#: them is a dark gradient whichever mode the rest of the window is in.
+#:
+#: Measured against the darkest and lightest ends of both gradients rather than
+#: chosen by eye. The foot of the light-mode rail is Mediterranean, which is
+#: far lighter than anything the dark mode reaches -- the previous muted value
+#: sat at 1.6:1 there, invisible. These clear 3:1 on every ground they touch,
+#: which is the bar for the large type the rail is set in.
+CHROME_TEXT = brand.WHITE               # 6.1:1 worst case (on Mediterranean)
+CHROME_TEXT_MUTED = "#CBD9E8"           # 4.2:1 worst case
+CHROME_TEXT_DIM = "#9FB6D0"             # 2.9:1; only used at the Salish end
+
+#: The rail's chapter names. Larger than body copy because the rail is the
+#: progression through a survey day rather than a list of settings -- and at
+#: 15px semibold it also clears the 3:1 large-text bar rather than 4.5:1.
+FONT_RAIL = (FAMILY_SEMIBOLD, 15)
+FONT_RAIL_SMALL = (FAMILY, 15)
+
+FONT_BANNER = (FAMILY, 23, "bold")
+FONT_BANNER_SUB = (FAMILY, 11)
+
+
+# --------------------------------------------------------------------------
+#  Display scaling
+# --------------------------------------------------------------------------
+#
+# CustomTkinter scales its own widgets and fonts for the display -- 2.5x on the
+# field laptop -- but a raw tkinter Canvas knows nothing about that, and Tk
+# itself reports 96 DPI regardless. So anything drawn on a canvas (the banner
+# and the rail) has to be scaled by hand, or it renders at two-fifths the size
+# of everything around it. This was not a subtle bug: the banner came out
+# shorter than a single card heading.
+
+
+def scale_of(widget) -> float:
+    """CustomTkinter's widget scaling for this display, or 1.0."""
+    try:
+        import customtkinter as ctk
+        return float(ctk.ScalingTracker.get_widget_scaling(widget))
+    except Exception:
+        return 1.0
+
+
+def scale_font(font: tuple, factor: float) -> tuple:
+    """A font tuple at display scale, for drawing on a canvas."""
+    size = max(1, int(round(font[1] * factor)))
+    return (font[0], size, *font[2:])
+
 
 def apply(ctk, mode: str = "dark") -> None:
     """Set the global appearance mode."""
@@ -82,7 +166,10 @@ def apply(ctk, mode: str = "dark") -> None:
 def logo_for(mode: str) -> str | None:
     """Logo variant that is legible on the current ground.
 
-    The guidelines allow White on any dark background; Mediterranean Blue is the
-    primary treatment on white or light.
+    White in both modes, because the banner it sits on is a deep gradient in
+    both. Mediterranean Blue is the treatment for a white or light ground, and
+    the banner stopped being one -- a blue logo there would read as a smudge
+    against Mediterranean's own end of the light-mode gradient.
     """
-    return brand.logo_path("white" if mode.lower().startswith("d") else "mediterranean")
+    del mode                      # kept: callers pass the current mode
+    return brand.logo_path("white")

@@ -76,6 +76,12 @@ NEUTRAL
   Stone           #575757
 ```
 
+> **All seven colours are in play.** An earlier decision — recorded in
+> `CCR_ROV_survey_methods_HISTORY.md` for the paper field datasheet — kept
+> Purple Star and Coral out of the palette. **That was rescinded on
+> 2026-09-05** and applies to nothing going forward: both are part of the
+> toolkit. They are accents, so use them as accents.
+
 > **Use the hex values, not the RGB line.** On p.18 Algae's RGB is printed as
 > `0 | 195 | 37`, but its hex `#00C389` is `0 | 195 | 137` — the RGB line is
 > missing a digit. Every other colour agrees.
@@ -159,9 +165,39 @@ at 0 / 70 / 95; three-colour at 0 / 50 / 50 / 50 / 100.
 
 **Never use the full One Ocean gradient in its entirety.**
 
-For desktop GUI work, gradients are mostly a header or splash treatment. Flat
-brand colours are the safer default for controls — a gradient behind small type
-makes contrast unverifiable, since it changes across the element.
+For desktop GUI work, gradients belong on chrome — the banner and the rail —
+not on controls. A gradient behind small type makes contrast unverifiable,
+because the ground changes across the element; if you put type on one, check it
+against **both** end colours (`brand.contrast`), not against the average.
+
+### What the UTC actually does with them
+
+*Decided 2026-09-05, after the four-chapter regrouping.*
+
+- **Banner and rail carry a deep gradient, and stay dark in both appearance
+  modes**, while the content between them flips. There is no light gradient in
+  the palette, and inventing one would mean tinting a brand colour, which p.18
+  forbids. It also says something true: the rail is the order of a survey day,
+  and it runs across every mode and every page.
+  - dark mode: **Salish → Fathom**  ·  light mode: **Salish → Mediterranean**
+- **A 3-colour bright gradient rules off the banner** — Algae → Seafoam →
+  Purple Star, three pixels tall. Sanctioned use: a bright gradient as a UI
+  element over a darker ground.
+- **The selected chapter's marker is a 2-colour bright gradient** — Algae →
+  Seafoam. Same rule, smaller element.
+- **The logo is White in both modes**, because the banner is dark in both. The
+  Mediterranean logo is for a light ground, and the banner stopped being one.
+
+Rendered by `utc/gui/gradients.py`, which implements the p.19 geometry rather
+than a plain ramp: the second colour is reached at 95 and the 50/50 blend lands
+at 70, so the first colour holds and then moves. Drawn on a `tkinter.Canvas` —
+a CustomTkinter widget over an image paints its own rectangle, because
+"transparent" there means the master's flat colour, not what is behind it.
+
+> **Scale canvas work by hand.** CustomTkinter scales its widgets and fonts for
+> the display (2.5× on the field laptop); a raw Canvas does not, and Tk reports
+> 96 DPI regardless. Use `theme.scale_of(widget)` and `theme.scale_font`. The
+> first cut of the banner came out shorter than a single card heading.
 
 ## The two schemes
 
