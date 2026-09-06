@@ -40,7 +40,7 @@ APP_ABBREV = "UTC"
 #: What the banner says. Deliberately separate from APP_NAME, which still names
 #: the window, the dialogs and the files this writes -- renaming the programme
 #: is a decision for later, and nothing on disk should move in the meantime.
-DISPLAY_TITLE = "Program title TBD"
+DISPLAY_TITLE = "Program Title"
 
 #: One line per chapter, in the rail's order, and numbered to match it. Drawn
 #: with a coloured badge carrying the number -- the same colour that chapter's

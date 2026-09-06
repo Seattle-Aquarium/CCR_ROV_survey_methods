@@ -191,8 +191,7 @@ def test_switching_appearance_mode_repaints_the_chrome(app):
             app._toggle_theme()
 
 
-@pytest.mark.parametrize("style", ["solid", "outline", "leftbar", "pill",
-                                   "plate", "ghost"])
+@pytest.mark.parametrize("style", ["solid", "outline", "leftbar", "ghost"])
 @pytest.mark.parametrize("state", ["on", "hover", "off"])
 def test_every_button_style_puts_legible_type_on_every_chapter(app, style,
                                                                state,

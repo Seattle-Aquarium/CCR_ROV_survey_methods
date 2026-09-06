@@ -232,14 +232,19 @@ a CustomTkinter widget over an image paints its own rectangle, because
 Each is a named constant in `theme.py` with the variants listed beside it, and
 each was trialled against the running application rather than mocked up.
 
-| Constant | Variants |
-|---|---|
-| `CHAPTER_BTN_STYLE` | solid · outline · leftbar · pill · plate · ghost |
-| `SECTION_MARK_STYLE` | underline · hairline · outline · pill · topline |
-| `BADGE_STYLE` | solid · soft · outline · dot · bar · plain |
-| `BANNER_LAYOUT` | inline · stacked |
-| `TITLE_STYLE` | bold · black · caps · twotone · light |
-| `CHAPTER_PALETTES` | ocean · kelp · tideline · estuary · spectrum · shore |
+| Constant | Variants | Settled on |
+|---|---|---|
+| `CHAPTER_BTN_STYLE` | solid · outline · leftbar · ghost | **outline** |
+| `CHAPTER_BTN_SHAPE` | soft · plate · pill · square | **plate** |
+| `SECTION_MARK_STYLE` | underline · hairline · outline · pill · topline | **outline** |
+| `BADGE_STYLE` | solid · soft · outline · dot · bar · plain | **soft** |
+| `BANNER_LAYOUT` | inline · stacked | **stacked** |
+| `TITLE_STYLE` | bold · black · caps · twotone · light | **bold** |
+| `CHAPTER_PALETTES` | ocean · kelp · tideline · estuary · spectrum · shore | **kelp** |
+
+A button's *treatment* and its *shape* are separate constants. Running them
+together meant the combination that was actually wanted — the outline
+treatment at the plate's corner radius — could not be expressed at all.
 
 `tests/test_nav.py` walks every button, badge, banner and title variant, so a
 new one cannot be added that draws illegible type or reserves the wrong width.

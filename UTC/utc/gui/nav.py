@@ -369,7 +369,8 @@ class Navigator(ctk.CTkFrame):
         style = T.CHAPTER_BTN_STYLE
         surface = mode(T.SURFACE_ALT)
         text, muted, edge = mode(T.TEXT), mode(T.TEXT_MUTED), mode(T.BORDER)
-        r, b, b_on = self._radius, self._border, self._border_on
+        b, b_on = self._border, self._border_on
+        r = T.chapter_btn_radius(self._radius, self._btn_h)
         on, hover = state == "on", state == "hover"
 
         if not live:
@@ -381,18 +382,8 @@ class Navigator(ctk.CTkFrame):
                     T.ink_for(colour) if on else text)
 
         if style == "leftbar":
-            fill = surface
-            return (fill, colour if on else edge, b_on if on else b, r,
+            return (surface, colour if on else edge, b_on if on else b, r,
                     colour, text if (on or hover) else muted)
-
-        if style == "pill":
-            return (colour, text if on else edge, b_on if on else b,
-                    self._btn_h // 2, "", T.ink_for(colour))
-
-        if style == "plate":
-            # No border at rest; the open one takes a bright ring instead.
-            return (colour, mode(T.ACCENT) if on else colour,
-                    b_on if on else 0, int(r * 1.8), "", T.ink_for(colour))
 
         if style == "ghost":
             # Colour arrives only on the chapter you chose.
@@ -401,7 +392,7 @@ class Navigator(ctk.CTkFrame):
                     b_on if on else b, r, "",
                     T.ink_for(colour) if on else text)
 
-        # "solid" -- the default.
+        # "solid".
         if on:
             border, width = text, b_on
         elif hover:

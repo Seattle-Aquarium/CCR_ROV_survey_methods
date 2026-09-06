@@ -107,7 +107,7 @@ STRIPE_GRADIENT = brand.BRIGHT_GRADIENTS["algae_seafoam"]
 #:   outline    a rounded border all the way around the tab
 #:   pill       a filled rounded ground behind the tab, no line
 #:   topline    the rule above rather than below, so it points at the chapter
-SECTION_MARK_STYLE = "underline"
+SECTION_MARK_STYLE = "outline"
 SECTION_MARK_STYLES = ("underline", "hairline", "outline", "pill", "topline")
 #: Reduced from six: at the banner's weight it was competing with the rule
 #: across the top of the window rather than answering to it.
@@ -173,25 +173,47 @@ CHAPTER_BTN_BORDER_ON = 3
 #: Room above the first button, and how far down the four sit as a group.
 CHAPTER_BTN_TOP = 18
 
-#: How a chapter button is drawn. Trialled 2026-09-06; see the comparison
-#: sheet. Every one of these keeps the chapter's colour somewhere, and none of
-#: them puts type *in* Algae or Seafoam on a light ground, which fails.
+# A chapter button has a *treatment* and a *shape*, and they are independent.
+# The first cut ran them together, which meant "the outline treatment at the
+# plate's corner radius" -- the combination that was actually wanted -- could
+# not be asked for at all.
+
+#: How a chapter button is coloured. Every one of these keeps the chapter's
+#: colour somewhere, and none puts type *in* Algae or Seafoam, which measure
+#: 2.2:1 and 1.9:1 on a light ground.
 #:
-#:   solid    filled with the chapter's colour, bordered. The type is chosen
-#:            against the fill by `ink_for`.
-#:   outline  surface fill, the colour in a thick border only; type stays
-#:            theme-coloured, so it reads on either ground.
+#:   solid    filled with the chapter's colour. The type is chosen against
+#:            that fill by `ink_for`.
+#:   outline  surface fill, the colour in the border only, type theme-coloured
+#:            so it reads on either ground. Fills in when the chapter is open.
 #:   leftbar  surface fill with a colour bar down the leading edge -- quiet,
 #:            and closest to a conventional nav rail.
-#:   pill     solid, fully rounded.
-#:   plate    solid with no border and a wider radius; the open one takes a
-#:            bright ring instead.
-#:   ghost    outline that fills in only when open -- the least colour of the
-#:            five until you choose something.
-CHAPTER_BTN_STYLE = "solid"
-CHAPTER_BTN_STYLES = ("solid", "outline", "leftbar", "pill", "plate", "ghost")
-#: Width of the colour bar in the "leftbar" style.
+#:   ghost    outline, but the border stays neutral until you choose -- the
+#:            least colour of the four.
+CHAPTER_BTN_STYLE = "outline"
+CHAPTER_BTN_STYLES = ("solid", "outline", "leftbar", "ghost")
+
+#: The corner radius, as a shape rather than a number.
+#:
+#:   soft   the standard radius, a little rounder than a card
+#:   plate  noticeably rounder; reads as an object rather than a panel
+#:   pill   fully rounded
+#:   square no radius at all
+CHAPTER_BTN_SHAPE = "plate"
+CHAPTER_BTN_SHAPES = ("soft", "plate", "pill", "square")
+
+#: Width of the colour bar in the "leftbar" treatment.
 CHAPTER_BTN_BAR = 6
+
+
+def chapter_btn_radius(base: int, height: int, shape: str = "") -> int:
+    """Corner radius in real pixels, for a button `height` tall."""
+    return {
+        "soft": base,
+        "plate": int(base * 1.8),
+        "pill": height // 2,
+        "square": 0,
+    }.get(shape or CHAPTER_BTN_SHAPE, base)
 
 FONT_BANNER = (FAMILY, 23, "bold")
 FONT_BANNER_SUB = (FAMILY, 11)
