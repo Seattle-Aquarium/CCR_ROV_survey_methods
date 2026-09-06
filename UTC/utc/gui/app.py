@@ -64,6 +64,10 @@ ROADMAP_ROWS = ((0, 1), (2, 3))
 #: logo two inches to the left already says it.
 ATTRIBUTION = ("Conservation Programs and Partnerships  ·  "
                "Coastal Climate Resilience")
+
+#: The same, one per line, for the stacked banner.
+ATTRIBUTION_LINES = ("Conservation Programs and Partnerships",
+                     "Coastal Climate Resilience")
 # Plan filename and legacy fallback live in survey.py, so the CLI and the
 # GUI cannot drift apart on which file they read.
 
@@ -179,22 +183,128 @@ class App(ctk.CTk):
                 lines.extend([i] for i in row)
         return lines
 
+    def _badge_width(self, badge: int, s: float) -> int:
+        """How much horizontal room a chapter number takes, whatever its style.
+
+        Measured here rather than assumed at each call site, so the roadmap
+        wraps correctly in every badge style.
+        """
+        style = T.BADGE_STYLE
+        if style == "bar":
+            return max(2, int(4 * s)) + int(10 * s)
+        if style == "dot":
+            return badge // 2 + int(7 * s) + badge // 2
+        if style == "plain":
+            return badge // 2
+        return badge
+
+    def _draw_badge(self, c, x: int, cy: float, index: int, badge: int,
+                    ground: str, ink: str, font: tuple, s: float) -> int:
+        """Draw one chapter number and return the width it used.
+
+        Six treatments, all of which keep the chapter's colour somewhere. The
+        colour is never the type itself: on a light ground Algae and Seafoam
+        measure 2.2:1 and 1.9:1, so where the number has to be read it is set
+        in body ink and the colour goes into a fill, a ring, a disc or a rule.
+        """
+        from PIL import ImageTk
+
+        style = T.BADGE_STYLE
+        colour = T.CHAPTER_COLOURS[index % len(T.CHAPTER_COLOURS)]
+        num = str(index + 1)
+
+        if style == "plain":
+            c.create_text(x, cy, anchor="w", text=num + ".", font=font,
+                          fill=ink)
+            return self._badge_width(badge, s)
+
+        if style == "bar":
+            bw = max(2, int(4 * s))
+            c.create_rectangle(x, cy - badge / 2, x + bw, cy + badge / 2,
+                               fill=colour, outline="")
+            return self._badge_width(badge, s)
+
+        if style == "dot":
+            d = badge // 2
+            c.create_oval(x, cy - d / 2, x + d, cy + d / 2, fill=colour,
+                          outline="")
+            c.create_text(x + d + int(7 * s), cy, anchor="w", text=num,
+                          font=font, fill=ink)
+            return self._badge_width(badge, s)
+
+        if style == "outline":
+            img = G.chip((badge, badge), fill=ground, border=colour,
+                         border_w=max(1, int(1.5 * s)), radius=badge // 4,
+                         ground=ground)
+            photo = ImageTk.PhotoImage(img)
+            self._badge_photos.append(photo)
+            c.create_image(x, cy - badge / 2, image=photo, anchor="nw")
+            c.create_text(x + badge / 2, cy, anchor="center", text=num,
+                          font=font, fill=ink)
+            return badge
+
+        # "solid" and "soft" -- filled, the number chosen against the fill.
+        img = G.chip((badge, badge), fill=colour, radius=badge // 4,
+                     ground=ground)
+        photo = ImageTk.PhotoImage(img)
+        self._badge_photos.append(photo)
+        c.create_image(x, cy - badge / 2, image=photo, anchor="nw")
+        c.create_text(x + badge / 2, cy, anchor="center", text=num,
+                      font=font, fill=T.ink_for(colour))
+        return badge
+
+    def _draw_title(self, c, x: int, y: int, s: float, heading: str) -> None:
+        """The programme name, in whichever style the theme asks for."""
+        style = T.TITLE_STYLE
+        font = T.scale_font(T.title_font(style), s)
+        if style == "caps":
+            c.create_text(x, y, anchor="nw", text=DISPLAY_TITLE.upper(),
+                          font=font, fill=heading)
+            return
+        if style == "twotone":
+            from tkinter import font as tkfont
+            head, _, tail = DISPLAY_TITLE.partition(" ")
+            f = tkfont.Font(**_font_kw(font))
+            c.create_text(x, y, anchor="nw", text=head, font=font,
+                          fill=heading)
+            if tail:
+                c.create_text(x + f.measure(head + " "), y, anchor="nw",
+                              text=tail, font=font,
+                              fill=self._apply_appearance_mode(T.ACCENT))
+            return
+        c.create_text(x, y, anchor="nw", text=DISPLAY_TITLE, font=font,
+                      fill=heading)
+
     def _paint_header(self) -> None:
         """Draw the banner at the current width.
 
-        Laid out by measuring rather than by fixed offsets. Three things follow
-        from that and none of them can be a constant: the roadmap flows into as
-        many lines as the width needs, the banner is as tall as whatever that
-        came to, and the logo is sized to span the title and roadmap together.
+        Two arrangements, chosen by `theme.BANNER_LAYOUT`:
 
-        The roadmap's numbers are badges in their own chapter's colour -- the
-        same colour that chapter's button wears in the rail. It reads as the
-        key to the rail rather than as a sentence, and it sidesteps the fact
-        that Seafoam and Algae cannot be used as type on a light ground.
+        *inline* runs the title above the roadmap and the attribution beneath,
+        across the full width.
+
+        *stacked* puts the title and its attribution in one column and the four
+        chapters in another beside it, which leaves the right-hand third of the
+        banner clear -- room for illustration, and a calmer read.
+
+        Both are laid out by measuring rather than by fixed offsets: the banner
+        is as tall as whatever its own type came to, and the logo is sized to
+        span the block beside it.
         """
+        if T.BANNER_LAYOUT == "stacked":
+            return self._paint_header_stacked()
+        return self._paint_header_inline()
+
+    def _banner_metrics(self, s: float):
+        """Fonts and spacings shared by both banner arrangements."""
         from tkinter import font as tkfont
 
-        from PIL import ImageTk
+        f_title = tkfont.Font(**_font_kw(T.scale_font(T.title_font(), s)))
+        f_sub = tkfont.Font(**_font_kw(T.scale_font(T.FONT_BANNER_SUB, s)))
+        badge = max(1, int(f_sub.metrics("linespace") * T.BADGE_SCALE))
+        return f_title, f_sub, badge
+
+    def _paint_header_inline(self) -> None:
 
         c = self.header
         s = T.scale_of(self)
@@ -203,13 +313,10 @@ class App(ctk.CTk):
         rule_h = max(1, int(T.RULE_HEIGHT * s))
         ground = self._apply_appearance_mode(T.HEADER_BG)
 
-        f_title = tkfont.Font(**_font_kw(T.scale_font(T.FONT_BANNER, s)))
-        f_sub = tkfont.Font(**_font_kw(T.scale_font(T.FONT_BANNER_SUB, s)))
+        f_title, f_sub, badge = self._banner_metrics(s)
         title_h = f_title.metrics("linespace")
         sub_h = f_sub.metrics("linespace")
-
-        badge = int(sub_h * 1.25)
-        line_h = badge + int(5 * s)
+        line_h = max(badge, sub_h) + int(7 * s)
         gap_title = int(9 * s)
         gap_attrib = int(14 * s)         # the visible break: roadmap, then who
         seg_gap = int(24 * s)
@@ -219,42 +326,27 @@ class App(ctk.CTk):
         # the space the roadmap has depends on how wide the logo is. Settle it
         # by laying out twice -- the second pass knows the real logo width.
         lines: list[list[int]] = [[0, 1], [2, 3]]
-        x = logo_w = 0
+        x = 0
         for _ in range(2):
             block_h = title_h + gap_title + len(lines) * line_h
             logo = self._logo_scaled(block_h)
             logo_w = logo.width if logo is not None else int(150 * s)
             x = pad + int(4 * s) + logo_w + logo_gap
             avail = max(int(200 * s), w - x - int(170 * s))
-            lines = self._wrap_roadmap(f_sub, badge, seg_gap, avail)
+            lines = self._wrap_roadmap(f_sub, self._badge_width(badge, s),
+                                       seg_gap, avail)
 
         block_h = title_h + gap_title + len(lines) * line_h
         h = pad + block_h + gap_attrib + sub_h + pad + rule_h
-        if int(c.cget("height")) != h:
-            c.configure(height=h)
-
-        c.delete("all")
-        c.configure(background=ground)
-        c.create_rectangle(0, 0, w, h, fill=ground, outline="")
+        self._banner_ground(c, w, h, ground)
 
         heading = self._apply_appearance_mode(T.HEADING)
         body = self._apply_appearance_mode(T.TEXT)
         muted = self._apply_appearance_mode(T.TEXT_MUTED)
-
-        # The logo spans the title and the roadmap, top-aligned with both.
-        logo = self._logo_scaled(block_h)
-        if logo is not None:
-            self._logo_photo = ImageTk.PhotoImage(logo)
-            c.create_image(pad + int(4 * s), pad, image=self._logo_photo,
-                           anchor="nw")
-        else:
-            c.create_text(pad + int(4 * s), pad + block_h // 2, anchor="w",
-                          text="Seattle Aquarium",
-                          font=T.scale_font(T.FONT_H2, s), fill=heading)
+        self._draw_logo(c, pad + int(4 * s), pad, block_h, s, heading)
 
         y = pad
-        c.create_text(x, y, anchor="nw", text=DISPLAY_TITLE,
-                      font=T.scale_font(T.FONT_BANNER, s), fill=heading)
+        self._draw_title(c, x, y, s, heading)
         y += title_h + gap_title
 
         self._badge_photos = []
@@ -262,27 +354,110 @@ class App(ctk.CTk):
         for row in lines:
             bx = x
             for i in row:
-                colour = T.CHAPTER_COLOURS[i % len(T.CHAPTER_COLOURS)]
-                img = G.chip((badge, badge), fill=colour, radius=badge // 4,
-                             ground=ground)
-                photo = ImageTk.PhotoImage(img)
-                self._badge_photos.append(photo)
-                c.create_image(bx, y, image=photo, anchor="nw")
-                c.create_text(bx + badge / 2, y + badge / 2, anchor="center",
-                              text=str(i + 1), font=f_badge,
-                              fill=T.ink_for(colour))
-                bx += badge + seg_gap // 2
-                c.create_text(bx, y + badge / 2, anchor="w",
+                used = self._draw_badge(c, bx, y + line_h / 2, i, badge,
+                                        ground, body, f_badge, s)
+                bx += used + seg_gap // 2
+                c.create_text(bx, y + line_h / 2, anchor="w",
                               text=CHAPTER_BLURBS[i], font=f_badge, fill=body)
                 bx += f_sub.measure(CHAPTER_BLURBS[i]) + seg_gap
             y += line_h
 
         c.create_text(x, y + gap_attrib, anchor="nw", text=ATTRIBUTION,
                       font=T.scale_font(T.FONT_BANNER_SUB, s), fill=muted)
+        self._banner_furniture(c, w, h, rule_h, pad, ground)
 
-        # The one gradient in the application: a three-colour bright gradient
-        # along the foot of the banner. It is a single object and carries no
-        # type, which is exactly what p.19 sanctions a bright gradient for.
+    def _paint_header_stacked(self) -> None:
+        """Title and attribution in one column, the four chapters in another.
+
+        The chapters are stacked rather than run together, so their numbers
+        line up as a column and read as the key to the rail. Whatever is left
+        at the right is deliberate: it is where illustration would sit.
+        """
+        c = self.header
+        s = T.scale_of(self)
+        w = max(1, c.winfo_width())
+        pad = int(16 * s)
+        rule_h = max(1, int(T.RULE_HEIGHT * s))
+        ground = self._apply_appearance_mode(T.HEADER_BG)
+
+        f_title, f_sub, badge = self._banner_metrics(s)
+        title_h = f_title.metrics("linespace")
+        sub_h = f_sub.metrics("linespace")
+        line_h = max(badge, sub_h) + int(6 * s)
+        gap_title = int(10 * s)
+        gutter = int(46 * s)
+        logo_gap = int(22 * s)
+
+        title_block = title_h + gap_title + sub_h * 2 + int(4 * s)
+        chapters_block = len(CHAPTER_BLURBS) * line_h
+        block_h = max(title_block, chapters_block)
+        h = pad + block_h + pad + rule_h
+        self._banner_ground(c, w, h, ground)
+
+        heading = self._apply_appearance_mode(T.HEADING)
+        body = self._apply_appearance_mode(T.TEXT)
+        muted = self._apply_appearance_mode(T.TEXT_MUTED)
+
+        x0 = pad + int(4 * s)
+        logo = self._draw_logo(c, x0, pad, block_h, s, heading)
+        x1 = x0 + (logo.width if logo is not None else int(150 * s)) + logo_gap
+
+        y = pad
+        self._draw_title(c, x1, y, s, heading)
+        y += title_h + gap_title
+        for line in ATTRIBUTION_LINES:
+            c.create_text(x1, y, anchor="nw", text=line,
+                          font=T.scale_font(T.FONT_BANNER_SUB, s), fill=muted)
+            y += sub_h + int(2 * s)
+
+        title_w = max([f_title.measure(DISPLAY_TITLE)]
+                      + [f_sub.measure(t) for t in ATTRIBUTION_LINES])
+        x2 = x1 + title_w + gutter
+
+        self._badge_photos = []
+        f_badge = T.scale_font(T.FONT_BANNER_SUB, s)
+        gap = int(12 * s)
+        y = pad + (block_h - chapters_block) // 2
+        for i in range(len(CHAPTER_BLURBS)):
+            cy = y + line_h / 2
+            used = self._draw_badge(c, x2, cy, i, badge, ground, body,
+                                    f_badge, s)
+            c.create_text(x2 + used + gap, cy, anchor="w",
+                          text=CHAPTER_BLURBS[i], font=f_badge, fill=body)
+            y += line_h
+
+        self._banner_furniture(c, w, h, rule_h, pad, ground)
+
+    # ------------------------------------------------------------------
+
+    def _banner_ground(self, c, w: int, h: int, ground: str) -> None:
+        if int(c.cget("height")) != h:
+            c.configure(height=h)
+        c.delete("all")
+        c.configure(background=ground)
+        c.create_rectangle(0, 0, w, h, fill=ground, outline="")
+
+    def _draw_logo(self, c, x: int, y: int, height: int, s: float,
+                   heading: str):
+        from PIL import ImageTk
+
+        logo = self._logo_scaled(height)
+        if logo is None:
+            c.create_text(x, y + height // 2, anchor="w",
+                          text="Seattle Aquarium",
+                          font=T.scale_font(T.FONT_H2, s), fill=heading)
+            return None
+        self._logo_photo = ImageTk.PhotoImage(logo)
+        c.create_image(x, y, image=self._logo_photo, anchor="nw")
+        return logo
+
+    def _banner_furniture(self, c, w: int, h: int, rule_h: int, pad: int,
+                          ground: str) -> None:
+        """The bright rule along the foot, and the appearance switch."""
+        from PIL import ImageTk
+
+        # The one gradient in the application. It is a single object and
+        # carries no type, which is what p.19 sanctions a bright gradient for.
         rule = G.render((w, rule_h), T.RULE_GRADIENT, angle=0.0)
         self._rule_photo = ImageTk.PhotoImage(rule)
         c.create_image(0, h - rule_h, image=self._rule_photo, anchor="nw")

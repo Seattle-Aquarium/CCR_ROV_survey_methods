@@ -81,50 +81,69 @@ class SectionStrip(ctk.CTkFrame):
 
     def add(self, name: str) -> None:
         col = len(self._buttons)
+        style = T.SECTION_MARK_STYLE
         btn = ctk.CTkButton(
-            self, text=name, font=T.FONT_SECTION, height=34, corner_radius=0,
+            self, text=name, font=T.FONT_SECTION, height=34,
+            corner_radius=8 if style in ("outline", "pill") else 0,
             fg_color="transparent", hover_color=T.SURFACE,
             text_color=T.TEXT_MUTED,
             command=lambda n=name: self._on_select(n),
         )
-        btn.grid(row=0, column=col, sticky="ew", padx=(0, 4))
+        # "topline" puts the rule above the tab, so the two swap rows.
+        rows = (1, 0) if style == "topline" else (0, 1)
+        btn.grid(row=rows[0], column=col, sticky="ew", padx=(0, 4))
 
-        # A canvas because the underline is a gradient, and a CTkLabel
-        # holding an image is the wrong tool for it.
-        # A first attempt did use one and dropped the PhotoImage as soon as the
-        # tool was deselected, which left Tk holding a handle to an image
-        # Python had already freed -- "image pyimage9 doesn't exist".
-        mark = tkinter_mod.Canvas(self, height=int(T.RULE_HEIGHT * T.scale_of(self)),
-                                  highlightthickness=0, borderwidth=0)
-        mark.grid(row=1, column=col, sticky="ew", padx=(0, 4))
+        # A canvas because the marker can be a gradient, and a CTkLabel holding
+        # an image is the wrong tool for it. A first attempt did use one and
+        # dropped the PhotoImage as soon as the tool was deselected, which left
+        # Tk holding a handle to an image Python had already freed --
+        # "image pyimage9 doesn't exist".
+        mark = tkinter_mod.Canvas(
+            self, height=max(1, int(T.SECTION_MARK_HEIGHT * T.scale_of(self))),
+            highlightthickness=0, borderwidth=0)
+        mark.grid(row=rows[1], column=col, sticky="ew", padx=(0, 4))
         mark.bind("<Configure>", lambda _e, n=name: self._paint_mark(n))
+        if style in ("outline", "pill"):
+            mark.grid_remove()          # the tab carries its own marking
         self._buttons[name] = btn
         self._marks[name] = mark
 
     def select(self, name: str) -> None:
         self._current = name
+        style = T.SECTION_MARK_STYLE
         for n, btn in self._buttons.items():
             on = n == name
             btn.configure(text_color=T.HEADING if on else T.TEXT_MUTED,
                           font=T.FONT_SECTION_ON if on else T.FONT_SECTION)
+            if style == "outline":
+                btn.configure(border_width=2 if on else 0,
+                              border_color=T.ACCENT, fg_color="transparent")
+            elif style == "pill":
+                btn.configure(fg_color=T.SURFACE if on else "transparent")
             self._paint_mark(n)
 
     def _paint_mark(self, name: str) -> None:
-        """The open tool gets a bright-gradient underline.
+        """Mark the open tool, in whichever style the theme asks for.
 
         Repainted on <Configure> as well as on selection, so it arrives at the
         right width whenever the strip is finally laid out -- there is no
         retry timer to leak.
         """
+        style = T.SECTION_MARK_STYLE
         mark = self._marks[name]
         mark.delete("all")
         ground = self._apply_appearance_mode(T.BG)
         mark.configure(background=ground)
-        if name != self._current:
+        if name != self._current or style in ("outline", "pill"):
             mark._photo = None          # noqa: SLF001 -- the reference Tk needs
             return
         w = max(1, mark.winfo_width())
         h = max(1, mark.winfo_height())
+        if style == "hairline":
+            colour = self._apply_appearance_mode(T.ACCENT)
+            mark.create_rectangle(0, h // 2, w, h, fill=colour, outline="")
+            mark._photo = None          # noqa: SLF001
+            return
         img = G.render((w, h), T.STRIPE_GRADIENT, angle=0.0)
         # Held on the widget: Tk keeps no reference of its own, and a photo
         # collected while the canvas still shows it is a hard error.
@@ -296,34 +315,32 @@ class Navigator(ctk.CTkFrame):
         c.create_rectangle(0, 0, w, h, fill=ground, outline="")
 
         inset, btn_w = self._inset, max(1, w - self._inset * 2)
-        edge_on, edge_off = mode(T.TEXT), mode(T.BORDER)
 
         for name, ch in self._chapters.items():
             y = self._btn_y(ch.index)
             on = name == self._current_chapter
             live = self._chapter_enabled(name)
-            fill = self._colour_for(ch.index)
+            state = ("on" if on else
+                     "hover" if name == self._hover else "off")
 
-            # An unavailable chapter drops to the surface: a greyed-out button
-            # that keeps a saturated fill still looks pressable.
-            if not live:
-                fill = mode(T.SURFACE_ALT)
-            if not live:
-                border, width = edge_off, 0
-            elif on:
-                border, width = edge_on, self._border_on
-            elif name == self._hover:
-                border, width = mode(T.TEXT_MUTED), self._border_on
-            else:
-                border, width = edge_off, self._border
+            fill, border, width, radius, bar, ink = self._button_look(
+                self._colour_for(ch.index), state, live, mode)
 
             img = G.chip((btn_w, self._btn_h), fill=fill, border=border,
-                         border_w=width, radius=self._radius, ground=ground)
+                         border_w=width, radius=radius, ground=ground)
             photo = ImageTk.PhotoImage(img)
             self._photos.append(photo)      # Tk keeps no reference of its own
             c.create_image(inset, y, image=photo, anchor="nw")
 
-            ink = T.ink_for(fill) if live else mode(T.TEXT_MUTED)
+            if bar:
+                # A colour bar down the leading edge, clipped to the button's
+                # own corner radius so it does not poke out of the rounding.
+                bw = max(1, int(T.CHAPTER_BTN_BAR * self._scale))
+                c.create_rectangle(inset + width, y + radius // 2,
+                                   inset + width + bw,
+                                   y + self._btn_h - radius // 2,
+                                   fill=bar, outline="")
+
             cy = y + self._btn_h / 2
 
             # The numeral sits at a fixed inset so the four line up as a
@@ -336,6 +353,62 @@ class Navigator(ctk.CTkFrame):
             c.create_text(inset + btn_w / 2, cy, anchor="center", text=name,
                           font=self._font_name if on else self._font_name_off,
                           fill=ink, tags=("row", f"row:{name}"))
+
+    def _button_look(self, colour: str, state: str, live: bool, mode):
+        """Fill, border, border width, radius, leading bar and ink.
+
+        One place for all six styles, so a variant is a table entry rather
+        than a branch scattered through the drawing code.
+
+        Two rules hold across every style. A disabled chapter loses its colour
+        entirely -- a greyed-out button that keeps a saturated fill still looks
+        pressable. And type is never set *in* Algae or Seafoam: on a light
+        ground they measure 2.2:1 and 1.9:1, so the colour goes in a fill or a
+        border and `ink_for` picks what sits on it.
+        """
+        style = T.CHAPTER_BTN_STYLE
+        surface = mode(T.SURFACE_ALT)
+        text, muted, edge = mode(T.TEXT), mode(T.TEXT_MUTED), mode(T.BORDER)
+        r, b, b_on = self._radius, self._border, self._border_on
+        on, hover = state == "on", state == "hover"
+
+        if not live:
+            return surface, edge, 0, r, "", muted
+
+        if style == "outline":
+            fill = colour if on else surface
+            return (fill, colour, b_on if (on or hover) else b, r, "",
+                    T.ink_for(colour) if on else text)
+
+        if style == "leftbar":
+            fill = surface
+            return (fill, colour if on else edge, b_on if on else b, r,
+                    colour, text if (on or hover) else muted)
+
+        if style == "pill":
+            return (colour, text if on else edge, b_on if on else b,
+                    self._btn_h // 2, "", T.ink_for(colour))
+
+        if style == "plate":
+            # No border at rest; the open one takes a bright ring instead.
+            return (colour, mode(T.ACCENT) if on else colour,
+                    b_on if on else 0, int(r * 1.8), "", T.ink_for(colour))
+
+        if style == "ghost":
+            # Colour arrives only on the chapter you chose.
+            fill = colour if on else surface
+            return (fill, colour if (on or hover) else edge,
+                    b_on if on else b, r, "",
+                    T.ink_for(colour) if on else text)
+
+        # "solid" -- the default.
+        if on:
+            border, width = text, b_on
+        elif hover:
+            border, width = muted, b_on
+        else:
+            border, width = edge, b
+        return colour, border, width, r, "", T.ink_for(colour)
 
     def _btn_y(self, index: int) -> int:
         """Top of the button for chapter `index` (1-based)."""

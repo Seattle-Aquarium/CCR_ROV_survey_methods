@@ -96,9 +96,22 @@ RAIL_BG = SURFACE
 RULE_GRADIENT = brand.BRIGHT_GRADIENTS_3["algae_seafoam_purple"]
 RULE_HEIGHT = 6
 
-#: The open tool's underline on the section strip: a small UI element, which
-#: is what the two-colour bright gradients are for.
+#: The open tool's marker on the section strip: a small UI element, which is
+#: what the two-colour bright gradients are for.
 STRIPE_GRADIENT = brand.BRIGHT_GRADIENTS["algae_seafoam"]
+
+#: How the open tool is marked on the section strip.
+#:
+#:   underline  a gradient rule beneath it (the original)
+#:   hairline   the same, thinner and in flat accent
+#:   outline    a rounded border all the way around the tab
+#:   pill       a filled rounded ground behind the tab, no line
+#:   topline    the rule above rather than below, so it points at the chapter
+SECTION_MARK_STYLE = "underline"
+SECTION_MARK_STYLES = ("underline", "hairline", "outline", "pill", "topline")
+#: Reduced from six: at the banner's weight it was competing with the rule
+#: across the top of the window rather than answering to it.
+SECTION_MARK_HEIGHT = 4
 
 #: The rail's chapter names. Larger than body copy because the rail is the
 #: roadmap through a survey day rather than a list of settings -- and at 15pt
@@ -160,8 +173,78 @@ CHAPTER_BTN_BORDER_ON = 3
 #: Room above the first button, and how far down the four sit as a group.
 CHAPTER_BTN_TOP = 18
 
+#: How a chapter button is drawn. Trialled 2026-09-06; see the comparison
+#: sheet. Every one of these keeps the chapter's colour somewhere, and none of
+#: them puts type *in* Algae or Seafoam on a light ground, which fails.
+#:
+#:   solid    filled with the chapter's colour, bordered. The type is chosen
+#:            against the fill by `ink_for`.
+#:   outline  surface fill, the colour in a thick border only; type stays
+#:            theme-coloured, so it reads on either ground.
+#:   leftbar  surface fill with a colour bar down the leading edge -- quiet,
+#:            and closest to a conventional nav rail.
+#:   pill     solid, fully rounded.
+#:   plate    solid with no border and a wider radius; the open one takes a
+#:            bright ring instead.
+#:   ghost    outline that fills in only when open -- the least colour of the
+#:            five until you choose something.
+CHAPTER_BTN_STYLE = "solid"
+CHAPTER_BTN_STYLES = ("solid", "outline", "leftbar", "pill", "plate", "ghost")
+#: Width of the colour bar in the "leftbar" style.
+CHAPTER_BTN_BAR = 6
+
 FONT_BANNER = (FAMILY, 23, "bold")
 FONT_BANNER_SUB = (FAMILY, 11)
+
+# --------------------------------------------------------------------------
+#  The banner
+# --------------------------------------------------------------------------
+
+#: How the banner arranges itself.
+#:
+#:   inline   title above the roadmap, attribution beneath -- full width
+#:   stacked  logo, then a title block with the attribution under it, then the
+#:            four chapters in a column beside it. Leaves the right-hand third
+#:            free, which is where illustration would go.
+BANNER_LAYOUT = "stacked"
+BANNER_LAYOUTS = ("inline", "stacked")
+
+#: How the roadmap's chapter numbers are drawn.
+#:
+#:   solid    a filled rounded square in the chapter's colour
+#:   soft     the same, smaller and with the number in a lighter weight
+#:   outline  a ring in the chapter's colour, the number in body ink
+#:   dot      a small colour disc, then the number in body ink beside it
+#:   bar      a short colour rule in place of a badge
+#:   plain    the number alone, in body ink -- no colour at all
+BADGE_STYLE = "soft"
+BADGE_STYLES = ("solid", "soft", "outline", "dot", "bar", "plain")
+
+#: Badge size as a multiple of the line's own height. The first cut was 1.25,
+#: which read as a row of buttons rather than as numbering.
+BADGE_SCALE = 1.05
+
+#: How the programme name is set.
+#:
+#:   bold     Montserrat Bold, title case
+#:   black    Montserrat ExtraBold, heavier
+#:   caps     upper case, medium weight
+#:   twotone  two words, the second in the accent colour
+#:   light    Montserrat Light, title case -- quiet and wide
+TITLE_STYLE = "bold"
+TITLE_STYLES = ("bold", "black", "caps", "twotone", "light")
+
+
+def title_font(style: str = "") -> tuple:
+    """The font for a title style."""
+    style = style or TITLE_STYLE
+    return {
+        "bold": (FAMILY, 23, "bold"),
+        "black": (brand.font_family("extrabold"), 23),
+        "caps": (FAMILY_MEDIUM, 21),
+        "twotone": (FAMILY, 23, "bold"),
+        "light": (brand.font_family("light"), 25),
+    }.get(style, FONT_BANNER)
 
 
 # --------------------------------------------------------------------------

@@ -191,6 +191,72 @@ def test_switching_appearance_mode_repaints_the_chrome(app):
             app._toggle_theme()
 
 
+@pytest.mark.parametrize("style", ["solid", "outline", "leftbar", "pill",
+                                   "plate", "ghost"])
+@pytest.mark.parametrize("state", ["on", "hover", "off"])
+def test_every_button_style_puts_legible_type_on_every_chapter(app, style,
+                                                               state,
+                                                               monkeypatch):
+    """A style is a table entry, so a new one is easy to add and easy to add
+    wrongly. The trap is always the same: setting type *in* Algae or Seafoam,
+    which measures 2.2:1 and 1.9:1 on a light ground.
+    """
+    from utc import brand
+    from utc.gui import theme as T
+
+    monkeypatch.setattr(T, "CHAPTER_BTN_STYLE", style)
+    for index in (1, 2, 3, 4):
+        colour = app.nav._colour_for(index)
+        for mode in (lambda pair: pair[0], lambda pair: pair[1]):
+            fill, _b, _w, _r, _bar, ink = app.nav._button_look(
+                colour, state, True, mode)
+            assert brand.contrast(ink, fill) >= 4.5, (
+                f"{style}/{state}: {ink} on {fill} for chapter {index}")
+
+
+@pytest.mark.parametrize("style", ["solid", "soft", "outline", "dot", "bar",
+                                   "plain"])
+def test_every_badge_style_reserves_the_room_it_draws_in(app, style,
+                                                         monkeypatch):
+    """`_badge_width` is what the roadmap wraps against, so a style whose
+    drawing is wider than its measurement would overlap the text beside it."""
+    from utc.gui import theme as T
+
+    monkeypatch.setattr(T, "BADGE_STYLE", style)
+    assert app._badge_width(30, 2.5) > 0
+    app._paint_header()                    # must not raise in any style
+
+
+@pytest.mark.parametrize("layout", ["inline", "stacked"])
+def test_both_banner_arrangements_draw(app, layout, monkeypatch):
+    from utc.gui import theme as T
+
+    monkeypatch.setattr(T, "BANNER_LAYOUT", layout)
+    app._paint_header()
+    drawn = [app.header.itemcget(i, "text") for i in app.header.find_all()
+             if app.header.type(i) == "text"]
+    from utc.gui.app import CHAPTER_BLURBS
+    for blurb in CHAPTER_BLURBS:
+        assert blurb in drawn, f"{layout} lost a chapter"
+
+
+@pytest.mark.parametrize("style", ["bold", "black", "caps", "twotone",
+                                   "light"])
+def test_every_title_style_draws_the_name(app, style, monkeypatch):
+    from utc.gui import theme as T
+    from utc.gui.app import DISPLAY_TITLE
+
+    monkeypatch.setattr(T, "TITLE_STYLE", style)
+    app._paint_header()
+    drawn = " ".join(app.header.itemcget(i, "text")
+                     for i in app.header.find_all()
+                     if app.header.type(i) == "text")
+    # "caps" upper-cases it and "twotone" splits it in two, so compare on the
+    # letters rather than on the string.
+    assert (DISPLAY_TITLE.replace(" ", "").lower()
+            in drawn.replace(" ", "").lower())
+
+
 def test_the_roadmap_breaks_between_the_vehicle_and_the_imagery(app):
     """One and two are the ROV and what it recorded; three and four are the
     imagery that came back. The break carries that, so it stays put however

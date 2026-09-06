@@ -226,6 +226,30 @@ at 70, so the first colour holds and then moves. Drawn on a `tkinter.Canvas` —
 a CustomTkinter widget over an image paints its own rectangle, because
 "transparent" there means the master's flat colour, not what is behind it.
 
+### Style switches
+
+*Added 2026-09-06, so alternatives can be compared rather than argued about.*
+Each is a named constant in `theme.py` with the variants listed beside it, and
+each was trialled against the running application rather than mocked up.
+
+| Constant | Variants |
+|---|---|
+| `CHAPTER_BTN_STYLE` | solid · outline · leftbar · pill · plate · ghost |
+| `SECTION_MARK_STYLE` | underline · hairline · outline · pill · topline |
+| `BADGE_STYLE` | solid · soft · outline · dot · bar · plain |
+| `BANNER_LAYOUT` | inline · stacked |
+| `TITLE_STYLE` | bold · black · caps · twotone · light |
+| `CHAPTER_PALETTES` | ocean · kelp · tideline · estuary · spectrum · shore |
+
+`tests/test_nav.py` walks every button, badge, banner and title variant, so a
+new one cannot be added that draws illegible type or reserves the wrong width.
+
+> **Render variants in separate processes.** Some of these are read when a
+> widget is built, not when it draws — a tab's corner radius, which grid row
+> its marker sits in — so switching them live shows a half-applied state. Two
+> Tk roots in one process also cannot share images. The trial harness forks
+> per variant for both reasons.
+
 > **Scale canvas work by hand.** CustomTkinter scales its widgets and fonts for
 > the display (2.5× on the field laptop); a raw Canvas does not, and Tk reports
 > 96 DPI regardless. Use `theme.scale_of(widget)` and `theme.scale_font`. The
