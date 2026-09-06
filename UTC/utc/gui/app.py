@@ -53,6 +53,12 @@ CHAPTER_BLURBS = (
     "Import, assemble and export videos",
 )
 
+#: Where the roadmap breaks. The vehicle and its telemetry on the first line,
+#: the imagery that came back on the second -- the split is the same one the
+#: rail makes, and it says something, so it does not depend on how wide the
+#: window happens to be.
+ROADMAP_ROWS = ((0, 1), (2, 3))
+
 #: Set apart from the roadmap by a wider gap and a quieter ink: this is who
 #: made it, not what it does. "Seattle Aquarium" is deliberately absent -- the
 #: logo two inches to the left already says it.
@@ -150,21 +156,27 @@ class App(ctk.CTk):
 
     def _wrap_roadmap(self, f_sub, badge: int, gap: int,
                       avail: int) -> list[list[int]]:
-        """Fit the four chapter blurbs into lines of at most `avail` pixels.
+        """Fit the four chapter blurbs into lines, breaking where they mean to.
 
-        Returns the chapter indices per line. Flowing rather than fixed at two
-        lines, because the window can be dragged from 980px to a wide monitor
-        and the roadmap should use whatever it is given.
+        The break is between two and three, and it is fixed rather than
+        wherever the width happens to run out. One and two are the vehicle and
+        what it recorded; three and four are the imagery that came back. A
+        wide window would otherwise pull three onto the first line and lose
+        the distinction.
+
+        A row that genuinely does not fit is split, so a narrow window shows
+        everything rather than clipping it.
         """
-        lines: list[list[int]] = [[]]
-        used = 0
-        for i, blurb in enumerate(CHAPTER_BLURBS):
-            need = badge + gap // 2 + f_sub.measure(blurb)
-            if lines[-1] and used + gap + need > avail:
-                lines.append([])
-                used = 0
-            used += (gap if lines[-1] else 0) + need
-            lines[-1].append(i)
+        def width(row) -> int:
+            return (sum(badge + gap // 2 + f_sub.measure(CHAPTER_BLURBS[i])
+                        for i in row) + gap * (len(row) - 1))
+
+        lines: list[list[int]] = []
+        for row in ROADMAP_ROWS:
+            if len(row) == 1 or width(row) <= avail:
+                lines.append(list(row))
+            else:
+                lines.extend([i] for i in row)
         return lines
 
     def _paint_header(self) -> None:

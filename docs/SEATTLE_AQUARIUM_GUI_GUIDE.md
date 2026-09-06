@@ -192,13 +192,17 @@ with the theme.
 unavailable — it is the dark-mode window ground, and a button in it is a hole.
 Algae *is* available, contrary to first appearances: it is the dark mode's
 action colour, but the light mode's is Mediterranean, so it was never reserved.
-The default set is Salish · Mediterranean · Seafoam · Purple Star; six
-alternatives live in `theme.CHAPTER_PALETTES` and switching is one line.
+The set in use is **KELP** — Salish · Algae · Seafoam · Mediterranean — green
+through blue, four cool ocean colours that read as one family rather than four
+unrelated chips. Five alternatives live in `theme.CHAPTER_PALETTES` and
+switching is one line.
 
 **The banner's roadmap is keyed to those buttons.** Each of the four blurbs is
 introduced by a numbered badge in its chapter's own colour, so the banner reads
 as the key to the rail rather than as a sentence that happens to list four
-things. The badge also sidesteps a real constraint: Seafoam and Algae cannot be
+things. It breaks after the second — the vehicle and its telemetry above, the
+imagery below — and that break is fixed rather than wherever the width runs
+out, because it means something. The badge also sidesteps a real constraint: Seafoam and Algae cannot be
 used as *type* on a light ground (1.9:1 and 2.2:1 on Pumice), but they carry
 dark type perfectly well as a *fill*.
 

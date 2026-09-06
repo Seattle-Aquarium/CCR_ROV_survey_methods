@@ -144,7 +144,10 @@ CHAPTER_PALETTES = {
     "shore": (brand.SALISH, brand.ALGAE, brand.SEAFOAM, brand.CORAL),
 }
 
-CHAPTER_COLOURS = CHAPTER_PALETTES["ocean"]
+#: Salish, Algae, Seafoam, Mediterranean -- green through blue, all four cool
+#: ocean colours, so the rail reads as one family rather than four unrelated
+#: chips. Chosen 2026-09-06 from the six trialled above.
+CHAPTER_COLOURS = CHAPTER_PALETTES["kelp"]
 
 #: Bigger than a standard button (which is 28px tall at radius 6), because
 #: these four are the roadmap rather than an action on a card.

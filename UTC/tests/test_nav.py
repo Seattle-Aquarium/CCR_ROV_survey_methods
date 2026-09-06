@@ -191,6 +191,26 @@ def test_switching_appearance_mode_repaints_the_chrome(app):
             app._toggle_theme()
 
 
+def test_the_roadmap_breaks_between_the_vehicle_and_the_imagery(app):
+    """One and two are the ROV and what it recorded; three and four are the
+    imagery that came back. The break carries that, so it stays put however
+    wide the window gets -- flowing purely on width would pull three up onto
+    the first line on a large monitor and lose the distinction.
+    """
+    from tkinter import font as tkfont
+
+    from utc.gui import theme as T
+    from utc.gui.app import _font_kw
+
+    f = tkfont.Font(**_font_kw(T.scale_font(T.FONT_BANNER_SUB, 1.0)))
+    generous = app._wrap_roadmap(f, badge=20, gap=24, avail=100_000)
+    assert generous == [[0, 1], [2, 3]], "the break is not a consequence of width"
+
+    # Narrow enough that a pair cannot fit: everything still gets a line.
+    cramped = app._wrap_roadmap(f, badge=20, gap=24, avail=1)
+    assert cramped == [[0], [1], [2], [3]], "nothing may be dropped"
+
+
 def test_the_banner_says_what_it_is_told_to(app):
     """Only the banner is renamed -- the window, the dialogs and the file names
     still use APP_NAME, so nothing on disk moves."""
