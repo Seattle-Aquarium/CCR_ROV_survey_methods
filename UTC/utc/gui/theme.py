@@ -77,59 +77,75 @@ PAD = 12
 #  Chrome: the banner and the rail
 # --------------------------------------------------------------------------
 #
-# The banner and the rail are drawn in brand gradients and stay dark in both
-# appearance modes, while the content area between them flips. Two reasons.
+# Both are flat surfaces that flip with the appearance mode. Gradients were
+# tried on each and dropped: on the rail a gradient gives each of four rows a
+# slightly different ground, which reads as four states rather than one
+# control, and on the banner it fought the calm the rest of the window has.
 #
-# The first is the guidelines: deep gradients are for backgrounds, and every
-# colour in them is dark enough to carry White type at AA. There is no light
-# gradient in the palette, and inventing one would mean tinting a brand colour,
-# which p.18 forbids.
-#
-# The second is that it says something true about the application. The rail is
-# the order of a survey day, and it runs across every mode and every page; a
-# constant dark chrome around a changing content area is that idea drawn.
+# One gradient survives, and it is the piece that earns it -- the bright rule
+# across the foot of the banner. It is a single object, it carries no type, and
+# p.19 sanctions exactly that: a bright gradient as a UI element over a darker
+# ground.
 
-#: Deep gradients, per mode. Both pairs carry White type at AA throughout.
-HEADER_GRADIENT = {
-    "dark": brand.DEEP_GRADIENTS["salish_fathom"],
-    "light": brand.DEEP_GRADIENTS["salish_mediterranean"],
-}
-
-#: The rail is flat. A gradient behind a list of four rows gives each of them
-#: a slightly different ground, which reads as four states rather than one
-#: control -- so the rail takes its distinctness from being a step off the
-#: window ground, the way it always did, and the banner keeps the gradient.
+HEADER_BG = SURFACE
 RAIL_BG = SURFACE
 
-#: A three-colour bright gradient, three pixels tall, dividing the banner from
-#: the work below it. p.19 sanctions exactly this: a bright gradient as a UI
-#: element layered over a darker background.
+#: The three-colour bright gradient dividing the banner from the work below.
+#: Deliberately the full bright range -- Algae through Seafoam into Purple
+#: Star -- because it is the one place the whole palette gets to show at once.
 RULE_GRADIENT = brand.BRIGHT_GRADIENTS_3["algae_seafoam_purple"]
-RULE_HEIGHT = 3
+RULE_HEIGHT = 6
 
-#: The open tool's underline on the section strip -- a small UI element, which
-#: is what the two-colour bright gradients are for. The rail's own marker is
-#: the flat accent: its ground is Pumice in light mode, and p.19 puts bright
-#: gradients over *darker* backgrounds.
+#: The open tool's underline on the section strip: a small UI element, which
+#: is what the two-colour bright gradients are for.
 STRIPE_GRADIENT = brand.BRIGHT_GRADIENTS["algae_seafoam"]
 
-#: Chrome type. Flat values rather than (light, dark) pairs: the ground under
-#: them is a dark gradient whichever mode the rest of the window is in.
-#:
-#: Measured against the darkest and lightest ends of both gradients rather than
-#: chosen by eye. The foot of the light-mode rail is Mediterranean, which is
-#: far lighter than anything the dark mode reaches -- the previous muted value
-#: sat at 1.6:1 there, invisible. These clear 3:1 on every ground they touch,
-#: which is the bar for the large type the rail is set in.
-CHROME_TEXT = brand.WHITE               # 6.1:1 worst case (on Mediterranean)
-CHROME_TEXT_MUTED = "#CBD9E8"           # 4.2:1 worst case
-CHROME_TEXT_DIM = "#9FB6D0"             # 2.9:1; only used at the Salish end
-
 #: The rail's chapter names. Larger than body copy because the rail is the
-#: progression through a survey day rather than a list of settings -- and at
-#: 15px semibold it also clears the 3:1 large-text bar rather than 4.5:1.
+#: roadmap through a survey day rather than a list of settings -- and at 15pt
+#: it also clears the 3:1 large-text bar rather than 4.5:1.
 FONT_RAIL = (FAMILY_SEMIBOLD, 15)
-FONT_RAIL_SMALL = (FAMILY, 15)
+FONT_RAIL_SMALL = (FAMILY_MEDIUM, 15)
+FONT_RAIL_NUM = (FAMILY, 12)
+
+#: The tools within a chapter. A step above body copy: the strip is a control,
+#: and at 12pt it was reading as a caption.
+FONT_SECTION = (FAMILY_MEDIUM, 13)
+FONT_SECTION_ON = (FAMILY_SEMIBOLD, 14)
+
+# --------------------------------------------------------------------------
+#  Chapter buttons
+# --------------------------------------------------------------------------
+#
+# Each chapter carries its own brand colour. Fathom is the dark-mode ground and
+# Algae marks the open tool inside a chapter, so neither is available here --
+# which leaves Salish, Mediterranean, Seafoam, Purple Star and Coral for four
+# slots. See CHAPTER_PALETTES for the sets that were trialled.
+
+#: name -> the four colours, in rail order.
+CHAPTER_PALETTES = {
+    "ocean": (brand.SALISH, brand.MEDITERRANEAN, brand.SEAFOAM,
+              brand.PURPLE_STAR),
+    "tide": (brand.SALISH, brand.MEDITERRANEAN, brand.SEAFOAM, brand.CORAL),
+    "reef": (brand.SALISH, brand.MEDITERRANEAN, brand.PURPLE_STAR,
+             brand.CORAL),
+    "shallows": (brand.MEDITERRANEAN, brand.SEAFOAM, brand.PURPLE_STAR,
+                 brand.CORAL),
+    "salish": (brand.SALISH,) * 4,
+    "mediterranean": (brand.MEDITERRANEAN,) * 4,
+}
+
+CHAPTER_COLOURS = CHAPTER_PALETTES["ocean"]
+
+#: Bigger than a standard button (which is 28px tall at radius 6), because
+#: these four are the roadmap rather than an action on a card.
+CHAPTER_BTN_H = 70
+CHAPTER_BTN_GAP = 18
+CHAPTER_BTN_INSET = 14
+CHAPTER_BTN_RADIUS = 10
+CHAPTER_BTN_BORDER = 2
+CHAPTER_BTN_BORDER_ON = 3
+#: Room above the first button, and how far down the four sit as a group.
+CHAPTER_BTN_TOP = 18
 
 FONT_BANNER = (FAMILY, 23, "bold")
 FONT_BANNER_SUB = (FAMILY, 11)
@@ -170,10 +186,21 @@ def apply(ctk, mode: str = "dark") -> None:
 def logo_for(mode: str) -> str | None:
     """Logo variant that is legible on the current ground.
 
-    White in both modes, because the banner it sits on is a deep gradient in
-    both. Mediterranean Blue is the treatment for a white or light ground, and
-    the banner stopped being one -- a blue logo there would read as a smudge
-    against Mediterranean's own end of the light-mode gradient.
+    The guidelines allow White on any dark background; Mediterranean Blue is the
+    primary treatment on white or light.
     """
-    del mode                      # kept: callers pass the current mode
-    return brand.logo_path("white")
+    return brand.logo_path("white" if mode.lower().startswith("d")
+                           else "mediterranean")
+
+
+def ink_for(ground: str) -> str:
+    """The brand colour that reads best as type on `ground`.
+
+    Used where a background is a brand colour rather than a theme surface --
+    the chapter buttons, which each carry their own. Seafoam sits in the middle
+    of the luminance range and takes dark type; Salish and Purple Star take
+    White. Picking it by measurement rather than by a lookup means a palette
+    can be changed without anyone remembering to change the type with it.
+    """
+    return max((brand.WHITE, brand.FATHOM),
+               key=lambda ink: brand.contrast(ink, ground))

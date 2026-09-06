@@ -174,22 +174,32 @@ against **both** end colours (`brand.contrast`), not against the average.
 
 *Decided 2026-09-05, after the four-chapter regrouping.*
 
-- **The banner carries a deep gradient**, and stays dark in both appearance
-  modes while the content below flips. There is no light gradient in the
-  palette, and inventing one would mean tinting a brand colour, which p.18
-  forbids.
-  - dark mode: **Salish → Fathom**  ·  light mode: **Salish → Mediterranean**
-- **The rail is flat**, on the surface colour, and flips with the theme.
-  A gradient behind a list of four rows gives each row a slightly different
-  ground, which reads as four states rather than one control — the banner is a
-  single object and can carry one, a rail cannot. Tried both; flat won.
-- **A 3-colour bright gradient rules off the banner** — Algae → Seafoam →
-  Purple Star, three pixels tall. Sanctioned use: a bright gradient as a UI
-  element over a darker ground.
-- **The selected chapter's marker is a 2-colour bright gradient** — Algae →
-  Seafoam. Same rule, smaller element.
-- **The logo is White in both modes**, because the banner is dark in both. The
-  Mediterranean logo is for a light ground, and the banner stopped being one.
+**Exactly one gradient survives, and it earns its place.** Gradients were
+trialled on the banner and on the rail and both were dropped — on the rail
+because a gradient gives each of four rows a slightly different ground, which
+reads as four states rather than one control; on the banner because it fought
+the calm of everything below it. Banner and rail are flat surfaces that flip
+with the theme.
+
+- **The 3-colour bright rule under the banner** — Algae → Seafoam → Purple
+  Star, six pixels tall. It is a single object carrying no type, which is
+  exactly what p.19 sanctions a bright gradient for, and it is the one place
+  the whole palette shows at once.
+- **The open tool's underline on the section strip** is the 2-colour bright
+  gradient, Algae → Seafoam. Same rule, smaller element.
+
+**The four chapter buttons each carry their own brand colour.** Fathom is the
+dark-mode ground and Algae marks the open tool, so neither is available; that
+leaves Salish, Mediterranean, Seafoam, Purple Star and Coral for four slots.
+The default set is Salish · Mediterranean · Seafoam · Purple Star; the
+alternatives that were trialled live in `theme.CHAPTER_PALETTES`.
+
+> **Type on a brand colour is chosen by measuring, not from a table.**
+> `theme.ink_for(colour)` returns White or Fathom, whichever scores higher.
+> Seafoam is the trap: it sits mid-luminance, so White fails on it at 1.95:1
+> and it needs dark type — which is also why no bright gradient can carry a
+> label. Swapping the palette therefore swaps the type with it, and
+> `tests/test_gradients.py` checks every palette, not just the one in use.
 
 Rendered by `utc/gui/gradients.py`, which implements the p.19 geometry rather
 than a plain ramp: the second colour is reached at 95 and the 50/50 blend lands

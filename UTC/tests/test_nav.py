@@ -97,6 +97,38 @@ def test_chapter_names_are_set_larger_than_body_copy(app):
     assert T.FONT_RAIL_SMALL[1] > T.FONT_BODY[1]
 
 
+def test_the_section_strip_sits_between_body_copy_and_the_rail(app):
+    """The tools within a chapter are a control, not a caption -- but they
+    must not compete with the chapter names above them."""
+    from utc.gui import theme as T
+    assert T.FONT_BODY[1] < T.FONT_SECTION[1] < T.FONT_RAIL[1]
+    assert T.FONT_SECTION_ON[1] > T.FONT_SECTION[1]
+
+
+def test_the_chapter_buttons_are_larger_than_a_standard_button(app):
+    """They are the roadmap, so they are drawn as objects rather than rows."""
+    from utc.gui import theme as T
+    assert T.CHAPTER_BTN_H > 40, "a standard CTkButton is 28px tall"
+    assert T.CHAPTER_BTN_GAP > 0, "they should read as four, not as a stack"
+    assert T.CHAPTER_BTN_BORDER_ON > T.CHAPTER_BTN_BORDER
+
+
+def test_each_chapter_gets_its_own_colour(app):
+    from utc.gui import theme as T
+    assert len(T.CHAPTER_COLOURS) >= len(EXPECTED_CHAPTERS)
+    used = [app.nav._colour_for(i) for i in range(1, 5)]
+    assert len(set(used)) == 4, "four chapters, four colours"
+
+
+def test_the_gaps_between_buttons_are_not_clickable(app):
+    """They are separate objects; the space between them belongs to neither."""
+    nav = app.nav
+    second = nav._btn_y(2)
+    assert nav._chapter_at(nav._btn_y(1) + nav._btn_h // 2) == "Aboard ROV"
+    assert nav._chapter_at(second - nav._gap // 2) is None
+    assert nav._chapter_at(second + 2) == "Flight report"
+
+
 # --------------------------------------------------------------------------
 #  behaviour
 # --------------------------------------------------------------------------
@@ -147,10 +179,10 @@ def test_a_click_on_a_disabled_chapter_does_nothing(app):
 
 
 def test_switching_appearance_mode_repaints_the_chrome(app):
-    """The banner and rail gradients differ between modes, and both are drawn
-    rather than themed, so nothing repaints them for free."""
+    """The banner and the rail are drawn on canvases rather than themed by
+    CustomTkinter, so nothing repaints them for free."""
     from utc.gui import theme as T
-    assert T.HEADER_GRADIENT["dark"] != T.HEADER_GRADIENT["light"]
+    assert T.RAIL_BG[0] != T.RAIL_BG[1]
 
     was = app.mode
     try:

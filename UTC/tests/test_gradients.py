@@ -8,10 +8,10 @@ plain ramp: p.19 puts the second colour at 95 and the 50/50 blend at 70, and
 that bias is most of what keeps a two-colour background from reading as a flat
 wash.
 
-The second is the failure that actually happened. The chrome is drawn over a
-gradient, so a colour chosen against one end of it can disappear at the other:
-the rail's muted ink read fine on Salish and sat at 1.6:1 on Mediterranean --
-invisible -- because only the dark mode had ever been looked at.
+The second is legibility on a brand colour. Each chapter button carries its
+own, and the type on it is chosen by measuring rather than from a table -- so
+what has to hold is that the measuring works for every palette anyone might
+switch to, not just the one in use today.
 """
 
 from __future__ import annotations
@@ -105,45 +105,53 @@ def test_a_gradient_of_zero_width_still_produces_an_image():
 #  legibility on those gradients
 # --------------------------------------------------------------------------
 
-#: Every ground the banner's type is drawn on, across both appearance modes.
-BANNER_GROUNDS = sorted({c for pair in T.HEADER_GRADIENT.values() for c in pair})
-
 #: p.20: large type -- the rail is set at 15pt semibold, which qualifies.
 LARGE_TEXT = 3.0
 NORMAL_TEXT = 4.5
 
 
-@pytest.mark.parametrize("ground", BANNER_GROUNDS)
-def test_the_banner_reads_at_both_ends_of_its_own_gradient(ground):
-    """The regression this was written for: an ink picked against one end.
-
-    The banner runs Salish to Fathom in dark and Salish to Mediterranean in
-    light, and the type crosses the whole run, so it has to hold up on all
-    three. An earlier muted value read fine on Salish and sat at 1.6:1 on
-    Mediterranean.
-    """
-    assert brand.contrast(T.CHROME_TEXT, ground) >= NORMAL_TEXT
-    assert brand.contrast(T.CHROME_TEXT_MUTED, ground) >= LARGE_TEXT, (
-        f"the subtitle is illegible on {ground}")
-
-
 @pytest.mark.parametrize("mode,index", [("light", 0), ("dark", 1)])
-def test_the_rail_reads_on_its_flat_surface(mode, index):
-    """The rail is flat, so this is an ordinary two-colour check -- but it is
-    Pumice in light mode and a lifted Fathom in dark, which are far apart."""
-    ground = T.RAIL_BG[index]
-    assert brand.contrast(T.TEXT[index], ground) >= NORMAL_TEXT
-    assert brand.contrast(T.TEXT_MUTED[index], ground) >= LARGE_TEXT, (
-        f"unselected chapter names are illegible in {mode} mode")
-    assert brand.contrast(T.ACCENT[index], ground) >= LARGE_TEXT, (
-        f"the open-chapter marker is invisible in {mode} mode")
+def test_the_banner_and_rail_read_on_their_flat_surfaces(mode, index):
+    """Both are flat, so these are ordinary two-colour checks -- but the
+    surface is Pumice in light mode and a lifted Fathom in dark, which are as
+    far apart as two grounds get."""
+    for ground in (T.HEADER_BG[index], T.RAIL_BG[index]):
+        assert brand.contrast(T.TEXT[index], ground) >= NORMAL_TEXT
+        assert brand.contrast(T.HEADING[index], ground) >= LARGE_TEXT
+        assert brand.contrast(T.TEXT_MUTED[index], ground) >= LARGE_TEXT, (
+            f"muted type is illegible in {mode} mode")
 
 
-def test_the_deep_gradients_can_all_carry_white_type():
-    """Which is why the banner uses a deep gradient and not a medium one."""
-    for name, pair in brand.DEEP_GRADIENTS.items():
-        for colour in pair:
-            assert brand.contrast(brand.WHITE, colour) >= NORMAL_TEXT, name
+@pytest.mark.parametrize("palette", sorted(T.CHAPTER_PALETTES))
+def test_every_chapter_palette_carries_legible_type(palette):
+    """Each button is a brand colour, and `ink_for` picks the type by
+    measuring against it. This is the guard on that: swap the palette and the
+    type follows, without anyone remembering to change it.
+
+    Seafoam is the one that catches people out -- it sits mid-range, so White
+    fails on it and Fathom is needed.
+    """
+    for colour in T.CHAPTER_PALETTES[palette]:
+        ink = T.ink_for(colour)
+        assert brand.contrast(ink, colour) >= NORMAL_TEXT, (
+            f"{palette}: no legible type for {colour}")
+
+
+def test_seafoam_takes_dark_type_and_salish_takes_white():
+    """Named explicitly, because it is the case that looks wrong until it is
+    measured: the bright secondary needs dark type."""
+    assert T.ink_for(brand.SEAFOAM) == brand.FATHOM
+    assert T.ink_for(brand.SALISH) == brand.WHITE
+    assert T.ink_for(brand.PURPLE_STAR) == brand.WHITE
+
+
+def test_no_chapter_palette_uses_a_colour_that_is_spoken_for():
+    """Fathom is the dark-mode ground and Algae marks the open tool inside a
+    chapter. A chapter button in either would be saying something it does not
+    mean."""
+    for name, palette in T.CHAPTER_PALETTES.items():
+        assert brand.FATHOM not in palette, name
+        assert brand.ALGAE not in palette, name
 
 
 def test_contrast_agrees_with_the_published_pairs():

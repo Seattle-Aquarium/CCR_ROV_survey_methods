@@ -9,14 +9,20 @@ rail four items long however many tools accumulate.
 
 Two things here are unusual for CustomTkinter.
 
-**The rail is a canvas, not a column of buttons.** It is flat -- a gradient
-behind four rows gives each of them a different ground, which reads as four
-states rather than one control -- but a canvas still buys exact control over
-type size, the marker and hover, none of which a CTkButton gives up willingly.
-The section strip's underline is drawn, and that needs a canvas outright.
+**The four are buttons, and each carries its own brand colour.** They are the
+roadmap, so they are drawn larger than a standard button, rounded, bordered and
+spaced apart rather than stacked as a list. The type on each is chosen by
+measuring against its own fill -- Seafoam takes dark type where Salish takes
+White -- so the palette in `theme.CHAPTER_COLOURS` can be swapped without
+anyone remembering to swap the type with it.
 
-**Sizes are measured, not assumed.** Row height and rail width come from the
-rendered font, so a laptop at 150% display scaling gets a rail that fits its
+**The rail is a canvas, not a column of CTkButtons.** Tk has no rounded
+rectangle and no anti-aliasing, so the buttons are drawn with PIL and placed as
+images; that also buys exact control over type size, hover and the disabled
+state. The section strip's gradient underline needs a canvas outright.
+
+**Sizes are measured, not assumed.** Button height and rail width come from the
+rendered font, so a laptop at 250% display scaling gets a rail that fits its
 own type rather than one sized for somebody else's screen. An earlier version
 of this file hard-coded a row height and pushed the last page off the bottom of
 the rail on exactly such a machine.
@@ -34,15 +40,12 @@ from PIL import ImageTk
 from . import gradients as G
 from . import theme as T
 
-#: Space around a chapter name inside its row.
-ROW_PAD_Y = 11
-#: Left inset for the numeral, and for the name after it.
-NUM_X = 20
-NAME_X = 46
-#: The selected chapter's marker.
-STRIPE_W = 4
+#: Where the step numeral sits inside a chapter button, and the clearance
+#: kept between it and the centred name.
+BTN_NUM_X = 16
+BTN_PAD_X = 14
 #: Never narrower than this, however short the chapter names get.
-MIN_RAIL_W = 176
+MIN_RAIL_W = 190
 
 
 @dataclass
@@ -79,7 +82,7 @@ class SectionStrip(ctk.CTkFrame):
     def add(self, name: str) -> None:
         col = len(self._buttons)
         btn = ctk.CTkButton(
-            self, text=name, font=T.FONT_BODY, height=28, corner_radius=0,
+            self, text=name, font=T.FONT_SECTION, height=34, corner_radius=0,
             fg_color="transparent", hover_color=T.SURFACE,
             text_color=T.TEXT_MUTED,
             command=lambda n=name: self._on_select(n),
@@ -103,7 +106,7 @@ class SectionStrip(ctk.CTkFrame):
         for n, btn in self._buttons.items():
             on = n == name
             btn.configure(text_color=T.HEADING if on else T.TEXT_MUTED,
-                          font=T.FONT_H2 if on else T.FONT_BODY)
+                          font=T.FONT_SECTION_ON if on else T.FONT_SECTION)
             self._paint_mark(n)
 
     def _paint_mark(self, name: str) -> None:
@@ -153,12 +156,19 @@ class Navigator(ctk.CTkFrame):
         self._enabled: dict[str, bool] = {}
         self._scale = 1.0
         self._rail_w = MIN_RAIL_W
-        self._row_h = 44
-        self._top = ROW_PAD_Y
-        self._name_x, self._num_x = NAME_X, NUM_X
+        self._btn_h = T.CHAPTER_BTN_H
+        self._gap = T.CHAPTER_BTN_GAP
+        self._inset = T.CHAPTER_BTN_INSET
+        self._radius = T.CHAPTER_BTN_RADIUS
+        self._border = T.CHAPTER_BTN_BORDER
+        self._border_on = T.CHAPTER_BTN_BORDER_ON
+        self._top = T.CHAPTER_BTN_TOP
+        self._num_x = BTN_NUM_X
         self._font_name = T.FONT_RAIL
         self._font_name_off = T.FONT_RAIL_SMALL
-        self._font_num = T.FONT_SMALL
+        self._font_num = T.FONT_RAIL_NUM
+        #: Tk keeps no reference to a PhotoImage, so the rail holds them.
+        self._photos: list[ImageTk.PhotoImage] = []
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -227,7 +237,7 @@ class Navigator(ctk.CTkFrame):
         return page
 
     def _measure(self) -> None:
-        """Rail width and row height from the rendered font, not from a guess.
+        """Button geometry from the rendered font, not from a guess.
 
         Everything here is in real pixels: the canvas is raw Tk, which does not
         get CustomTkinter's display scaling, so the constants are scaled on the
@@ -237,75 +247,116 @@ class Navigator(ctk.CTkFrame):
         self._scale = s
         self._font_name = T.scale_font(T.FONT_RAIL, s)
         self._font_name_off = T.scale_font(T.FONT_RAIL_SMALL, s)
-        self._font_num = T.scale_font(T.FONT_SMALL, s)
-        try:
-            from tkinter import font as tkfont
-            f = tkfont.Font(family=self._font_name[0], size=self._font_name[1])
-            line = f.metrics("linespace")
-            widest = max((f.measure(n) for n in self._chapters), default=0)
-        except Exception:
-            line, widest = int(20 * s), int(120 * s)
-        self._top = int(ROW_PAD_Y * s)
-        self._row_h = int(line + ROW_PAD_Y * 2 * s)
-        self._name_x = int(NAME_X * s)
-        self._num_x = int(NUM_X * s)
-        self._rail_w = int(max(MIN_RAIL_W * s, self._name_x + widest + 22 * s))
+        self._font_num = T.scale_font(T.FONT_RAIL_NUM, s)
+        widest = max((self._text_w(n, self._font_name) for n in self._chapters),
+                     default=0)
+        num_w = max((self._text_w(str(i + 1), self._font_num)
+                     for i in range(len(self._chapters))), default=0)
+
+        self._btn_h = int(T.CHAPTER_BTN_H * s)
+        self._gap = int(T.CHAPTER_BTN_GAP * s)
+        self._inset = int(T.CHAPTER_BTN_INSET * s)
+        self._radius = int(T.CHAPTER_BTN_RADIUS * s)
+        self._border = max(1, int(T.CHAPTER_BTN_BORDER * s))
+        self._border_on = max(1, int(T.CHAPTER_BTN_BORDER_ON * s))
+        self._top = int(T.CHAPTER_BTN_TOP * s)
+        self._num_x = int(BTN_NUM_X * s)
+        # The name is centred, so the room the numeral takes has to be
+        # reserved on *both* sides of it -- otherwise the longest name grows
+        # leftward until it collides with the number.
+        side = self._num_x + num_w + int(BTN_PAD_X * s)
+        self._rail_w = int(max(MIN_RAIL_W * s,
+                               widest + side * 2 + self._inset * 2))
         self.rail.configure(width=self._rail_w)
 
     # ------------------------------------------------------------------
     #  drawing
     # ------------------------------------------------------------------
 
-    def _mode(self) -> str:
-        return ctk.get_appearance_mode().lower()
-
     def _redraw(self) -> None:
-        """The rail, on one flat surface colour.
+        """Four buttons, each in its own brand colour, on a flat surface.
 
-        Deliberately not a gradient. The rail is a list of four things that
-        differ only by which one is open, and a gradient behind them makes each
-        row sit on a slightly different ground -- which reads as four states
-        rather than one control. The banner is a single object and can carry
-        one; this cannot. It takes its distinctness from the surface colour
-        instead, a step off the window ground in both modes.
+        The rail is the roadmap through a survey day, so the four read as
+        objects rather than as a list: rounded, bordered, larger than a
+        standard button and spaced apart.
+
+        Each carries its own colour, and the type on it is chosen by measuring
+        against that colour rather than from a table -- Seafoam takes dark
+        type, Salish takes White, and a palette can be swapped without anyone
+        remembering to swap the type with it.
         """
         c = self.rail
         w, h = max(1, c.winfo_width()), max(1, c.winfo_height())
         c.delete("all")
+        self._photos.clear()
 
-        ink = self._apply_appearance_mode
-        ground = ink(T.RAIL_BG)
+        mode = self._apply_appearance_mode
+        ground = mode(T.RAIL_BG)
         c.configure(background=ground)
         c.create_rectangle(0, 0, w, h, fill=ground, outline="")
 
-        stripe_w = max(1, int(STRIPE_W * self._scale))
-        accent, text, muted = ink(T.ACCENT), ink(T.TEXT), ink(T.TEXT_MUTED)
-        dim = ink(T.BORDER)
+        inset, btn_w = self._inset, max(1, w - self._inset * 2)
+        edge_on, edge_off = mode(T.TEXT), mode(T.BORDER)
 
         for name, ch in self._chapters.items():
-            y = self._top + (ch.index - 1) * self._row_h
+            y = self._btn_y(ch.index)
             on = name == self._current_chapter
             live = self._chapter_enabled(name)
-            if on:
-                c.create_rectangle(0, y, stripe_w, y + self._row_h,
-                                   fill=accent, outline="")
-            if live:
-                colour = text if (on or name == self._hover) else muted
+            fill = self._colour_for(ch.index)
+
+            # An unavailable chapter drops to the surface: a greyed-out button
+            # that keeps a saturated fill still looks pressable.
+            if not live:
+                fill = mode(T.SURFACE_ALT)
+            if not live:
+                border, width = edge_off, 0
+            elif on:
+                border, width = edge_on, self._border_on
+            elif name == self._hover:
+                border, width = mode(T.TEXT_MUTED), self._border_on
             else:
-                colour = dim
-            c.create_text(self._num_x, y + self._row_h / 2, anchor="w",
-                          text=str(ch.index), font=self._font_num,
-                          fill=muted if live else dim,
+                border, width = edge_off, self._border
+
+            img = G.chip((btn_w, self._btn_h), fill=fill, border=border,
+                         border_w=width, radius=self._radius, ground=ground)
+            photo = ImageTk.PhotoImage(img)
+            self._photos.append(photo)      # Tk keeps no reference of its own
+            c.create_image(inset, y, image=photo, anchor="nw")
+
+            ink = T.ink_for(fill) if live else mode(T.TEXT_MUTED)
+            cy = y + self._btn_h / 2
+
+            # The numeral sits at a fixed inset so the four line up as a
+            # column -- they are the roadmap's step numbers, and centring them
+            # with their names left them ragged. The name is centred; the rail
+            # is sized so it can never reach back to the numeral.
+            c.create_text(inset + self._num_x, cy, anchor="w",
+                          text=str(ch.index), font=self._font_num, fill=ink,
                           tags=("row", f"row:{name}"))
-            c.create_text(self._name_x, y + self._row_h / 2, anchor="w",
-                          text=name,
+            c.create_text(inset + btn_w / 2, cy, anchor="center", text=name,
                           font=self._font_name if on else self._font_name_off,
-                          fill=colour, tags=("row", f"row:{name}"))
+                          fill=ink, tags=("row", f"row:{name}"))
+
+    def _btn_y(self, index: int) -> int:
+        """Top of the button for chapter `index` (1-based)."""
+        return self._top + (index - 1) * (self._btn_h + self._gap)
+
+    def _colour_for(self, index: int) -> str:
+        palette = T.CHAPTER_COLOURS
+        return palette[(index - 1) % len(palette)]
+
+    def _text_w(self, text: str, font: tuple) -> int:
+        try:
+            from tkinter import font as tkfont
+            return tkfont.Font(family=font[0], size=font[1]).measure(text)
+        except Exception:
+            return len(text) * font[1]
 
     def _chapter_at(self, y: int) -> str | None:
+        """Which button, if any, is under `y`. The gaps between are dead."""
         for name, ch in self._chapters.items():
-            y0 = self._top + (ch.index - 1) * self._row_h
-            if y0 <= y < y0 + self._row_h:
+            y0 = self._btn_y(ch.index)
+            if y0 <= y < y0 + self._btn_h:
                 return name
         return None
 

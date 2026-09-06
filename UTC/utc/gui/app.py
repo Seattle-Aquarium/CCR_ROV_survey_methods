@@ -20,7 +20,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from .. import brand, discovery
+from .. import discovery
 from ..config import AppConfig
 from ..pipeline import RunResult
 from ..survey import (
@@ -99,25 +99,23 @@ class App(ctk.CTk):
     def _build_header(self) -> None:
         """The banner, drawn on a canvas over a brand gradient.
 
-        A canvas rather than a frame of labels because a CustomTkinter widget
-        over an image paints its own rectangle -- "transparent" there means the
-        master's flat colour, not what is behind it. On a canvas the type sits
-        on the gradient directly. The one real widget, the theme switch, is
-        told the colour of the pixel underneath it so its edges disappear.
+        A canvas rather than a frame of labels so the height can come from the
+        rendered type: the banner sets three lines, and CustomTkinter scales
+        fonts for the display where a fixed pixel height does not. It also
+        makes the bright rule along its foot a two-line job.
         """
         import tkinter
 
-        self.header = tkinter.Canvas(self, highlightthickness=0, borderwidth=0,
-                                     height=104,
-                                     background=T.HEADER_GRADIENT["dark"][0])
+        self.header = tkinter.Canvas(
+            self, highlightthickness=0, borderwidth=0, height=104,
+            background=self._apply_appearance_mode(T.HEADER_BG))
         self.header.grid(row=0, column=0, sticky="ew")
         self.header.bind("<Configure>", lambda _e: self._paint_header())
 
         self.theme_switch = ctk.CTkSwitch(
             self.header, text="Dark mode", command=self._toggle_theme,
-            font=T.FONT_SMALL, text_color=T.CHROME_TEXT,
-            progress_color=brand.ALGAE, button_color=brand.WHITE,
-            fg_color=T.CHROME_TEXT_DIM,
+            font=T.FONT_SMALL, text_color=T.TEXT,
+            progress_color=T.ACCENT, button_color=T.SURFACE_ALT,
         )
         self.theme_switch.select()
         self._header_photo = None
@@ -125,7 +123,7 @@ class App(ctk.CTk):
         self._load_logo()
 
     def _load_logo(self) -> None:
-        """The White logo at full resolution, for the banner to size itself.
+        """The logo for this mode, at full resolution.
 
         Kept as a PIL image rather than the CTkImage the rest of the
         application uses, because the banner is a canvas. Full resolution
@@ -174,11 +172,11 @@ class App(ctk.CTk):
             c.configure(height=h)
 
         c.delete("all")
-        colours = T.HEADER_GRADIENT.get(self.mode, T.HEADER_GRADIENT["dark"])
-        img = G.render((w, h), colours)
-        self._header_photo = ImageTk.PhotoImage(img)
-        c.create_image(0, 0, image=self._header_photo, anchor="nw")
+        ground = self._apply_appearance_mode(T.HEADER_BG)
+        c.configure(background=ground)
+        c.create_rectangle(0, 0, w, h, fill=ground, outline="")
 
+        heading = self._apply_appearance_mode(T.HEADING)
         x = pad + int(4 * s)
         logo = self._logo_scaled(int((h - rule_h) * 0.46))
         if logo is not None:
@@ -189,7 +187,7 @@ class App(ctk.CTk):
         else:
             c.create_text(x, (h - rule_h) // 2, anchor="w",
                           text="Seattle Aquarium",
-                          font=T.scale_font(T.FONT_H2, s), fill=T.CHROME_TEXT)
+                          font=T.scale_font(T.FONT_H2, s), fill=heading)
             x += int(160 * s)
 
         # Leave room for the switch against the right edge, and drop to the
@@ -200,26 +198,26 @@ class App(ctk.CTk):
 
         y = pad
         c.create_text(x, y, anchor="nw", text=DISPLAY_TITLE,
-                      font=T.scale_font(T.FONT_BANNER, s), fill=T.CHROME_TEXT)
+                      font=T.scale_font(T.FONT_BANNER, s), fill=heading)
         y += title_h + int(6 * s)
         c.create_text(x, y, anchor="nw", text=sub,
                       font=T.scale_font(T.FONT_BANNER_SUB, s),
-                      fill=T.CHROME_TEXT_MUTED)
+                      fill=self._apply_appearance_mode(T.TEXT))
         y += sub_h + int(3 * s)
         if attrib:
             c.create_text(x, y, anchor="nw", text=attrib,
                           font=T.scale_font(T.FONT_BANNER_SUB, s),
-                          fill=T.CHROME_TEXT_DIM)
+                          fill=self._apply_appearance_mode(T.TEXT_MUTED))
 
-        # A three-colour bright gradient along the foot of the banner. p.19
-        # sanctions exactly this: a bright gradient as a UI element layered
-        # over a darker ground.
+        # The one gradient in the application: a three-colour bright gradient
+        # along the foot of the banner. It is a single object and carries no
+        # type, which is exactly what p.19 sanctions a bright gradient for.
         rule = G.render((w, rule_h), T.RULE_GRADIENT, angle=0.0)
         self._rule_photo = ImageTk.PhotoImage(rule)
         c.create_image(0, h - rule_h, image=self._rule_photo, anchor="nw")
 
         sx, sy = w - pad, (h - rule_h) // 2
-        self.theme_switch.configure(bg_color=G.sample(img, sx - int(70 * s), sy))
+        self.theme_switch.configure(bg_color=ground)
         c.create_window(sx, sy, window=self.theme_switch, anchor="e")
 
     def _logo_scaled(self, height: int):

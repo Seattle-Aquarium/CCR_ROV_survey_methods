@@ -24,11 +24,11 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from .. import brand
 
-#: Rendered gradients, keyed by everything that determines the pixels.
+#: Rendered images, keyed by everything that determines their pixels.
 _CACHE: dict[tuple, Image.Image] = {}
 
 #: Enough entries for a window being dragged between a few sizes in both
@@ -108,6 +108,36 @@ def render(size: tuple[int, int], colours: tuple[str, ...],
         img = two_colour((w, h), *colours, angle=angle)
     else:
         raise ValueError(f"a gradient needs two or three colours, got {len(colours)}")
+    if len(_CACHE) >= _CACHE_MAX:
+        _CACHE.clear()
+    _CACHE[key] = img
+    return img
+
+
+def chip(size: tuple[int, int], fill: str, border: str = "",
+         border_w: int = 0, radius: int = 8, ground: str = "#000000",
+         ) -> Image.Image:
+    """A rounded, optionally bordered rectangle -- a button, drawn.
+
+    Tk's canvas has no rounded rectangle and no anti-aliasing, so a chapter
+    button drawn with canvas primitives comes out with stepped corners next to
+    CustomTkinter's smooth ones. PIL draws it properly; `ground` is the colour
+    behind it, composited in so the corners do not show black.
+
+    Cached like the gradients: the rail repaints on hover, and four buttons at
+    two states each would otherwise be redrawn on every mouse move.
+    """
+    w, h = max(1, int(size[0])), max(1, int(size[1]))
+    key = ("chip", w, h, fill, border, border_w, radius, ground)
+    hit = _CACHE.get(key)
+    if hit is not None:
+        return hit
+
+    img = Image.new("RGB", (w, h), ground)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((0, 0, w - 1, h - 1), radius=radius, fill=fill,
+                        outline=border or None,
+                        width=border_w if border else 0)
     if len(_CACHE) >= _CACHE_MAX:
         _CACHE.clear()
     _CACHE[key] = img
