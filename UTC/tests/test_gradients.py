@@ -145,13 +145,15 @@ def test_seafoam_takes_dark_type_and_salish_takes_white():
     assert T.ink_for(brand.PURPLE_STAR) == brand.WHITE
 
 
-def test_no_chapter_palette_uses_a_colour_that_is_spoken_for():
-    """Fathom is the dark-mode ground and Algae marks the open tool inside a
-    chapter. A chapter button in either would be saying something it does not
-    mean."""
+def test_no_chapter_palette_uses_the_window_ground():
+    """Fathom is the dark mode's window ground -- a button in it is a hole.
+
+    Algae is deliberately *not* excluded. It is the dark mode's action colour,
+    but the light mode's is Mediterranean, so it was never reserved the way it
+    first appeared to be.
+    """
     for name, palette in T.CHAPTER_PALETTES.items():
         assert brand.FATHOM not in palette, name
-        assert brand.ALGAE not in palette, name
 
 
 def test_contrast_agrees_with_the_published_pairs():

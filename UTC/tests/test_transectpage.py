@@ -16,29 +16,13 @@ import pytest
 
 ctk = pytest.importorskip("customtkinter")
 
-from utc.gui.app import App  # noqa: E402
 from utc.survey import Site, SurveyPlan, Transect  # noqa: E402
 
-
-@pytest.fixture(scope="module")
-def app():
-    """One window for the whole file.
-
-    Building and destroying a Tk root per test breaks partway through on
-    Anaconda's Tcl: the second interpreter comes up without its init script and
-    the first widget fails with "invalid command name tcl_findLibrary". Each
-    test sets the state it needs, so sharing one window costs nothing.
-    """
-    try:
-        a = App()
-    except Exception as ex:                      # no display on CI
-        pytest.skip(f"no display: {ex}")
-    a.withdraw()
-    yield a
-    try:
-        a.destroy()
-    except Exception:
-        pass
+# The window comes from the session fixture in conftest. This file used to
+# build its own, which was a second Tk root -- a second Tcl interpreter, whose
+# widgets cannot see images created by the first. Once the banner and the rail
+# started drawing themselves as images, that surfaced as "image pyimage258
+# doesn't exist" and skipped this whole file behind a "no display" guard.
 
 
 @pytest.fixture

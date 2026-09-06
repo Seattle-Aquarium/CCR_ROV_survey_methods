@@ -17,24 +17,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 @pytest.fixture(scope="module")
-def root():
-    """One Tk root for the whole module.
+def root(app):
+    """A window of this module's own, on the session's single Tk root.
 
-    Creating and destroying a root per test was flaky -- Tcl intermittently
-    failed to re-initialise ("couldn't read file auto.tcl"), the skip guard
-    caught it, and the tests guarding a real reported bug quietly did not run.
-    A skipped test that looks like a passing one is worse than no test.
+    A Toplevel rather than a second `CTk()`. Two roots in one process is two
+    Tcl interpreters, and it does not survive contact with the rest of the
+    suite: this module failed outright once the GUI tests began sharing a
+    long-lived application. Creating and destroying a root per test was flaky
+    for related reasons -- Tcl intermittently failed to re-initialise
+    ("couldn't read file auto.tcl"), the skip guard caught it, and tests
+    guarding a real reported bug quietly did not run. A skipped test that
+    looks like a passing one is worse than no test.
     """
     import customtkinter as ctk
     try:
-        r = ctk.CTk()
-        r.withdraw()
-        r.update()
+        top = ctk.CTkToplevel(app)
+        top.withdraw()
+        top.update()
     except Exception as ex:                       # genuinely no display
         pytest.skip(f"Tk unavailable: {ex}")
-    yield r
+    yield top
     try:
-        r.destroy()
+        top.destroy()
     except Exception:
         pass
 

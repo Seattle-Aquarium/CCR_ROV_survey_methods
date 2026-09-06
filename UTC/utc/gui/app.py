@@ -42,15 +42,22 @@ APP_ABBREV = "UTC"
 #: is a decision for later, and nothing on disk should move in the meantime.
 DISPLAY_TITLE = "Program title TBD"
 
-#: The four chapters, said once. Long form first; the banner falls back to the
-#: short one when the window is too narrow to set it without clipping.
-#: One segment per chapter, in the rail's order. Measured to fit the default
-#: window; below that the banner falls back to naming the four chapters.
-SUBTITLE = ("Connect and fetch files  ·  telemetry, message and log health  ·  "
-            "import and finish photos  ·  assemble and export video")
-SUBTITLE_SHORT = "Aboard ROV  ·  Flight report  ·  Photos  ·  Video"
-ATTRIBUTION = ("Seattle Aquarium  ·  Coastal Climate Resilience  ·  "
-               "Conservation Programs and Partnerships")
+#: One line per chapter, in the rail's order, and numbered to match it. Drawn
+#: with a coloured badge carrying the number -- the same colour that chapter's
+#: button wears -- so the banner reads as the roadmap for the rail rather than
+#: as a sentence that happens to list four things.
+CHAPTER_BLURBS = (
+    "Connect to ROV, monitor vehicle health and fetch files",
+    "ROV telemetry, message and log health",
+    "Import, process and export polished photos",
+    "Import, assemble and export videos",
+)
+
+#: Set apart from the roadmap by a wider gap and a quieter ink: this is who
+#: made it, not what it does. "Seattle Aquarium" is deliberately absent -- the
+#: logo two inches to the left already says it.
+ATTRIBUTION = ("Conservation Programs and Partnerships  ·  "
+               "Coastal Climate Resilience")
 # Plan filename and legacy fallback live in survey.py, so the CLI and the
 # GUI cannot drift apart on which file they read.
 
@@ -141,13 +148,37 @@ class App(ctk.CTk):
         except Exception:
             self._logo_pil = None
 
+    def _wrap_roadmap(self, f_sub, badge: int, gap: int,
+                      avail: int) -> list[list[int]]:
+        """Fit the four chapter blurbs into lines of at most `avail` pixels.
+
+        Returns the chapter indices per line. Flowing rather than fixed at two
+        lines, because the window can be dragged from 980px to a wide monitor
+        and the roadmap should use whatever it is given.
+        """
+        lines: list[list[int]] = [[]]
+        used = 0
+        for i, blurb in enumerate(CHAPTER_BLURBS):
+            need = badge + gap // 2 + f_sub.measure(blurb)
+            if lines[-1] and used + gap + need > avail:
+                lines.append([])
+                used = 0
+            used += (gap if lines[-1] else 0) + need
+            lines[-1].append(i)
+        return lines
+
     def _paint_header(self) -> None:
         """Draw the banner at the current width.
 
-        Laid out by measuring rather than by fixed offsets: the subtitle is a
-        full sentence and the window can be dragged down to 980px, so the line
-        that does not fit is swapped for a shorter one instead of being clipped
-        halfway through a word.
+        Laid out by measuring rather than by fixed offsets. Three things follow
+        from that and none of them can be a constant: the roadmap flows into as
+        many lines as the width needs, the banner is as tall as whatever that
+        came to, and the logo is sized to span the title and roadmap together.
+
+        The roadmap's numbers are badges in their own chapter's colour -- the
+        same colour that chapter's button wears in the rail. It reads as the
+        key to the rail rather than as a sentence, and it sidesteps the fact
+        that Seafoam and Algae cannot be used as type on a light ground.
         """
         from tkinter import font as tkfont
 
@@ -158,56 +189,84 @@ class App(ctk.CTk):
         w = max(1, c.winfo_width())
         pad = int(16 * s)
         rule_h = max(1, int(T.RULE_HEIGHT * s))
+        ground = self._apply_appearance_mode(T.HEADER_BG)
 
         f_title = tkfont.Font(**_font_kw(T.scale_font(T.FONT_BANNER, s)))
         f_sub = tkfont.Font(**_font_kw(T.scale_font(T.FONT_BANNER_SUB, s)))
         title_h = f_title.metrics("linespace")
         sub_h = f_sub.metrics("linespace")
 
-        # The banner is as tall as its own type, rather than a number chosen on
-        # one machine. At 2.5x display scaling a fixed height clipped the
-        # attribution line off the bottom entirely.
-        h = pad + title_h + int(6 * s) + sub_h + int(3 * s) + sub_h + pad + rule_h
+        badge = int(sub_h * 1.25)
+        line_h = badge + int(5 * s)
+        gap_title = int(9 * s)
+        gap_attrib = int(14 * s)         # the visible break: roadmap, then who
+        seg_gap = int(24 * s)
+        logo_gap = int(22 * s)
+
+        # The logo's height depends on how many lines the roadmap takes, and
+        # the space the roadmap has depends on how wide the logo is. Settle it
+        # by laying out twice -- the second pass knows the real logo width.
+        lines: list[list[int]] = [[0, 1], [2, 3]]
+        x = logo_w = 0
+        for _ in range(2):
+            block_h = title_h + gap_title + len(lines) * line_h
+            logo = self._logo_scaled(block_h)
+            logo_w = logo.width if logo is not None else int(150 * s)
+            x = pad + int(4 * s) + logo_w + logo_gap
+            avail = max(int(200 * s), w - x - int(170 * s))
+            lines = self._wrap_roadmap(f_sub, badge, seg_gap, avail)
+
+        block_h = title_h + gap_title + len(lines) * line_h
+        h = pad + block_h + gap_attrib + sub_h + pad + rule_h
         if int(c.cget("height")) != h:
             c.configure(height=h)
 
         c.delete("all")
-        ground = self._apply_appearance_mode(T.HEADER_BG)
         c.configure(background=ground)
         c.create_rectangle(0, 0, w, h, fill=ground, outline="")
 
         heading = self._apply_appearance_mode(T.HEADING)
-        x = pad + int(4 * s)
-        logo = self._logo_scaled(int((h - rule_h) * 0.46))
+        body = self._apply_appearance_mode(T.TEXT)
+        muted = self._apply_appearance_mode(T.TEXT_MUTED)
+
+        # The logo spans the title and the roadmap, top-aligned with both.
+        logo = self._logo_scaled(block_h)
         if logo is not None:
             self._logo_photo = ImageTk.PhotoImage(logo)
-            c.create_image(x, (h - rule_h) // 2, image=self._logo_photo,
-                           anchor="w")
-            x += logo.width + int(20 * s)
+            c.create_image(pad + int(4 * s), pad, image=self._logo_photo,
+                           anchor="nw")
         else:
-            c.create_text(x, (h - rule_h) // 2, anchor="w",
+            c.create_text(pad + int(4 * s), pad + block_h // 2, anchor="w",
                           text="Seattle Aquarium",
                           font=T.scale_font(T.FONT_H2, s), fill=heading)
-            x += int(160 * s)
-
-        # Leave room for the switch against the right edge, and drop to the
-        # short subtitle rather than clipping a sentence mid-word.
-        avail = max(int(120 * s), w - x - int(170 * s))
-        sub = SUBTITLE if f_sub.measure(SUBTITLE) <= avail else SUBTITLE_SHORT
-        attrib = ATTRIBUTION if f_sub.measure(ATTRIBUTION) <= avail else ""
 
         y = pad
         c.create_text(x, y, anchor="nw", text=DISPLAY_TITLE,
                       font=T.scale_font(T.FONT_BANNER, s), fill=heading)
-        y += title_h + int(6 * s)
-        c.create_text(x, y, anchor="nw", text=sub,
-                      font=T.scale_font(T.FONT_BANNER_SUB, s),
-                      fill=self._apply_appearance_mode(T.TEXT))
-        y += sub_h + int(3 * s)
-        if attrib:
-            c.create_text(x, y, anchor="nw", text=attrib,
-                          font=T.scale_font(T.FONT_BANNER_SUB, s),
-                          fill=self._apply_appearance_mode(T.TEXT_MUTED))
+        y += title_h + gap_title
+
+        self._badge_photos = []
+        f_badge = T.scale_font(T.FONT_BANNER_SUB, s)
+        for row in lines:
+            bx = x
+            for i in row:
+                colour = T.CHAPTER_COLOURS[i % len(T.CHAPTER_COLOURS)]
+                img = G.chip((badge, badge), fill=colour, radius=badge // 4,
+                             ground=ground)
+                photo = ImageTk.PhotoImage(img)
+                self._badge_photos.append(photo)
+                c.create_image(bx, y, image=photo, anchor="nw")
+                c.create_text(bx + badge / 2, y + badge / 2, anchor="center",
+                              text=str(i + 1), font=f_badge,
+                              fill=T.ink_for(colour))
+                bx += badge + seg_gap // 2
+                c.create_text(bx, y + badge / 2, anchor="w",
+                              text=CHAPTER_BLURBS[i], font=f_badge, fill=body)
+                bx += f_sub.measure(CHAPTER_BLURBS[i]) + seg_gap
+            y += line_h
+
+        c.create_text(x, y + gap_attrib, anchor="nw", text=ATTRIBUTION,
+                      font=T.scale_font(T.FONT_BANNER_SUB, s), fill=muted)
 
         # The one gradient in the application: a three-colour bright gradient
         # along the foot of the banner. It is a single object and carries no
@@ -216,12 +275,18 @@ class App(ctk.CTk):
         self._rule_photo = ImageTk.PhotoImage(rule)
         c.create_image(0, h - rule_h, image=self._rule_photo, anchor="nw")
 
-        sx, sy = w - pad, (h - rule_h) // 2
         self.theme_switch.configure(bg_color=ground)
-        c.create_window(sx, sy, window=self.theme_switch, anchor="e")
+        c.create_window(w - pad, (h - rule_h) // 2, window=self.theme_switch,
+                        anchor="e")
 
     def _logo_scaled(self, height: int):
-        """The logo at a pixel height, cached so a resize is not a resample."""
+        """The logo at a pixel height, cached so a resize is not a resample.
+
+        Sized to span the title and the roadmap beneath it. p.11 sets a
+        minimum of 50px wide for digital and no maximum; the clear space it
+        asks for -- the height of the "A" in AQUARIUM, about a sixth of the
+        mark -- is what the banner's own padding provides.
+        """
         if self._logo_pil is None:
             return None
         height = max(8, int(height))

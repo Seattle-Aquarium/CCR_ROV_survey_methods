@@ -20,8 +20,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 pytest.importorskip("customtkinter")
 
-from utc.gui.app import App  # noqa: E402
-
 #: The order of a field day: on the boat, at the desk, then the media.
 EXPECTED_CHAPTERS = ["Aboard ROV", "Flight report", "Photos", "Videos"]
 
@@ -32,20 +30,6 @@ EXPECTED_TOOLS = {
     "Videos": ["Video"],
 }
 
-
-@pytest.fixture(scope="module")
-def app():
-    try:
-        a = App()
-    except Exception as ex:
-        pytest.skip(f"no display: {ex}")
-    a.withdraw()
-    a.update()
-    yield a
-    try:
-        a.destroy()
-    except Exception:
-        pass
 
 
 def _rail_text(app) -> list[str]:
@@ -150,8 +134,19 @@ def test_a_chapter_reopens_on_the_tool_last_used_there(app):
 
 
 def test_a_chapter_opens_on_its_first_tool_the_first_time(app):
-    app.nav.select_chapter("Flight report")
-    assert app.nav.current == "Transects", "Transects lead the flight report"
+    """A chapter nobody has opened yet lands on the tool that leads it.
+
+    "Never opened" is arranged rather than assumed: the window is shared
+    across the suite and the tests do not run in a fixed order, so by the time
+    this runs the chapter may well have been visited.
+    """
+    nav = app.nav
+    ch = nav._chapters["Flight report"]
+    nav.select("Video")                       # somewhere else entirely
+    if hasattr(ch, "_last"):
+        del ch._last
+    nav.select_chapter("Flight report")
+    assert nav.current == "Transects", "Transects lead the flight report"
 
 
 def test_the_app_opens_on_the_flight_because_everything_else_needs_it(app):

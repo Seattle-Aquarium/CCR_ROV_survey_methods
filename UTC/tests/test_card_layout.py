@@ -19,26 +19,12 @@ import pytest
 
 ctk = pytest.importorskip("customtkinter")
 
-from utc.gui.app import App  # noqa: E402
 from utc.gui.widgets import Card  # noqa: E402
 
 #: CustomTkinter scales wraplength on the way to the underlying label, and the
 #: round trip through int() leaves a few pixels of slack either way.
 TOLERANCE_PX = 16
 
-
-@pytest.fixture(scope="module")
-def app():
-    try:
-        a = App()
-    except Exception as ex:
-        pytest.skip(f"no display: {ex}")
-    a.withdraw()
-    yield a
-    try:
-        a.destroy()
-    except Exception:
-        pass
 
 
 def _cards(widget, found=None):

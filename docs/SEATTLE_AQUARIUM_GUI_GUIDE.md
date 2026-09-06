@@ -188,11 +188,26 @@ with the theme.
 - **The open tool's underline on the section strip** is the 2-colour bright
   gradient, Algae → Seafoam. Same rule, smaller element.
 
-**The four chapter buttons each carry their own brand colour.** Fathom is the
-dark-mode ground and Algae marks the open tool, so neither is available; that
-leaves Salish, Mediterranean, Seafoam, Purple Star and Coral for four slots.
-The default set is Salish · Mediterranean · Seafoam · Purple Star; the
-alternatives that were trialled live in `theme.CHAPTER_PALETTES`.
+**The four chapter buttons each carry their own brand colour.** Only Fathom is
+unavailable — it is the dark-mode window ground, and a button in it is a hole.
+Algae *is* available, contrary to first appearances: it is the dark mode's
+action colour, but the light mode's is Mediterranean, so it was never reserved.
+The default set is Salish · Mediterranean · Seafoam · Purple Star; six
+alternatives live in `theme.CHAPTER_PALETTES` and switching is one line.
+
+**The banner's roadmap is keyed to those buttons.** Each of the four blurbs is
+introduced by a numbered badge in its chapter's own colour, so the banner reads
+as the key to the rail rather than as a sentence that happens to list four
+things. The badge also sidesteps a real constraint: Seafoam and Algae cannot be
+used as *type* on a light ground (1.9:1 and 2.2:1 on Pumice), but they carry
+dark type perfectly well as a *fill*.
+
+**The logo spans the title and the roadmap together.** p.11 sets a minimum of
+50px wide for digital and no maximum, asks for clear space equal to the height
+of the "A" in AQUARIUM — about a sixth of the mark, which the banner's padding
+covers — and requires 4.5:1 against its ground. White on the dark surface is
+13:1; Mediterranean on Pumice is 5.5:1. "Seattle Aquarium" was dropped from the
+attribution line: the logo beside it already says so.
 
 > **Type on a brand colour is chosen by measuring, not from a table.**
 > `theme.ink_for(colour)` returns White or Fathom, whichever scores higher.

@@ -116,22 +116,32 @@ FONT_SECTION_ON = (FAMILY_SEMIBOLD, 14)
 #  Chapter buttons
 # --------------------------------------------------------------------------
 #
-# Each chapter carries its own brand colour. Fathom is the dark-mode ground and
-# Algae marks the open tool inside a chapter, so neither is available here --
-# which leaves Salish, Mediterranean, Seafoam, Purple Star and Coral for four
-# slots. See CHAPTER_PALETTES for the sets that were trialled.
+# Each chapter carries its own brand colour. Fathom is out -- it is the
+# dark-mode window ground, and a button in it would be a hole. Everything else
+# is available, Algae included: it is the dark mode's action colour but the
+# light mode's is Mediterranean, so it was never reserved in the way it first
+# appeared to be.
+#
+# The type on each is chosen by `ink_for`, not from a table, so a set can be
+# swapped here and the labels follow.
 
 #: name -> the four colours, in rail order.
 CHAPTER_PALETTES = {
+    # No Algae -- the set these started from, kept for comparison.
     "ocean": (brand.SALISH, brand.MEDITERRANEAN, brand.SEAFOAM,
               brand.PURPLE_STAR),
-    "tide": (brand.SALISH, brand.MEDITERRANEAN, brand.SEAFOAM, brand.CORAL),
-    "reef": (brand.SALISH, brand.MEDITERRANEAN, brand.PURPLE_STAR,
-             brand.CORAL),
-    "shallows": (brand.MEDITERRANEAN, brand.SEAFOAM, brand.PURPLE_STAR,
-                 brand.CORAL),
-    "salish": (brand.SALISH,) * 4,
-    "mediterranean": (brand.MEDITERRANEAN,) * 4,
+    # Green through blue: the Salish Sea seen from the surface downward.
+    "kelp": (brand.SALISH, brand.ALGAE, brand.SEAFOAM, brand.MEDITERRANEAN),
+    # Dark to bright, so the rail lightens as the day's work moves on.
+    "tideline": (brand.SALISH, brand.MEDITERRANEAN, brand.ALGAE,
+                 brand.SEAFOAM),
+    # One primary anchoring three brighter ones.
+    "estuary": (brand.SALISH, brand.ALGAE, brand.MEDITERRANEAN,
+                brand.PURPLE_STAR),
+    # The bright half of the palette, end to end.
+    "spectrum": (brand.ALGAE, brand.SEAFOAM, brand.PURPLE_STAR, brand.CORAL),
+    # Cool to warm, finishing on the accent.
+    "shore": (brand.SALISH, brand.ALGAE, brand.SEAFOAM, brand.CORAL),
 }
 
 CHAPTER_COLOURS = CHAPTER_PALETTES["ocean"]
