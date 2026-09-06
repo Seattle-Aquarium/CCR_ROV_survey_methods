@@ -105,25 +105,38 @@ def test_a_gradient_of_zero_width_still_produces_an_image():
 #  legibility on those gradients
 # --------------------------------------------------------------------------
 
-#: Every ground the chrome type is drawn on, across both appearance modes.
-CHROME_GROUNDS = sorted({c for pair in T.HEADER_GRADIENT.values() for c in pair}
-                        | {c for pair in T.RAIL_GRADIENT.values() for c in pair})
+#: Every ground the banner's type is drawn on, across both appearance modes.
+BANNER_GROUNDS = sorted({c for pair in T.HEADER_GRADIENT.values() for c in pair})
 
 #: p.20: large type -- the rail is set at 15pt semibold, which qualifies.
 LARGE_TEXT = 3.0
 NORMAL_TEXT = 4.5
 
 
-@pytest.mark.parametrize("ground", CHROME_GROUNDS)
-def test_the_rail_reads_at_both_ends_of_its_own_gradient(ground):
-    """The regression: an ink picked against the dark mode alone.
+@pytest.mark.parametrize("ground", BANNER_GROUNDS)
+def test_the_banner_reads_at_both_ends_of_its_own_gradient(ground):
+    """The regression this was written for: an ink picked against one end.
 
-    The rail runs Salish to Fathom in dark and Salish to Mediterranean in
-    light, so a chapter name has to hold up on all three.
+    The banner runs Salish to Fathom in dark and Salish to Mediterranean in
+    light, and the type crosses the whole run, so it has to hold up on all
+    three. An earlier muted value read fine on Salish and sat at 1.6:1 on
+    Mediterranean.
     """
     assert brand.contrast(T.CHROME_TEXT, ground) >= NORMAL_TEXT
     assert brand.contrast(T.CHROME_TEXT_MUTED, ground) >= LARGE_TEXT, (
-        f"unselected chapter names are illegible on {ground}")
+        f"the subtitle is illegible on {ground}")
+
+
+@pytest.mark.parametrize("mode,index", [("light", 0), ("dark", 1)])
+def test_the_rail_reads_on_its_flat_surface(mode, index):
+    """The rail is flat, so this is an ordinary two-colour check -- but it is
+    Pumice in light mode and a lifted Fathom in dark, which are far apart."""
+    ground = T.RAIL_BG[index]
+    assert brand.contrast(T.TEXT[index], ground) >= NORMAL_TEXT
+    assert brand.contrast(T.TEXT_MUTED[index], ground) >= LARGE_TEXT, (
+        f"unselected chapter names are illegible in {mode} mode")
+    assert brand.contrast(T.ACCENT[index], ground) >= LARGE_TEXT, (
+        f"the open-chapter marker is invisible in {mode} mode")
 
 
 def test_the_deep_gradients_can_all_carry_white_type():

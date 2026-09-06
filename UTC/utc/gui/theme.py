@@ -95,9 +95,11 @@ HEADER_GRADIENT = {
     "light": brand.DEEP_GRADIENTS["salish_mediterranean"],
 }
 
-#: The rail runs top to bottom, so its gradient does too.
-RAIL_GRADIENT = HEADER_GRADIENT
-RAIL_ANGLE = 90.0
+#: The rail is flat. A gradient behind a list of four rows gives each of them
+#: a slightly different ground, which reads as four states rather than one
+#: control -- so the rail takes its distinctness from being a step off the
+#: window ground, the way it always did, and the banner keeps the gradient.
+RAIL_BG = SURFACE
 
 #: A three-colour bright gradient, three pixels tall, dividing the banner from
 #: the work below it. p.19 sanctions exactly this: a bright gradient as a UI
@@ -105,8 +107,10 @@ RAIL_ANGLE = 90.0
 RULE_GRADIENT = brand.BRIGHT_GRADIENTS_3["algae_seafoam_purple"]
 RULE_HEIGHT = 3
 
-#: The selected chapter's marker -- a small UI element on a dark ground, which
-#: is what the two-colour bright gradients are for.
+#: The open tool's underline on the section strip -- a small UI element, which
+#: is what the two-colour bright gradients are for. The rail's own marker is
+#: the flat accent: its ground is Pumice in light mode, and p.19 puts bright
+#: gradients over *darker* backgrounds.
 STRIPE_GRADIENT = brand.BRIGHT_GRADIENTS["algae_seafoam"]
 
 #: Chrome type. Flat values rather than (light, dark) pairs: the ground under

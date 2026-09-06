@@ -174,12 +174,15 @@ against **both** end colours (`brand.contrast`), not against the average.
 
 *Decided 2026-09-05, after the four-chapter regrouping.*
 
-- **Banner and rail carry a deep gradient, and stay dark in both appearance
-  modes**, while the content between them flips. There is no light gradient in
-  the palette, and inventing one would mean tinting a brand colour, which p.18
-  forbids. It also says something true: the rail is the order of a survey day,
-  and it runs across every mode and every page.
+- **The banner carries a deep gradient**, and stays dark in both appearance
+  modes while the content below flips. There is no light gradient in the
+  palette, and inventing one would mean tinting a brand colour, which p.18
+  forbids.
   - dark mode: **Salish → Fathom**  ·  light mode: **Salish → Mediterranean**
+- **The rail is flat**, on the surface colour, and flips with the theme.
+  A gradient behind a list of four rows gives each row a slightly different
+  ground, which reads as four states rather than one control — the banner is a
+  single object and can carry one, a rail cannot. Tried both; flat won.
 - **A 3-colour bright gradient rules off the banner** — Algae → Seafoam →
   Purple Star, three pixels tall. Sanctioned use: a bright gradient as a UI
   element over a darker ground.

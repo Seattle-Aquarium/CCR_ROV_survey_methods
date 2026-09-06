@@ -9,12 +9,11 @@ rail four items long however many tools accumulate.
 
 Two things here are unusual for CustomTkinter.
 
-**The rail is a canvas, not a column of buttons.** It carries a brand gradient,
-and a CTkButton over an image paints its own rectangle: "transparent" in
-CustomTkinter resolves to the master's flat colour, not to what is behind it.
-On a canvas, text and stripes sit on the gradient with nothing behind them.
-Selection and hover are therefore bound by hand, which is a few more lines and
-gives exact control over both.
+**The rail is a canvas, not a column of buttons.** It is flat -- a gradient
+behind four rows gives each of them a different ground, which reads as four
+states rather than one control -- but a canvas still buys exact control over
+type size, the marker and hover, none of which a CTkButton gives up willingly.
+The section strip's underline is drawn, and that needs a canvas outright.
 
 **Sizes are measured, not assumed.** Row height and rail width come from the
 rendered font, so a laptop at 150% display scaling gets a rail that fits its
@@ -87,8 +86,8 @@ class SectionStrip(ctk.CTkFrame):
         )
         btn.grid(row=0, column=col, sticky="ew", padx=(0, 4))
 
-        # A canvas, for the same reason the rail is one: the marker is a
-        # gradient, and a CTkLabel holding an image is the wrong tool for it.
+        # A canvas because the underline is a gradient, and a CTkLabel
+        # holding an image is the wrong tool for it.
         # A first attempt did use one and dropped the PhotoImage as soon as the
         # tool was deselected, which left Tk holding a handle to an image
         # Python had already freed -- "image pyimage9 doesn't exist".
@@ -108,7 +107,7 @@ class SectionStrip(ctk.CTkFrame):
             self._paint_mark(n)
 
     def _paint_mark(self, name: str) -> None:
-        """The active tool gets a bright-gradient underline, matching the rail.
+        """The open tool gets a bright-gradient underline.
 
         Repainted on <Configure> as well as on selection, so it arrives at the
         right width whenever the strip is finally laid out -- there is no
@@ -140,7 +139,7 @@ class SectionStrip(ctk.CTkFrame):
 
 
 class Navigator(ctk.CTkFrame):
-    """A gradient rail of chapters beside a single-page content area."""
+    """A rail of chapters beside a single-page content area."""
 
     def __init__(self, master, on_select: Callable[[str], None] | None = None):
         super().__init__(master, fg_color="transparent")
@@ -152,8 +151,6 @@ class Navigator(ctk.CTkFrame):
         self._current_chapter: str | None = None
         self._hover: str | None = None
         self._enabled: dict[str, bool] = {}
-        self._rail_photo: ImageTk.PhotoImage | None = None
-        self._stripe_photo: ImageTk.PhotoImage | None = None
         self._scale = 1.0
         self._rail_w = MIN_RAIL_W
         self._row_h = 44
@@ -170,7 +167,8 @@ class Navigator(ctk.CTkFrame):
         # non-zero and would draw a light frame around the gradient.
         self.rail = tkinter_mod.Canvas(self, width=self._rail_w, height=10,
                                        highlightthickness=0, borderwidth=0,
-                                       background=T.RAIL_GRADIENT["dark"][0])
+                                       background=self._apply_appearance_mode(
+                                           T.RAIL_BG))
         self.rail.grid(row=0, column=0, sticky="nsw")
         self.rail.bind("<Configure>", lambda _e: self._redraw())
         self.rail.bind("<Button-1>", self._clicked)
@@ -262,33 +260,42 @@ class Navigator(ctk.CTkFrame):
         return ctk.get_appearance_mode().lower()
 
     def _redraw(self) -> None:
+        """The rail, on one flat surface colour.
+
+        Deliberately not a gradient. The rail is a list of four things that
+        differ only by which one is open, and a gradient behind them makes each
+        row sit on a slightly different ground -- which reads as four states
+        rather than one control. The banner is a single object and can carry
+        one; this cannot. It takes its distinctness from the surface colour
+        instead, a step off the window ground in both modes.
+        """
         c = self.rail
         w, h = max(1, c.winfo_width()), max(1, c.winfo_height())
         c.delete("all")
 
-        colours = T.RAIL_GRADIENT.get(self._mode(), T.RAIL_GRADIENT["dark"])
-        img = G.render((w, h), colours, angle=T.RAIL_ANGLE)
-        self._rail_photo = ImageTk.PhotoImage(img)
-        c.create_image(0, 0, image=self._rail_photo, anchor="nw")
+        ink = self._apply_appearance_mode
+        ground = ink(T.RAIL_BG)
+        c.configure(background=ground)
+        c.create_rectangle(0, 0, w, h, fill=ground, outline="")
 
-        stripe = G.render((max(1, int(STRIPE_W * self._scale)), self._row_h),
-                          T.STRIPE_GRADIENT, angle=T.RAIL_ANGLE)
-        self._stripe_photo = ImageTk.PhotoImage(stripe)
+        stripe_w = max(1, int(STRIPE_W * self._scale))
+        accent, text, muted = ink(T.ACCENT), ink(T.TEXT), ink(T.TEXT_MUTED)
+        dim = ink(T.BORDER)
 
         for name, ch in self._chapters.items():
             y = self._top + (ch.index - 1) * self._row_h
             on = name == self._current_chapter
             live = self._chapter_enabled(name)
             if on:
-                c.create_image(0, y, image=self._stripe_photo, anchor="nw")
+                c.create_rectangle(0, y, stripe_w, y + self._row_h,
+                                   fill=accent, outline="")
             if live:
-                colour = (T.CHROME_TEXT if on or name == self._hover
-                          else T.CHROME_TEXT_MUTED)
+                colour = text if (on or name == self._hover) else muted
             else:
-                colour = T.CHROME_TEXT_DIM
+                colour = dim
             c.create_text(self._num_x, y + self._row_h / 2, anchor="w",
                           text=str(ch.index), font=self._font_num,
-                          fill=T.CHROME_TEXT_MUTED,
+                          fill=muted if live else dim,
                           tags=("row", f"row:{name}"))
             c.create_text(self._name_x, y + self._row_h / 2, anchor="w",
                           text=name,
