@@ -407,3 +407,77 @@ def test_the_id_reaches_the_csv_and_the_filename(dive, tmp_path):
                         dvl_source=res.dvl_source)
     assert r.path.name == "EBM_W25_T1.csv"
     assert pd.read_csv(r.path)["Transect_ID"].eq("EBM_W25_T1").all()
+
+
+# ---- how the DVL track gets its coordinates -------------------------------
+#
+# Two behaviours that pull in opposite directions, so both are pinned here.
+# Anchoring each transect to its own fix keeps the DVL's drift bounded by that
+# transect; propagating one track across the dive keeps the transects' true
+# separation. Choosing the wrong one is not subtle -- on 2025-08-14 it put the
+# later transects 114 m from their GPS.
+
+def _moving_gps_dive(b, *, seconds=60, start=BASE_EPOCH):
+    """Like straight_north_dive, but with a surface fix that tracks."""
+    for i in range(seconds):
+        t = start + i
+        for k in range(10):
+            b.add(t + k / 10, "ATTITUDE",
+                  {"roll": 0.0, "pitch": 0.0, "yaw": 0.0})
+        for k in range(5):
+            b.add(t + k / 5, "VISION_POSITION_DELTA",
+                  {"time_delta_usec": 200000, "position_delta": [0.1, 0.0, 0.0],
+                   "confidence": 99.0}, sysid=255, compid=0)
+        # ~1 m of northward movement per second, matching the DVL
+        b.add(t, "GPS_RAW_INT",
+              {"lat": 476176249 + i * 90, "lon": -1223610207, "alt": 0,
+               "fix_type": {"type": "GPS_FIX_TYPE_3D_FIX"},
+               "satellites_visible": 12})
+        b.add(t, "GLOBAL_POSITION_INT",
+              {"lat": 0, "lon": 0, "relative_alt": -5000})
+        b.add(t, "RANGEFINDER", {"distance": 2.0, "voltage": 0})
+    return b.close()
+
+
+def test_a_static_fix_is_not_mistaken_for_a_tracking_one(builder):
+    """A UGPS with no lock injects one coordinate for the whole recording."""
+    from ccr_m2c.transect import has_live_fix
+    df = read_mcaps([straight_north_dive(builder(), seconds=30).close()]).df
+    assert not has_live_fix(df)
+
+
+def test_a_tracking_fix_is_recognised(builder):
+    from ccr_m2c.transect import has_live_fix
+    df = read_mcaps([_moving_gps_dive(builder("m.mcap"), seconds=30)]).df
+    assert has_live_fix(df)
+
+
+def test_with_a_tracking_fix_each_transect_starts_on_its_own(builder, tmp_path):
+    """The regression this exists for: a later transect must not carry the
+    dive's accumulated dead reckoning."""
+    path = _moving_gps_dive(builder("m.mcap"), seconds=120)
+    run([path], site_name="S", survey_date="20260826", station_id=None,
+        save_location=tmp_path, make_map=False,
+        transects=[TransectSpec("T1", [("10:00:05", "10:00:25")]),
+                   TransectSpec("T2", [("10:01:30", "10:01:55")])])
+
+    for name in ("T1", "T2"):
+        w = pd.read_csv(tmp_path / "transects" / f"{name}.csv")
+        first = w.dropna(subset=["Latitude", "DVLlat"]).iloc[0]
+        gap_m = abs(first["DVLlat"] - first["Latitude"]) * 111_320
+        assert gap_m < 1.0, f"{name} starts {gap_m:.1f} m from its own fix"
+
+
+def test_without_a_tracking_fix_the_transects_keep_their_separation(builder, tmp_path):
+    """The behaviour the above must not undo: seeding per transect on a static
+    fix would stack every transect on one coordinate."""
+    path = straight_north_dive(builder(), seconds=120).close()
+    run([path], site_name="S", survey_date="20260826", station_id=None,
+        save_location=tmp_path, make_map=False,
+        transects=[TransectSpec("T1", [("10:00:05", "10:00:25")]),
+                   TransectSpec("T2", [("10:01:30", "10:01:55")])])
+
+    a = pd.read_csv(tmp_path / "transects" / "T1.csv")["DVLlat"].dropna()
+    b = pd.read_csv(tmp_path / "transects" / "T2.csv")["DVLlat"].dropna()
+    apart_m = abs(b.iloc[0] - a.iloc[0]) * 111_320
+    assert apart_m > 20, f"the transects were stacked ({apart_m:.1f} m apart)"

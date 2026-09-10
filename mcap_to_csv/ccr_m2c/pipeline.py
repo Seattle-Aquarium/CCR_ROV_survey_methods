@@ -22,7 +22,8 @@ from . import mapping
 from .mcap_read import ReadResult, read_mcaps
 from .tide import add_empty_tide, fetch_tide_dataframe, merge_tide
 from .transect import (
-    TransectResult, export_transect, georeference_dvl, whole_log_window,
+    TransectResult, export_transect, georeference_dvl, has_live_fix,
+    whole_log_window,
 )
 
 log = logging.getLogger(__name__)
@@ -150,18 +151,31 @@ def run(
     # its slice. DVLx/DVLy are still re-zeroed per transect afterwards, so those
     # columns mean exactly what they did in the tlog workflow.
     step(0.74, "building the dive track")
+    # How the DVL track gets its coordinates. Seeding each transect at its own
+    # fix keeps the DVL's drift bounded by that transect; propagating one track
+    # across the dive keeps the transects' true separation. Which is right
+    # depends entirely on whether the surface fix was tracking.
     site_frame = False
-    try:
-        df_all, _steps, seed_warning = georeference_dvl(df_all)
-        if seed_warning:
-            say(f"  ! {seed_warning}")
-            result.warnings.append(seed_warning)
-        else:
-            site_frame = True
-    except Exception as ex:
-        result.warnings.append(f"dive-wide track failed ({ex}); "
-                               "each transect will be seeded on its own")
-        say(f"  ! {result.warnings[-1]}")
+    if has_live_fix(df_all):
+        say("Surface fix is tracking; each transect is anchored to its own. "
+            "The DVL's drift is then bounded by the transect rather than "
+            "accumulating across the dive.")
+    else:
+        try:
+            df_all, _steps, seed_warning = georeference_dvl(df_all)
+            if seed_warning:
+                say(f"  ! {seed_warning}")
+                result.warnings.append(seed_warning)
+            else:
+                site_frame = True
+                say("Surface fix never moved, so it cannot anchor a transect. "
+                    "The dive is propagated as one DVL track instead, which "
+                    "keeps the transects' separation but not their absolute "
+                    "position.")
+        except Exception as ex:
+            result.warnings.append(f"dive-wide track failed ({ex}); "
+                                   "each transect will be seeded on its own")
+            say(f"  ! {result.warnings[-1]}")
 
     # ---- 4. transects -----------------------------------------------------
     specs = list(transects)

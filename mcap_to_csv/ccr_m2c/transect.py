@@ -19,6 +19,7 @@ appended after that point.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -201,6 +202,44 @@ def dvl_steps(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
     dx = dx.where(step >= MIN_STEP_M, 0.0)
     dy = dy.where(step >= MIN_STEP_M, 0.0)
     return dx, dy, np.sqrt(dx ** 2 + dy ** 2)
+
+
+#: How far the surface fix must move across a dive before it counts as
+#: tracking. A Water Linked UGPS with no lock injects one coordinate for the
+#: whole recording, giving a span of exactly zero; any real fix jitters further
+#: than this even when the vehicle is still.
+LIVE_FIX_SPAN_M = 1.0
+
+
+def has_live_fix(df: pd.DataFrame, min_span_m: float = LIVE_FIX_SPAN_M) -> bool:
+    """Did the surface fix actually move over this dive?
+
+    This decides how the DVL track is anchored, and the two answers are far
+    apart.
+
+    With a fix that tracks, each transect is seeded at its own -- the DVL's
+    drift is then bounded by one transect instead of accumulating across the
+    whole dive. On 2025-08-14 that is the difference between a DVL track 7 m
+    from the GPS and one 114 m from it, because the later transects had an
+    hour of dead reckoning behind them.
+
+    With a fix that never moves, seeding per transect would put every transect
+    on the same coordinate and throw away the separation the DVL did measure.
+    Those dives have to be propagated as a single track from one seed.
+    """
+    lat = pd.to_numeric(df.get("Latitude"), errors="coerce")
+    lon = pd.to_numeric(df.get("Longitude"), errors="coerce")
+    ok = lat.notna() & lon.notna() & (lat != 0) & (lon != 0)
+    if ok.sum() < 2:
+        return False
+    lat, lon = lat[ok], lon[ok]
+    metres_per_deg = 111_320.0
+    span = math.hypot(
+        (lat.max() - lat.min()) * metres_per_deg,
+        (lon.max() - lon.min()) * metres_per_deg
+        * math.cos(math.radians(float(lat.mean()))),
+    )
+    return span > min_span_m
 
 
 def georeference_dvl(df_tran: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, str | None]:
