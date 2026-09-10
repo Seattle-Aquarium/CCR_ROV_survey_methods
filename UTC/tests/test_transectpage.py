@@ -57,6 +57,16 @@ def installed(monkeypatch):
     return stub
 
 
+def _disc(*paths):
+    """A stand-in for discovery.Discovery.
+
+    `telemetry` is what the page reads: mcaps and tlogs together, since a
+    transect CSV can be cut from either. Kept as a property here so the stub
+    cannot drift into offering one without the other.
+    """
+    return SimpleNamespace(mcaps=list(paths), tlogs=[], telemetry=list(paths))
+
+
 def _pump(app, n=20):
     import time
     for _ in range(n):
@@ -165,7 +175,7 @@ def test_the_health_check_is_scoped_to_the_transects(app, monkeypatch, tmp_path)
                         lambda: (SimpleNamespace(), SimpleNamespace()))
 
     app.flight_dir = tmp_path
-    app.discovery = SimpleNamespace(mcaps=[tmp_path / "a.mcap"])
+    app.discovery = _disc(tmp_path / "a.mcap")
     app._apply_plan(SurveyPlan([Site(
         name="Jack_Block", project="t", date="2026-09-02",
         transects=[Transect(name="T1", start_tc="09:25:23", end_tc="09:35:37"),
@@ -194,7 +204,7 @@ def test_an_unfinished_plan_still_gets_the_dive_wide_report(app, monkeypatch, tm
                         lambda: (SimpleNamespace(), SimpleNamespace()))
 
     app.flight_dir = tmp_path
-    app.discovery = SimpleNamespace(mcaps=[tmp_path / "a.mcap"])
+    app.discovery = _disc(tmp_path / "a.mcap")
     app._apply_plan(SurveyPlan([Site(
         name="S", project="t", date="2026-09-02",
         transects=[Transect(name="T1", start_tc="", end_tc="")],

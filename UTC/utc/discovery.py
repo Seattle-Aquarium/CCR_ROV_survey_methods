@@ -64,13 +64,24 @@ class VideoChapter:
 class Discovery:
     root: Path
     mcaps: list[Path] = field(default_factory=list)
+    #: Pre-BlueOS-1.5 telemetry. Kept apart from `mcaps` on purpose: a tlog
+    #: carries telemetry but no video, so it can feed the Transects page and
+    #: never the compositing, and `ok` still means "this flight can be
+    #: composited".
+    tlogs: list[Path] = field(default_factory=list)
     videos: list[VideoChapter] = field(default_factory=list)
     mcap_dir: Path | None = None
+    tlog_dir: Path | None = None
     video_dir: Path | None = None
     logs_dir: Path | None = None
     photos_dir: Path | None = None
     notes: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+    @property
+    def telemetry(self) -> list[Path]:
+        """Everything a transect CSV can be cut from, newest format first."""
+        return list(self.mcaps) + list(self.tlogs)
 
     @property
     def ok(self) -> bool:
@@ -86,6 +97,11 @@ class Discovery:
                      + (f" in {self._rel(self.mcap_dir)}" if self.mcap_dir else ""))
         for m in self.mcaps:
             lines.append(f"           {m.name}  ({m.stat().st_size / 1e9:.2f} GB)")
+        if self.tlogs:
+            lines.append(f"  tlog   : {len(self.tlogs)} file(s)"
+                         + (f" in {self._rel(self.tlog_dir)}" if self.tlog_dir else ""))
+            for t in self.tlogs:
+                lines.append(f"           {t.name}  ({t.stat().st_size / 1e6:.0f} MB)")
         lines.append(f"  video  : {len(self.videos)} file(s)"
                      + (f" in {self._rel(self.video_dir)}" if self.video_dir else ""))
         for v in self.videos:
@@ -199,6 +215,23 @@ def _find_videos(root: Path, disc: Discovery) -> None:
         )
 
 
+def _find_tlogs(root: Path, disc: Discovery) -> None:
+    """Older flights recorded telemetry as .tlog, in the same places."""
+    for rel in _MCAP_DIRS:
+        d = (root / rel) if rel else root
+        if not d.is_dir():
+            continue
+        hits = sorted(p for p in d.glob("*.tlog") if p.is_file())
+        if hits:
+            disc.tlogs = hits
+            disc.tlog_dir = d
+            return
+    hits = sorted(p for p in root.rglob("*.tlog") if p.is_file())
+    if hits:
+        disc.tlogs = hits
+        disc.tlog_dir = hits[0].parent
+
+
 def _find_mcaps(root: Path, disc: Discovery) -> None:
     for rel in _MCAP_DIRS:
         d = (root / rel) if rel else root
@@ -238,10 +271,14 @@ def discover(root: str | Path) -> Discovery:
             break
 
     _find_mcaps(root, disc)
+    _find_tlogs(root, disc)
     _find_videos(root, disc)
 
     if not disc.mcaps:
-        disc.warnings.append("no .mcap telemetry found")
+        disc.warnings.append(
+            "no .mcap telemetry found; the .tlog can still be cut into "
+            "transect CSVs, but compositing needs an mcap for the ROV view"
+            if disc.tlogs else "no .mcap telemetry found")
     if not disc.videos:
         disc.warnings.append("no downward GoPro video found")
 

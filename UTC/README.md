@@ -9,13 +9,13 @@ The app has six screens on a left-hand rail, following the life of a flight:
 | Screen | What it does |
 |---|---|
 | **Flight setup** | Create a flight's folders, then enter its transect times once. Draws a dive profile with the transects marked, so a mistyped time is obvious before anything is processed. |
-| **Transects** | Cut the `.mcap` telemetry into one CSV per transect, plus a map of the site. Uses the times from Flight setup, so they are entered once. |
+| **Transects** | Cut the telemetry into one CSV per transect, plus a map of the site — `.mcap` from BlueOS 1.5 onwards, `.tlog` from before it. Uses the times from Flight setup, so they are entered once. |
 | **Import photos** | Pull stills off the camera card straight into transect folders, renamed and bannered. Copies, never moves. |
 | **Video** | Trim each transect from the GoPro, build composites, and cut short shareable clips. |
 | **Recording health** | Check each `.mcap` for damage, repair the ones the vehicle never closed, and — when a recording is beyond saving — read telemetry from the autopilot's own `.BIN` log instead. |
 | **Banner tools** | Add the telemetry banner to any folder of stills, later. |
 
-## Transects (mcap to CSV)
+## Transects (mcap or tlog to CSV)
 
 The **Transects** page runs the extractor in [`mcap_to_csv/`](../mcap_to_csv/)
 against the flight that is already open. It reads the survey plan from Flight
@@ -26,6 +26,19 @@ disagrees with the footage.
 
 It writes one CSV per transect plus a Leaflet map of the site. Column meanings
 and provenance are in [COLUMNS.md](../mcap_to_csv/COLUMNS.md).
+
+**Older flights work too.** Dives recorded before BlueOS 1.5 kept their telemetry
+in `.tlog` files, and those are read the same way — the two formats meet at the
+point the MAVLink frames are parsed, so everything after that is shared and a
+tlog produces exactly the same 44 columns. A dive that spans the upgrade can even
+mix them; they are merged on one timeline. Only compositing still needs an
+`.mcap`, because a tlog carries no video.
+
+**Transect IDs.** Give the survey code once in *Transect ID prefix* — `EBM_W25` —
+and each transect becomes `EBM_W25_T1`, `EBM_W25_T2`, in both the `Transect_ID`
+column and the filename. Left blank, the site name is used. Naming them by hand
+per transect is how `EBM_W25_T3` ends up beside `EMB_W25_T4`, with nothing
+downstream able to tell the two belong to one survey.
 
 `run_UTC.bat` installs the extractor alongside UTC. If the page reports it
 missing, install it by hand:

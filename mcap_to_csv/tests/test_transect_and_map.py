@@ -17,7 +17,7 @@ from ccr_m2c.mcap_read import read_mcaps
 from ccr_m2c.pipeline import TransectSpec, run
 from ccr_m2c.tide import add_empty_tide
 from ccr_m2c.transect import (
-    OUTPUT_COLUMNS, build_transect_mask, export_transect,
+    OUTPUT_COLUMNS, make_transect_id, build_transect_mask, export_transect,
     sanitize_filename,
 )
 
@@ -368,3 +368,42 @@ def test_run_with_no_windows_takes_the_whole_log(builder, tmp_path):
 
     assert len(result.saved) == 1
     assert len(pd.read_csv(result.saved[0].path)) == 30
+
+
+# ---- transect IDs ---------------------------------------------------------
+
+def test_the_survey_code_is_given_once_and_the_ordinal_filled_in():
+    """Typing the whole ID per transect is how EBM_W25_T3 ends up beside
+    EMB_W25_T4, with nothing downstream able to tell they are one survey."""
+    assert make_transect_id("EBM_W25", 1) == "EBM_W25_T1"
+    assert make_transect_id("EBM_W25", 2) == "EBM_W25_T2"
+
+
+def test_a_name_from_the_plan_keeps_its_own_wording():
+    assert make_transect_id("EBM_W25", 3, "T2") == "EBM_W25_T2"
+    assert make_transect_id("EBM_W25", 4, "deep_pass") == "EBM_W25_deep_pass"
+
+
+def test_applying_the_prefix_twice_does_not_double_it():
+    """Re-running over a plan whose names are already qualified is normal --
+    it happens every time a flight is reprocessed."""
+    once = make_transect_id("EBM_W25", 1, "T1")
+    assert make_transect_id("EBM_W25", 1, once) == once == "EBM_W25_T1"
+
+
+def test_no_prefix_leaves_a_plain_ordinal():
+    assert make_transect_id("", 4) == "T4"
+    assert make_transect_id("   ", 5, "T5") == "T5"
+
+
+def test_a_trailing_separator_is_not_doubled():
+    assert make_transect_id("EBM_W25_", 1) == "EBM_W25_T1"
+
+
+def test_the_id_reaches_the_csv_and_the_filename(dive, tmp_path):
+    df, res = dive
+    tid = make_transect_id("EBM_W25", 1)
+    r = export_transect(df, [("10:00:05", "10:00:20")], 1, tid, "Site", tmp_path,
+                        dvl_source=res.dvl_source)
+    assert r.path.name == "EBM_W25_T1.csv"
+    assert pd.read_csv(r.path)["Transect_ID"].eq("EBM_W25_T1").all()

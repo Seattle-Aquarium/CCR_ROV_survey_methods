@@ -96,6 +96,46 @@ OUTPUT_COLUMNS = [
     "Relative_alt_m", "VFR_alt", "NEDz", "Pressure_abs_hPa", "Messages",
 ]
 
+#: How a transect's own name is joined to the survey prefix.
+_ORDINAL = "T"
+
+
+def make_transect_id(prefix: str, number: int, name: str = "") -> str:
+    """The full Transect_ID, and the CSV filename with it.
+
+    A survey is identified by a code that is the same for every transect in it
+    -- ``EBM_W25`` -- and the transects are then just T1, T2, T3. Typing the
+    whole thing out per transect is how ``EBM_W25_T3`` ends up next to
+    ``EBM_W25_T4`` with one of them spelt ``EMB``, and nothing downstream can
+    tell that the two belong to the same survey.
+
+    So the prefix is given once and the ordinal is filled in:
+
+        >>> make_transect_id("EBM_W25", 1)
+        'EBM_W25_T1'
+        >>> make_transect_id("EBM_W25", 2, "T2")     # a name from the plan
+        'EBM_W25_T2'
+        >>> make_transect_id("EBM_W25", 3, "deep_pass")
+        'EBM_W25_deep_pass'
+        >>> make_transect_id("", 4)                  # no prefix given
+        'T4'
+        >>> make_transect_id("EBM_W25", 5, "EBM_W25_T5")   # already qualified
+        'EBM_W25_T5'
+    """
+    prefix = (prefix or "").strip().rstrip("_")
+    name = (name or "").strip()
+
+    if not name:
+        name = f"{_ORDINAL}{number}"
+    if not prefix:
+        return name
+    # Idempotent: re-running over a plan whose names are already qualified must
+    # not produce EBM_W25_EBM_W25_T1.
+    if name == prefix or name.startswith(prefix + "_"):
+        return name
+    return f"{prefix}_{name}"
+
+
 _FILENAME_INVALID_CHARS = re.compile(r'[<>:"/\\|?*]')
 
 

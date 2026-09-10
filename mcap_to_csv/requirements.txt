@@ -10,3 +10,4 @@ scipy>=1.10        # cubic spline over the NOAA one-minute tide
 requests>=2.28     # NOAA tide API
 # tkinter is part of the standard library on Windows and macOS.
 # On Debian/Ubuntu: sudo apt install python3-tk
+pymavlink>=2.4     # .tlog recordings from before BlueOS 1.5

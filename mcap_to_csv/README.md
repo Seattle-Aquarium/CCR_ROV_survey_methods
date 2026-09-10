@@ -193,6 +193,48 @@ Debian version underneath it.
 
 ---
 
+## Older .tlog recordings
+
+Dives from before BlueOS 1.5 recorded telemetry as `.tlog`, and those are read
+the same way:
+
+```bash
+python -m ccr_m2c logs/*.tlog --site EBM --date 20240924 --out ./out     --prefix EBM_W25 --transect 11:30:00-11:45:00 --transect 12:00:00-12:15:00
+```
+
+The two formats meet at the point the MAVLink frames are parsed — a tlog reader
+yields the same `(type, fields, time)` the mcap readers do — so the per-second
+folding, depth precedence, transect cutting, tide standardisation, map and health
+report are all shared. The same 44 columns come out either way, and a dive split
+across the upgrade can mix both in one run.
+
+Three things need translating on the way in, and are:
+
+* pymavlink returns enums as integers where an mcap carries their names, so a fix
+  type would otherwise read `3` from one file and `GPS_FIX_TYPE_3D_FIX` from the
+  other.
+* A tlog has no channel list, so which sources it carries has to be found by
+  reading some of it. That decision picks altitude and speed for the whole dive,
+  and getting it wrong lets two sources feed one column at once.
+* A tlog interleaves every system on the link, so the sending system is read from
+  the frame header and the autopilot preferred, exactly as the topic names let an
+  mcap do.
+
+Only compositing still needs an `.mcap`: a tlog carries telemetry but no video.
+
+## Naming the transects
+
+Give the survey code once and let the ordinal be filled in:
+
+```bash
+--prefix EBM_W25 --transect 11:30:00-11:45:00      # -> EBM_W25_T1
+```
+
+The ID lands in the `Transect_ID` column and is the CSV's filename. A
+`--transect` may still name itself (`T9=11:00:00-11:10:00` becomes
+`EBM_W25_T9`), and applying a prefix that is already there does not double it,
+so reprocessing a flight is safe.
+
 ## Checking the navigation: `--health`
 
 ```bash

@@ -151,7 +151,7 @@ class App(ctk.CTk):
         for name, sub, cls in (
             # Transects first: the CSVs need only the plan and the mcaps,
             # and the same windows go on to drive the video overlays.
-            ("Transects", "mcap to CSV", TransectPage),
+            ("Transects", "mcap / tlog to CSV", TransectPage),
             ("Import photos", "card or folder", ImportPage),
             ("Video", "trim · composite", VideoPage),
             ("Recording health", "mcap · repair", HealthPage),
