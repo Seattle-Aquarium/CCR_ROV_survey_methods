@@ -1,0 +1,55 @@
+[project]
+name = "rov_flight_ops"
+version = "0.1.0"
+description = "ROV Flight Operations (working title) -- ROV connectivity, live monitoring, flight logs and BlueOS file management"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "customtkinter>=5.2",
+    "pillow>=10.0",
+    "numpy>=1.24",
+    "mcap>=1.1",
+    # ArduPilot dataflash logs: parameters, the BIN telemetry fallback, and the
+    # transect preview read straight off the vehicle.
+    "pymavlink>=2.4",
+    # The topside monitor: CPU, memory, disk, per-adapter network and the
+    # Cockpit process group.
+    "psutil>=5.9",
+    # The battery reading goes through WMI, which needs COM on its own thread.
+    "pywin32>=306; sys_platform == 'win32'",
+    # The flight report's timeline figure and PDF.
+    "matplotlib>=3.8",
+    # Windows has no system timezone database. Without this, local transect
+    # times resolve to the wrong instant.
+    "tzdata>=2024.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "pyinstaller>=6.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["rov_flight_ops*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# -p no:cacheprovider keeps a .pytest_cache out of a Dropbox-synced folder.
+addopts = "-q --strict-markers -p no:cacheprovider"
+markers = [
+    "live: needs a real flight folder or a display; run with --runlive",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+exclude = ["build", "dist", "assets"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501", "B008", "E702", "E731"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402", "F401"]

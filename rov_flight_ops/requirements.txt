@@ -1,0 +1,15 @@
+# ROV Flight Operations (working title)
+# Install with:  python -m pip install -r requirements.txt
+mcap>=1.1            # BlueOS telemetry container
+pymavlink>=2.4       # ArduPilot .BIN dataflash logs
+Pillow>=10           # banner, charts and the dive profile
+numpy>=1.24          # telemetry indexing
+psutil>=5.9          # the topside monitor
+pywin32>=306         # COM, for the battery reading
+matplotlib>=3.8      # the flight report
+customtkinter>=5.2   # GUI
+tzdata>=2024.1       # Windows ships no timezone database
+
+# The Analyze transects tab drives the transect extractor, a sibling package in
+# this repo rather than something on PyPI. run_rov_flight_ops.bat installs it:
+#     python -m pip install -e ../mcap_to_csv

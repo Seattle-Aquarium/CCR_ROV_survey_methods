@@ -1,0 +1,11 @@
+build/
+dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+*.part
+tests/*.png
+tests/out/
+network_check.txt

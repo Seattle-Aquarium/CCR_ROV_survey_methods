@@ -1,0 +1,15 @@
+build/
+dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+*.part
+gui_dark.png
+gui_light.png
+tests/*.png
+tests/out/
+# RAW develop test imagery
+tests/GPR/
+tests/TIF/

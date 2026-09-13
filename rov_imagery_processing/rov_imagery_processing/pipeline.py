@@ -1,0 +1,573 @@
+"""
+End-to-end orchestration.
+
+Everything the GUI needs sits behind `run()`: discovery, extraction, sync
+verification, the 1 Hz CSV, and one composite per transect per resolution.
+
+Design notes:
+
+* Progress is reported as a single 0..1 fraction with a message, computed from
+  weighted stages, so the GUI needs no knowledge of the internals.
+* A failure in one transect does not abandon the rest of the run -- it is
+  recorded and the next one is attempted. A field user with six transects should
+  not lose five of them to one bad set of times.
+* Everything expensive is cached under `cache_root`, keyed by flight folder, so
+  a second run (different resolution, corrected times) skips straight to
+  compositing.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import time
+import traceback
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from . import (
+    binlog,
+    csv_export,
+    discovery,
+    mcap_extract,
+    overlay,
+    rov_video,
+    sorting,
+    videoclip,
+)
+from . import compose as compose_mod
+from . import ffmpeg_tools as ff
+from . import sync as sync_mod
+from .config import RENDITIONS, AppConfig
+from .power import keep_awake
+from .survey import (
+    Chapter,
+    ResolvedTransect,
+    SurveyPlan,
+    format_hhmmss,
+    local_midnight_epoch,
+    resolve_from_trims,
+    resolve_plan,
+    utc_offset_hours,
+)
+from .telemetry import TelemetryStore
+
+ProgressCB = Callable[[float, str], None]
+
+
+@dataclass
+class RunRequest:
+    flight_dir: Path
+    plan: SurveyPlan
+    renditions: tuple[str, ...] = ("1080p",)
+    app: AppConfig = field(default_factory=AppConfig)
+    write_csv: bool = True
+    force_extract: bool = False
+    #: Stamp telemetry onto the flight's stills as well as the video.
+    process_photos: bool = False
+    #: How to sort them. Shared with the standalone sort so the two paths
+    #: cannot drift into producing different layouts.
+    sort_options: sorting.SortOptions = field(
+        default_factory=lambda: sorting.SortOptions())
+
+
+@dataclass
+class RunResult:
+    outputs: list[Path] = field(default_factory=list)
+    csv_path: Path | None = None
+    sync: sync_mod.SyncReport = field(default_factory=sync_mod.SyncReport)
+    resolved: list[ResolvedTransect] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    elapsed_s: float = 0.0
+    cancelled: bool = False
+    photos: sorting.SortReport | None = None
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors and not self.cancelled
+
+    def summary(self) -> str:
+        lines = []
+        if self.cancelled:
+            lines.append("Run cancelled.")
+        lines.append(f"{len(self.outputs)} composite(s) written "
+                     f"in {self.elapsed_s / 60:.1f} min")
+        for p in self.outputs:
+            try:
+                lines.append(f"   {p.name}  ({p.stat().st_size / 1e6:.0f} MB)")
+            except OSError:
+                lines.append(f"   {p.name}")
+        if self.csv_path:
+            lines.append(f"telemetry CSV: {self.csv_path.name}")
+        if self.photos is not None:
+            lines.append(self.photos.summary())
+        if self.sync.checked:
+            lines.append(self.sync.summary())
+        for w in self.warnings:
+            lines.append(f"WARNING: {w}")
+        for e in self.errors:
+            lines.append(f"ERROR: {e}")
+        return "\n".join(lines)
+
+
+class _Stages:
+    """Weighted progress across the pipeline."""
+
+    def __init__(self, cb: ProgressCB | None):
+        self.cb = cb
+        self.weights: dict[str, float] = {}
+        self.done: dict[str, float] = {}
+
+    def plan(self, **weights: float) -> None:
+        self.weights = dict(weights)
+        self.done = {k: 0.0 for k in weights}
+
+    def sub(self, name: str) -> ProgressCB:
+        def cb(frac: float, msg: str = "") -> None:
+            # Never let a stage's progress go backwards. Sub-steps that each
+            # count 0..1 would otherwise rewind the bar, which reads as a hang.
+            self.done[name] = max(self.done.get(name, 0.0),
+                                  max(0.0, min(1.0, frac)))
+            self._emit(msg)
+        return cb
+
+    def finish(self, name: str, msg: str = "") -> None:
+        self.done[name] = 1.0
+        self._emit(msg)
+
+    def _emit(self, msg: str) -> None:
+        if not self.cb:
+            return
+        total = sum(self.weights.values()) or 1.0
+        acc = sum(self.weights[k] * self.done.get(k, 0.0) for k in self.weights)
+        self.cb(acc / total, msg)
+
+
+def cache_dir_for(flight_dir: Path, root: Path) -> Path:
+    """A stable per-flight cache path.
+
+    Keyed by name plus a hash of the full path, so two flights that happen to
+    share a folder name (``2026`` under different projects) do not collide.
+    """
+    h = hashlib.sha1(str(Path(flight_dir).resolve()).encode("utf-8")).hexdigest()[:8]
+    return Path(root) / f"{Path(flight_dir).name}_{h}"
+
+
+def telemetry_csv_for(flight_dir: Path, cache_root: Path) -> tuple[Path | None, str]:
+    """The telemetry a flight should be read from, and where it came from.
+
+    One place decides this, because the answer is not "the cache's
+    telemetry.csv": a flight whose mcap failed can be pointed at the
+    autopilot's dataflash log instead, and every caller has to honour that.
+    Reading the cache file directly is how the banner tool ended up ignoring a
+    BIN override the operator had explicitly chosen.
+    """
+    cache = cache_dir_for(Path(flight_dir), cache_root)
+    over = binlog.override_active(cache)
+    if over:
+        return Path(over["csv"]), f"{Path(over['source']).name} (autopilot log)"
+    csv = cache / "telemetry.csv"
+    return (csv, "mcap") if csv.is_file() else (None, "none")
+
+
+def ensure_telemetry(
+    flight_dir: Path,
+    app: AppConfig | None = None,
+    *,
+    windows: Sequence[tuple[float, float]] | None = None,
+    progress: ProgressCB | None = None,
+    force: bool = False,
+) -> tuple[TelemetryStore, list[str]]:
+    """Telemetry for a flight, reading its mcap only if the cache is cold.
+
+    Sorting imagery and bannering an edited folder both need telemetry but
+    neither needs the video pipeline, so this is the shared way in: the first
+    task that touches a flight pays for the extraction and everything after it
+    is a cache hit.
+
+    Returns (store, warnings). Raises if there is no mcap to read.
+    """
+    app = app or AppConfig()
+
+    # A flight whose telemetry was rebuilt from the autopilot's own dataflash
+    # log reads that instead. Checked before the mcap is even looked for,
+    # because the reason for choosing BIN is usually that the mcap is the
+    # thing that failed.
+    cache = cache_dir_for(flight_dir, app.cache_root)
+    over = binlog.override_active(cache)
+    if over:
+        note = (f"telemetry is coming from {Path(over['source']).name} "
+                f"(the autopilot's own log), not the mcap")
+        if over.get("depth_agreement") is not None:
+            note += f"; clock aligned to r={over['depth_agreement']:.4f}"
+        return TelemetryStore.load(over["csv"]), [note]
+
+    disc = discovery.discover(flight_dir)
+    if not disc.mcaps:
+        raise FileNotFoundError(
+            f"No .mcap telemetry found in {flight_dir}. Put the recording in "
+            f"the flight's logs/ folder."
+        )
+
+    # Narrow to the recordings that actually cover the work before insisting
+    # anything is downloaded. A day of testing leaves a folder full of them,
+    # and requiring the lot means waiting on gigabytes that will never be read.
+    warnings: list[str] = []
+    chosen = list(disc.mcaps)
+    if windows:
+        chosen, skipped, warns = mcap_extract.select_for_windows(chosen, windows)
+        warnings.extend(warns)
+        if not chosen:
+            raise FileNotFoundError(
+                "None of the recordings in logs/ overlap the transect times. "
+                "Check the times, or that the right mcap was copied over."
+            )
+
+    blocked = discovery.check_local(chosen)
+    if blocked:
+        raise RuntimeError("\n".join(blocked))
+
+    ex = mcap_extract.extract(chosen, cache, progress=progress, force=force)
+    return TelemetryStore.load(ex.telemetry_csv), warnings + list(ex.warnings)
+
+
+def plan_windows(plan: SurveyPlan) -> list[tuple[str, float, float]]:
+    """(name, epoch_start, epoch_end) for every transect in a plan.
+
+    Derived from the plan alone, so imagery can be sorted before -- or without
+    -- any video being processed. The composite path resolves its own windows
+    against the GoPro chapters instead, because it also has to know which file
+    each second lives in.
+    """
+    out: list[tuple[str, float, float]] = []
+    for site in plan.sites:
+        midnight = local_midnight_epoch(site.date_obj(), plan.timezone)
+        for t in site.transects:
+            out.append((t.name, midnight + t.start_s(), midnight + t.end_s()))
+    return out
+
+
+def describe_chapters(paths: Sequence[Path], ffmpeg: str | None = None) -> list[Chapter]:
+    """Probe each GoPro file and place it on the TC-25 clock."""
+    out: list[Chapter] = []
+    for p in paths:
+        mi = ff.probe(p, ffmpeg=ffmpeg)
+        tc = ff.timecode_to_seconds(mi.timecode, mi.fps)
+        out.append(Chapter(
+            path=Path(p),
+            duration=mi.duration or 0.0,
+            fps=mi.fps or 23.976,
+            width=mi.width or 3840,
+            height=mi.height or 2160,
+            rotation=mi.rotation,
+            tc_start_s=tc,
+        ))
+    return out
+
+
+def run(
+    req: RunRequest,
+    *,
+    progress: ProgressCB | None = None,
+    cancel=None,
+) -> RunResult:
+    """Execute a full job, keeping the machine awake while it works.
+
+    Never raises for expected problems -- inspect the returned `RunResult`.
+    """
+    with keep_awake() as awake:
+        res = _run(req, progress=progress, cancel=cancel)
+    if not awake:
+        res.warnings.append(
+            "Could not stop this machine from sleeping during the run. If it "
+            "slept, the encode paused until it woke and the run took longer "
+            "than it needed to."
+        )
+    return res
+
+
+def _run(
+    req: RunRequest,
+    *,
+    progress: ProgressCB | None = None,
+    cancel=None,
+) -> RunResult:
+    res = RunResult()
+    started = time.time()
+    st = _Stages(progress)
+
+    try:
+        # ---- 1. discovery -------------------------------------------
+        st.plan(discover=1, extract=22, rov=18, sync=14, csv=5,
+                photos=12 if req.process_photos else 0,
+                render=40)
+        disc = discovery.discover(req.flight_dir)
+        res.warnings.extend(disc.warnings)
+        if not disc.mcaps:
+            res.errors.append("No .mcap telemetry found in the flight folder.")
+            return _finish(res, started)
+        # Per-transect trims are a valid source on their own: a flight whose
+        # full-length footage was never kept, or never uploaded, still has
+        # everything the composite needs.
+        trim_paths = videoclip.find_trims(req.flight_dir)
+        if not disc.videos and not trim_paths:
+            res.errors.append(
+                "No downward GoPro video found in the flight folder, and no "
+                "per-transect trims in videos/transects/.")
+            return _finish(res, started)
+        cloud = discovery.check_local(
+            list(disc.mcaps) + disc.video_paths + list(trim_paths.values()))
+        if cloud:
+            # Proceeding would appear to hang for hours, so stop and say why.
+            res.errors.append(
+                "Some inputs are still in the cloud rather than on this "
+                "machine:\n  " + "\n  ".join(cloud)
+            )
+            return _finish(res, started)
+        st.finish("discover", f"found {len(disc.mcaps)} mcap(s), "
+                              + (f"{len(trim_paths)} transect trim(s)"
+                                 if trim_paths else
+                                 f"{len(disc.videos)} video file(s)"))
+
+        errs = req.plan.validate()
+        if errs:
+            res.errors.extend(errs)
+            return _finish(res, started)
+
+        cache = cache_dir_for(req.flight_dir, req.app.cache_root)
+        cache.mkdir(parents=True, exist_ok=True)
+        ffmpeg = ff.find_ffmpeg()
+
+        # ---- 2. mcap -------------------------------------------------
+        ex = mcap_extract.extract(disc.mcaps, cache, progress=st.sub("extract"),
+                                  force=req.force_extract)
+        res.warnings.extend(ex.warnings)
+        if ex.video.frames == 0:
+            res.errors.append(
+                "The mcap contains no video stream, so there is no inset to "
+                "composite. Check that the recorder was capturing video."
+            )
+            return _finish(res, started)
+        store = TelemetryStore.load(ex.telemetry_csv)
+        st.finish("extract", f"{ex.video.frames:,} ROV frames, "
+                             f"{len(store.series)} telemetry fields")
+
+        # ---- 3. chapters + transects ---------------------------------
+        # Transects are resolved BEFORE the proxy is built, so the proxy can
+        # cover only the span they need instead of the whole recording.
+        # Prefer per-transect trims when they exist. A trim already is one
+        # transect, so it needs no timecode search -- and it must not get one:
+        # a stream copy keeps the source chapter's timecode, so every trim from
+        # one recording reports the same start and a transect would resolve
+        # against all of them at once.
+        if trim_paths:
+            trims = {name: ch for name, ch in
+                     zip(trim_paths, describe_chapters(list(trim_paths.values()),
+                                                       ffmpeg), strict=True)}
+            gopro_fps = next((c.fps for c in trims.values() if c.fps), 23.976)
+            # No chapters: a trim's timecode is its source recording's, so
+            # there is nothing here the light-based sync check can verify.
+            chapters = []
+            res.resolved = resolve_from_trims(req.plan, trims)
+            res.warnings.append(
+                f"compositing from {len(trims)} per-transect trim(s) in "
+                f"videos/transects/, not from full-length footage")
+        else:
+            chapters = describe_chapters(disc.video_paths, ffmpeg)
+            gopro_fps = next((c.fps for c in chapters if c.fps), 23.976)
+
+            # Chapters that all claim one start time are trims that lost their
+            # provenance, not chapters. Resolving against them silently
+            # produces a composite several times too long.
+            tcs = {c.tc_start_s for c in chapters if c.tc_start_s is not None}
+            if len(chapters) > 1 and len(tcs) == 1:
+                res.errors.append(
+                    "Every video file reports the same start timecode "
+                    f"({format_hhmmss(next(iter(tcs)))}), so they cannot be "
+                    "placed on the TC-25 clock individually. These look like "
+                    "trimmed copies; put them in videos/transects/<name>/ so "
+                    "UTC can match them to transects by name.")
+                return _finish(res, started)
+
+            res.resolved = resolve_plan(req.plan, chapters)
+        for r in res.resolved:
+            for w in r.warnings:
+                res.warnings.append(f"{r.site.name}/{r.transect.name}: {w}")
+
+        renderable = [r for r in res.resolved if r.segments]
+        if not renderable:
+            res.errors.append(
+                "None of the transect times fall inside the recorded video. "
+                "Check the TC-25 times and the flight date."
+            )
+
+        # ---- 4. ROV proxy over just the needed span ------------------
+        needed = [(r.epoch_start, r.epoch_end) for r in renderable]
+        rov = rov_video.prepare(
+            cache, gopro_fps, needed_epochs=needed,
+            codec=req.app.proxy_codec, crf=req.app.proxy_crf,
+            preset=req.app.proxy_preset, use_gpu=req.app.proxy_use_gpu,
+            progress=st.sub("rov"), force=req.force_extract, cancel=cancel,
+        )
+        res.warnings.extend(rov.warnings)
+        st.finish("rov", "ROV proxy ready")
+
+        # ---- 5. sync check -------------------------------------------
+        first_date = req.plan.sites[0].date_obj()
+        midnight = local_midnight_epoch(first_date, req.plan.timezone)
+        offset_h = (req.app.sync.utc_offset_hours
+                    if req.app.sync.utc_offset_hours is not None
+                    else utc_offset_hours(first_date, req.plan.timezone))
+        if chapters:
+            res.sync = sync_mod.validate(
+                chapters, store.lights_series(), midnight, cache, req.app.sync,
+                ffmpeg=ffmpeg, progress=st.sub("sync"), cancel=cancel,
+            )
+            res.warnings.extend(res.sync.warnings)
+            st.finish("sync", res.sync.message or "sync checked")
+        else:
+            # Compositing from trims. The check compares a chapter's timecode
+            # against the ROV's lights, and a trim carries its source
+            # recording's timecode -- so running it would confirm nothing while
+            # looking like it had. Say that rather than report a pass.
+            res.warnings.append(
+                "the light-based TC-25 check was skipped: a trim carries its "
+                "source recording's timecode, so there is nothing to verify. "
+                "Transect times come straight from the plan.")
+            st.finish("sync", "sync check not applicable to trims")
+
+        # ---- 6. telemetry CSV ----------------------------------------
+        _composites, logs_dir = discovery.output_dirs(req.flight_dir, create=True)
+        if req.write_csv:
+            stem = f"{first_date.isoformat()}_{_slug(req.plan.sites[0].project)}_telemetry_1Hz"
+            try:
+                out = csv_export.export_1hz(
+                    store, logs_dir / f"{stem}.csv",
+                    plan=req.plan, resolved=res.resolved,
+                    utc_offset_hours=offset_h,
+                    progress=st.sub("csv"), cancel=cancel,
+                )
+                res.csv_path = out.path
+            except ff.CancelledError:
+                raise
+            except Exception as ex_:
+                res.warnings.append(f"telemetry CSV failed: {ex_}")
+        st.finish("csv", "telemetry CSV written" if res.csv_path else "CSV skipped")
+
+        # ---- 6b. flight stills ---------------------------------------
+        # Photos are placed on the timeline from their own EXIF, so this needs
+        # nothing from the video path -- but the transect windows come from the
+        # resolved transects, which have been checked against the lights.
+        if req.process_photos:
+            # Same sort the 'Sort imagery' button runs, so a combined run and a
+            # separate one cannot produce different folder layouts. Windows come
+            # from the plan rather than the resolved transects: sorting does not
+            # need the video, and a transect whose footage is missing should
+            # still get its stills.
+            try:
+                rep = sorting.sort_flight(
+                    req.flight_dir, plan_windows(req.plan),
+                    store=store, options=req.sort_options,
+                    progress=st.sub("photos"), cancel=cancel,
+                )
+                res.photos = rep
+                res.warnings.extend(rep.warnings)
+                res.errors.extend(rep.errors)
+            except ff.CancelledError:
+                raise
+            except Exception as ex_:
+                res.warnings.append(f"sorting imagery failed: {ex_}")
+        st.finish("photos", "photos done" if res.photos else "photos skipped")
+
+        # ---- 7. composites -------------------------------------------
+        rends = [RENDITIONS[k] for k in req.renditions if k in RENDITIONS]
+        if not rends:
+            res.errors.append("No output resolution selected.")
+            return _finish(res, started)
+
+        jobs = [(r, rd) for r in renderable for rd in rends]
+        if jobs:
+            per = 1.0 / len(jobs)
+            for i, (r, rd) in enumerate(jobs):
+                if cancel is not None and cancel.is_set():
+                    raise ff.CancelledError("cancelled")
+                base = i * per
+                label = f"{r.site.name}/{r.transect.name} {rd.label}"
+
+                # Bind everything the closure needs: it is called inside
+                # this iteration today, but a deferred call later would
+                # otherwise silently report the last job's label.
+                def jp(frac: float, msg: str = "", _b=base,
+                       _lab=label) -> None:
+                    st.sub("render")(_b + frac * per, msg or _lab)
+
+                try:
+                    out = _render_one(r, rd, rov, store, cache, _composites,
+                                      req.app, jp, cancel)
+                    res.outputs.append(out)
+                except ff.CancelledError:
+                    raise
+                except Exception as ex_:
+                    res.errors.append(f"{label}: {ex_}")
+                    ff.log_cb and ff.log_cb(traceback.format_exc())
+        st.finish("render", "composites complete")
+
+    except ff.CancelledError:
+        res.cancelled = True
+    except Exception as ex_:                      # unexpected: report, don't crash
+        res.errors.append(f"{type(ex_).__name__}: {ex_}")
+
+    return _finish(res, started)
+
+
+def _render_one(
+    r: ResolvedTransect,
+    rd,
+    rov: rov_video.RovVideo,
+    store: TelemetryStore,
+    cache: Path,
+    out_dir: Path,
+    app: AppConfig,
+    progress: ProgressCB,
+    cancel,
+) -> Path:
+    """Overlays + composite for one transect at one resolution."""
+    dur = sum(s.dur_s for s in r.segments)
+    ovl_dir = cache / "overlay" / f"{r.output_stem('x')}"
+
+    def footer(epoch: float) -> str:
+        import datetime as _dt
+        clock = _dt.datetime.fromtimestamp(epoch, _dt.timezone.utc)
+        return (f"{r.site.project}  |  {r.site.name}  |  {r.transect.name}"
+                f"  |  {clock.strftime('%H:%M:%S')} UTC")
+
+    def op(f: float, m: str = "") -> None:
+        progress(f * 0.35, m)
+
+    seq = overlay.render_sequence(
+        ovl_dir, store, r.epoch_start, dur, app.layout,
+        footer_text=footer if app.layout.show_footer else None,
+        progress=op, cancel=cancel,
+        workers=app.overlay_workers,
+    )
+
+    def cp(f: float, m: str = "") -> None:
+        progress(0.35 + f * 0.65, m)
+
+    return compose_mod.compose_transect(
+        resolved=r, seq=seq, rov=rov, out_dir=out_dir,
+        scratch=cache / "scratch", app=app, rendition=rd,
+        progress=cp, cancel=cancel,
+    )
+
+
+def _slug(s: str) -> str:
+    import re
+    s = re.sub(r"[\\/:*?\"<>|]+", "", str(s)).strip()
+    return re.sub(r"\s+", "-", s) or "unnamed"
+
+
+def _finish(res: RunResult, started: float) -> RunResult:
+    res.elapsed_s = time.time() - started
+    return res

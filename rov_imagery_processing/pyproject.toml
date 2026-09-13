@@ -1,0 +1,55 @@
+[project]
+name = "rov_imagery_processing"
+version = "0.1.0"
+description = "ROV Imagery Processing (working title) -- import, develop, banner and composite ROV survey imagery"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "customtkinter>=5.2",
+    "pillow>=10.0",
+    "numpy>=1.24",
+    "av>=11.0",
+    # Telemetry for banners and overlays comes from the flight's recordings.
+    "mcap>=1.1",
+    # ...or from the autopilot's own .BIN log, when the recording failed.
+    "pymavlink>=2.4",
+    "imageio-ffmpeg>=0.4.9",
+    # Windows has no system timezone database. Without this, local transect
+    # times resolve to the wrong instant.
+    "tzdata>=2024.1",
+    # AI Denoise in Lightroom Classic has no scripting interface, so the RAW
+    # develop batch drives its dialog through Windows UI Automation.
+    "pywinauto>=0.6.9; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "pyinstaller>=6.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["rov_imagery_processing*"]
+
+[tool.setuptools.package-data]
+"rov_imagery_processing.lightroom" = ["plugin/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers -p no:cacheprovider"
+markers = [
+    "live: needs a real flight folder or a display; run with --runlive",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+exclude = ["build", "dist", "assets"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501", "B008", "E702", "E731"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402", "F401"]

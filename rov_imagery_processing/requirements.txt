@@ -1,0 +1,11 @@
+# ROV Imagery Processing (working title)
+# Install with:  python -m pip install -r requirements.txt
+mcap>=1.1            # BlueOS telemetry container
+pymavlink>=2.4       # ArduPilot .BIN dataflash logs -- the telemetry fallback
+av>=11               # exact-PTS remux of the ROV camera stream (PyAV)
+imageio-ffmpeg>=0.4  # ships a static ffmpeg; skipped if ffmpeg is on PATH
+Pillow>=10           # overlay and banner rendering
+numpy>=1.24          # telemetry indexing and the sync check
+customtkinter>=5.2   # GUI
+tzdata>=2024.1       # Windows ships no timezone database
+pywinauto>=0.6.9     # drives Lightroom's Enhance dialog for AI Denoise
