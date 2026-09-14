@@ -87,6 +87,14 @@ class Vehicle:
         self.fs = build_fs()
         self.armed = False
         self.seen: list[tuple[str, str]] = []
+        #: mavlink2rest's heartbeat: its counter advances on a live vehicle.
+        self.hb_counter = 100
+        self.heartbeat_stale = False      # a cached heartbeat that never changes
+        self.heartbeat_status = True      # an old mavlink2rest with no status block
+        self.heartbeat_down = False       # no heartbeat endpoint at all
+        self.clock_down = False
+        #: Called with the path after each successful delete.
+        self.on_delete = None
         #: Folders exist in their own right, so one emptied by a delete still
         #: lists -- as nothing -- the way File Browser's does.
         self.dirs = {str(Path(p).parent).replace("\\", "/") for p in self.fs}
@@ -94,6 +102,14 @@ class Vehicle:
             while d.count("/") > 1:
                 d = d.rsplit("/", 1)[0]
                 self.dirs.add(d)
+
+    def add(self, path: str, data: bytes, modified: float) -> None:
+        """Put one more file on the vehicle, folders and all."""
+        self.fs[path] = {"data": data, "modified": modified}
+        d = str(Path(path).parent).replace("\\", "/")
+        while d.count("/") >= 1 and d != "/":
+            self.dirs.add(d)
+            d = d.rsplit("/", 1)[0] or "/"
 
     def listing(self, path: str):
         path = path.rstrip("/") or "/"
@@ -166,11 +182,20 @@ def handler_for(v: Vehicle):
             if self.path.endswith("/vehicle_name"):
                 return self._send(200, b'"Nereo"')
             if self.path.endswith("/unix_time_seconds"):
+                if v.clock_down:
+                    return self._send(404)
                 return self._send(200, str(time.time()).encode(), "text/plain")
             if self.path.endswith("/HEARTBEAT"):
+                if v.heartbeat_down:
+                    return self._send(404)
                 bits = 0b1000_0000 if v.armed else 0
-                return self._send(200, json.dumps(
-                    {"message": {"base_mode": {"bits": bits}}}).encode())
+                body = {"message": {"base_mode": {"bits": bits}}}
+                if not v.heartbeat_stale:
+                    v.hb_counter += 1         # a live autopilot: one more each read
+                if v.heartbeat_status:
+                    body["status"] = {"time": {"counter": v.hb_counter,
+                                               "frequency": 1.0}}
+                return self._send(200, json.dumps(body).encode())
             return self._send(404)
 
         def do_DELETE(self):
@@ -180,6 +205,8 @@ def handler_for(v: Vehicle):
             path = self._fb_path("/api/resources").rstrip("/")
             if path in v.fs:
                 del v.fs[path]
+                if v.on_delete is not None:
+                    v.on_delete(path)
                 return self._send(200)
             if v.listing(path) == []:
                 v.dirs.discard(path)

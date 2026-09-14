@@ -391,6 +391,83 @@ def select_channels_streaming(
 #  Extraction
 # --------------------------------------------------------------------------
 
+#: What a cache marker must say before its products are trusted. Bumped when
+#: what extraction writes changes, so an older extractor's cache is rebuilt.
+#: Markers without it -- UTC's, or this program's before the fingerprint was
+#: added -- are simply rebuilt once.
+CACHE_SCHEMA = 2
+
+#: A lock not refreshed for this long belongs to a process that has gone.
+LOCK_STALE_S = 120.0
+
+
+class ExtractionBusy(RuntimeError):
+    """Another program is already extracting this flight's telemetry."""
+
+
+def source_fingerprint(mcaps: Sequence[Path]) -> list[dict]:
+    """Path, size and modification time of every source, in order.
+
+    What the cache is valid *for*. A recording recopied, repaired or still
+    growing at the same path changes its size or time, and the cache built
+    from its earlier bytes stops matching -- which is the case that used to
+    return an old, shorter telemetry table without a word.
+    """
+    out = []
+    for m in mcaps:
+        st = Path(m).stat()
+        out.append({"path": str(m), "size": st.st_size, "mtime_ns": st.st_mtime_ns})
+    return out
+
+
+class _CacheLock:
+    """One extraction per flight cache, across every program sharing it.
+
+    A lock file created exclusively and refreshed while the work runs. One
+    left behind by a crash goes stale after `LOCK_STALE_S` and is taken over.
+    """
+
+    def __init__(self, cache_dir: Path):
+        self.path = Path(cache_dir) / "extract.lock"
+        self._touched = 0.0
+
+    def __enter__(self):
+        import os
+        import time
+        for _attempt in range(2):
+            try:
+                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode())
+                os.close(fd)
+                self._touched = time.monotonic()
+                return self
+            except FileExistsError:
+                try:
+                    age = time.time() - self.path.stat().st_mtime
+                except OSError:
+                    continue
+                if age < LOCK_STALE_S:
+                    raise ExtractionBusy(
+                        f"Another program is extracting this flight's telemetry "
+                        f"right now ({self.path}). Try again when it has "
+                        f"finished.") from None
+                self.path.unlink(missing_ok=True)
+        raise ExtractionBusy(f"Could not take the extraction lock {self.path}.")
+
+    def touch(self) -> None:
+        import os
+        import time
+        if time.monotonic() - self._touched > 5.0:
+            try:
+                os.utime(self.path)
+            except OSError:
+                pass
+            self._touched = time.monotonic()
+
+    def __exit__(self, *_exc):
+        self.path.unlink(missing_ok=True)
+        return False
+
 
 def extract(
     mcaps: Sequence[Path],
@@ -416,7 +493,9 @@ def extract(
     if marker.is_file() and not force:
         try:
             prev = json.loads(marker.read_text())
-            if prev.get("mcaps") == [str(m) for m in mcaps] and frames_csv.is_file():
+            if (prev.get("schema") == CACHE_SCHEMA
+                    and prev.get("sources") == source_fingerprint(mcaps)
+                    and all(p.is_file() for p in (h264_path, frames_csv, telem_csv))):
                 if progress:
                     progress(1.0, "telemetry cache hit")
                 vi = VideoStreamInfo(
@@ -432,6 +511,26 @@ def extract(
         except Exception:
             pass  # unreadable marker: just re-extract
 
+    with _CacheLock(cache_dir) as lock:
+        outer = progress
+
+        def progress(frac, msg=""):
+            lock.touch()
+            if outer:
+                outer(frac, msg)
+
+        return _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv,
+                        marker, progress)
+
+
+def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
+             progress) -> ExtractResult:
+    """The extraction itself, under the cache lock."""
+    # The marker goes first and comes back last: an extraction that dies part
+    # way leaves products with no marker, which is a cache miss next time
+    # rather than a half-written table taken as whole.
+    marker.unlink(missing_ok=True)
+    sources = source_fingerprint(mcaps)
     ordered, warnings = select_mcaps(mcaps)
     vi = VideoStreamInfo()
     if not ordered:
@@ -595,7 +694,11 @@ def extract(
 
     res = ExtractResult(cache_dir, ordered, h264_path, frames_csv, telem_csv, vi,
                         t_start, t_end, n_rows, warnings)
-    marker.write_text(json.dumps(res.to_json(), indent=2))
+    payload = res.to_json()
+    payload.update(schema=CACHE_SCHEMA, sources=sources)
+    tmp = marker.with_name(marker.name + ".part")
+    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.replace(marker)
     if progress:
         progress(1.0, f"extracted {vi.frames:,} frames, {n_rows:,} telemetry rows")
     return res

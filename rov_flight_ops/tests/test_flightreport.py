@@ -307,8 +307,47 @@ def test_a_recording_that_simply_ended_is_not_called_a_failsafe():
     base = T0.timestamp()
     day.recordings = [_recording(base, base + 300, "255/190")]
     report = R.analyse(day)
-    assert report.disarms[0].cause == "operator"
+    # A disarm with no recorded reason -- not a claim about who chose it.
+    assert report.disarms[0].cause == "disarmed"
     assert not report.of(R.CRITICAL)
+
+
+def test_a_recording_never_closed_is_not_attributed_to_anyone():
+    """An interrupted recorder and a disarm look alike from the file."""
+    day = S.FlightDay(folder=__import__("pathlib").Path("."))
+    base = T0.timestamp()
+    rec = _recording(base, base + 300, "255/190")
+    rec.closed = False
+    day.recordings = [rec]
+    assert R.analyse(day).disarms[0].cause == "unexplained"
+
+
+def test_a_failsafe_early_in_the_dive_does_not_name_its_ending():
+    """A failsafe that tripped and cleared at minute one is not why the
+    recording stopped at minute five."""
+    day = S.FlightDay(folder=__import__("pathlib").Path("."))
+    base = T0.timestamp()
+    day.recordings = [_recording(
+        base, base + 300, "255/240",
+        [(base + 60, "WARNING", "MYGCS: 255, heartbeat lost")])]
+    report = R.analyse(day)
+    assert report.disarms[0].cause != "gcs failsafe"
+    assert not any("failsafe" in f.title.lower() for f in report.findings)
+
+
+def test_the_report_quotes_a_timeout_only_when_the_vehicle_recorded_one():
+    day = S.FlightDay(folder=__import__("pathlib").Path("."))
+    base = T0.timestamp()
+    day.recordings = [_recording(
+        base, base + 300, "255/240",
+        [(base + 299, "WARNING", "MYGCS: 255, heartbeat lost")])]
+    finding = next(f for f in R.analyse(day).findings if "failsafe" in f.title.lower())
+    assert "seconds" not in finding.detail
+    snap = S.Snapshot(flight_id="2026-09-13_1300", path=None)
+    snap.parameters = {"FS_GCS_TIMEOUT": 5.0}
+    day.snapshots = {snap.flight_id: snap}
+    finding = next(f for f in R.analyse(day).findings if "failsafe" in f.title.lower())
+    assert "5 seconds" in finding.detail
 
 
 # --------------------------------------------------------------------------
@@ -338,7 +377,7 @@ def test_a_flight_record_carries_its_own_provenance(tmp_path):
         closing=_Snap({"A": 2.0}, {"blueos": "1.5.0", "containers": [{"name": "core", "image": "i"}]},
                       taken=T0.timestamp() + 600, source="00000002.BIN"),
         brief_disarms=[], capabilities={}, site="OTS")
-    assert record["schema"].startswith("rov_flight_ops.flight/")
+    assert record["schema"].startswith("utc.flight/")
     assert record["vehicle"]["host"] == "192.168.2.2"
     assert record["computer"]["name"] == "L342-D"
     assert record["parameters"]["read_from"] == "00000002.BIN"

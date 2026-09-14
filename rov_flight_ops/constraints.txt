@@ -1,0 +1,53 @@
+# The dependency set ROV Flight Operations was last tested with.
+#
+# run_rov_flight_ops.bat installs with -c constraints.txt, so a new laptop gets
+# these exact versions rather than whatever is newest on the day. Regenerate
+# after upgrading and re-running the tests:
+#     python -m pip freeze | findstr /v /b "-e" > constraints.txt
+# (then remove pip/setuptools and re-add this header).
+#
+# Tested: Windows 11, Python 3.13.3, 13 September 2026.
+
+altgraph==0.17.5
+certifi==2026.7.22
+charset-normalizer==3.5.1
+colorama==0.4.6
+contourpy==1.4.0
+customtkinter==6.0.0
+cycler==0.12.1
+darkdetect==0.8.0
+fastcrc==0.3.6
+fonttools==4.65.0
+geographiclib==2.1
+geopy==2.5.0
+idna==3.19
+iniconfig==2.3.0
+kiwisolver==1.5.1
+lxml==6.1.3
+lz4==4.4.5
+matplotlib==3.11.2
+mcap==1.4.0
+numpy==2.5.3
+packaging==26.3
+pandas==3.0.5
+pefile==2024.8.26
+pillow==12.3.0
+pluggy==1.6.0
+psutil==7.2.2
+Pygments==2.21.0
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.7
+pymavlink==2.4.49
+pyparsing==3.3.2
+pytest==9.1.1
+python-dateutil==2.9.0.post0
+pytz==2026.3.post1
+pywin32==312
+pywin32-ctypes==0.2.3
+requests==2.34.2
+ruff==0.16.7
+scipy==1.18.1
+six==1.17.0
+tzdata==2026.4
+urllib3==2.7.0
+zstandard==0.25.0

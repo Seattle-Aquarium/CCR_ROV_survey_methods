@@ -51,7 +51,7 @@ from . import blueos
 #: Bumped when the shape changes in a way a reader must notice. Present from
 #: the first version, because the cost of adding it later is going back
 #: through every file that does not have it and guessing.
-SCHEMA = "rov_flight_ops.flight/1"
+SCHEMA = "utc.flight/1"
 
 FLIGHT_PREFIX = "flight_"
 

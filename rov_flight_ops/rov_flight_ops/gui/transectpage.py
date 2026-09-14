@@ -224,8 +224,15 @@ class TransectPage(ctk.CTkFrame):
                 lines.append(f"    {s.name} ({s.date}) — {names}")
             self.plan_summary.configure(text="\n".join(lines))
 
-        if self.app.flight_dir and not self.out_entry.get().strip():
-            self.out_entry.insert(0, str(Path(self.app.flight_dir)))
+        # Follow the flight folder unless someone has typed a destination of
+        # their own. Filling the box only when empty used to leave the
+        # previous flight's folder in it after switching flights.
+        typed = self.out_entry.get().strip()
+        auto = getattr(self, "_auto_out", "")
+        if self.app.flight_dir and (not typed or typed == auto):
+            self._auto_out = str(Path(self.app.flight_dir))
+            self.out_entry.delete(0, "end")
+            self.out_entry.insert(0, self._auto_out)
 
     # ------------------------------------------------------------------
 

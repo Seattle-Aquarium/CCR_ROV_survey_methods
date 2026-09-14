@@ -15,10 +15,12 @@ It is one of two programs split out of UTC (Underwater Telemetry Compositing):
 | **ROV Imagery Processing** *(working title)* | `rov_imagery_processing/` | photos and video |
 | UTC | `UTC/` | the original all-in-one program, kept working unchanged as a fallback |
 
-The two new programs are **fully self-contained**. Neither imports anything
-from the other or from `UTC/`: where both need the same file (the theme, the
-survey plan, the telemetry reader…) each folder has its own copy. Each has its
-own launcher and its own Python environment.
+The two new programs are **self-contained in their code**. Neither imports
+anything from the other or from `UTC/`: where both need the same file (the
+theme, the survey plan, the telemetry reader…) each folder has its own copy.
+Each has its own launcher and its own Python environment. The one thing they
+deliberately share is the telemetry cache (see [Cache](#cache)). Because the
+copies can drift, a fix to shared logic has to be made in both folders.
 
 ---
 
@@ -126,6 +128,13 @@ Operations **on purpose**: it is data, not code, and sharing it means a flight
 whose telemetry was switched to the autopilot's `.BIN` log in ROV Flight
 Operations is bannered and composited from that log here, and nothing is
 extracted twice.
+
+A cached extraction is used only when it was built from the **same source files
+(path, size and modification time) with the current cache schema** and all its
+products are present, so a recording recopied or repaired at the same path is
+re-extracted rather than read from the old cache. Only one program extracts a
+flight at a time (a lock file, stale after two minutes). This came out of the 13
+September 2026 review of ROV Flight Operations, which shares the cache.
 
 ---
 

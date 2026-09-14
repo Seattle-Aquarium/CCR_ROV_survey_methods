@@ -22,10 +22,23 @@ set "VPY=%VENV%\Scripts\python.exe"
 set "VPYW=%VENV%\Scripts\pythonw.exe"
 
 REM ---- 1. a working environment already? --------------------------------
+REM "run_rov_flight_ops.bat --repair" reinstalls into the existing environment
+REM whatever state it is in.
+REM
+REM The check covers the transect extractor too. It is imported only when the
+REM Analyze transects tab runs, so an environment missing it would otherwise
+REM pass this check forever and never get the install that fixes it.
+if /i "%~1"=="--repair" goto setup
 if exist "%VPY%" (
   "%VPY%" -c "import rov_flight_ops.gui.app" >nul 2>&1
-  if not errorlevel 1 goto run
+  if not errorlevel 1 (
+    if not exist "..\mcap_to_csv\pyproject.toml" goto run
+    "%VPY%" -c "import ccr_m2c" >nul 2>&1
+    if not errorlevel 1 goto run
+  )
 )
+
+:setup
 
 REM ---- 2. find a Python that actually works -----------------------------
 set "SYS_PY="
@@ -67,15 +80,23 @@ if not exist "%VPY%" (
   if errorlevel 1 goto envfail
 )
 "%VPY%" -m pip install --upgrade pip --quiet --disable-pip-version-check
+REM constraints.txt pins the dependency versions this was last tested with,
+REM so a new laptop does not get whatever happens to be newest that day.
+set "PINS="
+if exist "constraints.txt" set "PINS=-c constraints.txt"
 echo Installing ROV Flight Operations...
-"%VPY%" -m pip install -e . --quiet --disable-pip-version-check
+"%VPY%" -m pip install -e . %PINS% --quiet --disable-pip-version-check
 if errorlevel 1 goto envfail
 
 REM The transect extractor is a sibling in this repo and is not on PyPI. The
-REM Analyze transects tab needs it; everything else runs without it.
+REM Analyze transects tab needs it. A failed install stops setup here, rather
+REM than leaving an environment that starts but cannot extract transects.
 if exist "..\mcap_to_csv\pyproject.toml" (
   echo Installing the transect extractor...
-  "%VPY%" -m pip install -e "..\mcap_to_csv" --quiet --disable-pip-version-check
+  "%VPY%" -m pip install -e "..\mcap_to_csv" %PINS% --quiet --disable-pip-version-check
+  if errorlevel 1 goto envfail
+  "%VPY%" -c "import ccr_m2c" >nul 2>&1
+  if errorlevel 1 goto envfail
 )
 echo.
 echo Setup complete.

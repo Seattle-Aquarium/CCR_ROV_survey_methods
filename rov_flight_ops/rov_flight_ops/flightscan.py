@@ -52,8 +52,9 @@ except ImportError:                                   # pragma: no cover
 #: `laptop_monitor_2026-09-11_1314.csv` -> `2026-09-11_1314`. The stamp is
 #: local time, because it is what the operator sees on the laptop clock, and
 #: it is only ever used as an identifier -- every instant in this module is
-#: UTC seconds.
-FLIGHT_ID = re.compile(r"_(\d{4}-\d{2}-\d{2}_\d{4})(?:\.|$)")
+#: UTC seconds. Newer flights carry seconds and, when two would otherwise
+#: collide, a suffix: `2026-09-13_130512` and `2026-09-13_130512-2`.
+FLIGHT_ID = re.compile(r"_(\d{4}-\d{2}-\d{2}_\d{4}(?:\d{2})?(?:-\d+)?)(?:\.|$)")
 
 #: `recorder_20260911_202519.mcap`. The stamp is the vehicle's clock in UTC,
 #: which is not the same as the laptop's -- see `blueos.clock_skew`.

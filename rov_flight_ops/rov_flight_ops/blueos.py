@@ -1385,6 +1385,66 @@ def read_arm_state(host: str, timeout: float = 6.0) -> tuple[bool | None, float 
         return None, ms
 
 
+def read_heartbeat(host: str, timeout: float = 6.0) -> tuple[bool | None, int | None]:
+    """(armed, mavlink2rest's message counter) from the last HEARTBEAT.
+
+    mavlink2rest answers with the *last* heartbeat it holds, however old: a
+    vehicle whose autopilot has gone quiet still serves one. The counter in
+    its ``status.time`` block is how many heartbeats have arrived, so two
+    reads with the counter advancing prove the answer is current -- without
+    trusting either computer's clock, which is exactly what cannot be trusted
+    on a Pi with no battery-backed clock.
+    """
+    a = _get(_base(host, MAVLINK2REST_PORT)
+             + "/v1/mavlink/vehicles/1/components/1/messages/HEARTBEAT",
+             timeout=timeout, limit=20_000)
+    if not a.ok:
+        return None, None
+    try:
+        body = json.loads(a.body)
+        msg = body.get("message", {})
+        bits = msg.get("base_mode", {})
+        bits = bits.get("bits") if isinstance(bits, dict) else bits
+        armed = None if bits is None else bool(int(bits) & ARMED_BIT)
+        counter = ((body.get("status") or {}).get("time") or {}).get("counter")
+        return armed, (int(counter) if counter is not None else None)
+    except Exception:
+        return None, None
+
+
+def confirm_disarmed(host: str, *, within_s: float = 4.0,
+                     poll_s: float = 0.5) -> tuple[bool, str]:
+    """True only when a *current* heartbeat says the vehicle is disarmed.
+
+    Anything short of that is a no, with the reason: armed, an unanswered
+    request, a heartbeat that does not change (a stale cache of a vehicle
+    that has stopped talking), or a mavlink2rest that does not say how many
+    heartbeats it has seen. Used before anything is deleted from the vehicle,
+    where "could not tell" must never be read as "disarmed".
+    """
+    armed, first = read_heartbeat(host)
+    if armed is True:
+        return False, "the ROV is armed"
+    if armed is None:
+        return False, "the vehicle's heartbeat could not be read"
+    if first is None:
+        return False, ("this vehicle's mavlink2rest does not report whether its "
+                       "heartbeat is current, so the disarmed state cannot be "
+                       "confirmed")
+    deadline = time.monotonic() + within_s
+    while time.monotonic() < deadline:
+        time.sleep(poll_s)
+        armed, counter = read_heartbeat(host)
+        if armed is True:
+            return False, "the ROV is armed"
+        if armed is None or counter is None:
+            return False, "the vehicle's heartbeat stopped answering"
+        if counter > first:
+            return True, "a current heartbeat says the ROV is disarmed"
+    return False, (f"no new heartbeat arrived in {within_s:.0f} s -- the "
+                   f"autopilot may not be running, so its state is unknown")
+
+
 def read_parameters_full(host: str, name: str, token: str = "", *,
                          progress: ProgressCB | None = None) -> dict:
     """Every parameter in one dataflash log, at its **last** recorded value.

@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -76,14 +77,41 @@ TETHER_POLL_S = 5.0
 #: the vehicle is still on the tether.
 DISARM_GRACE_S = 90.0
 
-#: Rows are written as they are sampled but flushed on this cadence, so a
-#: laptop that dies mid-dive loses seconds rather than the flight.
+#: Rows are written as they are sampled, and flushed and synced to disk on
+#: this cadence. A laptop that loses power mid-dive loses the rows since the
+#: last sync -- normally under this many seconds -- rather than the flight.
+#: The operating system and the drive still have the last word on that.
 FLUSH_EVERY_S = 10.0
+
+#: A vehicle reading older than this many of its own poll periods is shown as
+#: unknown rather than held forward. A flat chart must not imply a current
+#: measurement once the reads have stopped succeeding.
+STALE_AFTER_POLLS = 3
 
 
 def _stamp(when: float | None = None) -> str:
-    """`2026-09-11_1305`, local time -- the field's own clock."""
-    return datetime.fromtimestamp(when or time.time()).strftime("%Y-%m-%d_%H%M")
+    """`2026-09-11_130512`, local time -- the field's own clock, to the second.
+
+    To the second, not the minute: stopping and restarting a recording inside
+    one minute used to reuse the name and overwrite the first flight's CSV.
+    """
+    return datetime.fromtimestamp(when or time.time()).strftime("%Y-%m-%d_%H%M%S")
+
+
+def unique_flight_id(folder: Path, when: float | None = None) -> str:
+    """A flight id no existing record in `folder` already uses.
+
+    The time stamp alone is not a guarantee -- two starts in one second, or a
+    laptop clock set back -- so a suffix is added until nothing in the folder
+    carries the id. Every file a flight writes is then opened exclusively, so
+    even a race cannot replace an earlier record.
+    """
+    base = _stamp(when)
+    candidate, n = base, 1
+    while any(Path(folder).glob(f"*_{candidate}.*")):
+        n += 1
+        candidate = f"{base}-{n}"
+    return candidate
 
 
 def _iso(when: float) -> str:
@@ -120,6 +148,16 @@ class Status:
     by_hand: bool = False
     note: str = ""
     problem: str = ""
+    #: The address the watcher is actually asking.
+    host: str = ""
+    #: The flight folder the open recording is being written into. Fixed for
+    #: the length of the flight, whatever folder the window moves on to.
+    session_dir: Path | None = None
+    #: When a row last reached the CSV, and how many could not be written.
+    last_write: float = 0.0
+    dropped: int = 0
+    #: An address typed during a flight, applied once the flight closes.
+    pending_host: str = ""
 
     def line(self) -> str:
         if self.problem:
@@ -173,6 +211,11 @@ class FlightRecorder:
 
         self._start_snap = Snapshot()
         self._log_at_arm = ""
+        #: The flight folder of the flight in progress. `flight_dir` is where
+        #: the *next* flight goes; this is where the current one is going.
+        self._session_dir: Path | None = None
+        self._last_sync = 0.0
+        self._tether_read_at = 0.0
         #: The fast network trace for the flight in progress, when one is
         #: running. None between flights, and None on a station where it
         #: could not start -- which must not stop the flight being recorded.
@@ -193,6 +236,7 @@ class FlightRecorder:
         #: recording ninety seconds in the first time this was tried.
         self._manual = False
 
+        self.status.host = host
         self._stop = threading.Event()
         self._watch: threading.Thread | None = None
         self._tether: threading.Thread | None = None
@@ -311,6 +355,7 @@ class FlightRecorder:
         if self._sampler is None:
             return
         vehicle = self._sampler.vehicle
+        got = False
         try:
             interfaces = blueos.read_interfaces(self.host, timeout=3.0)
             name = blueos.tether_interface(interfaces)
@@ -319,24 +364,34 @@ class FlightRecorder:
                 vehicle.eth_rx_bytes = counters.get("rx_bytes")
                 vehicle.eth_rx_errors = counters.get("rx_errors")
                 self._pi_interface = name
+                got = True
         except Exception:
             pass
-        # The tether extension is probed once and then only re-read if it
-        # answered. A vehicle without it must not be asked eight times a
-        # minute for something it does not have.
-        if self._tether_ok is False:
-            return
+        if got:
+            self._tether_read_at = time.monotonic()
+        elif time.monotonic() - self._tether_read_at > TETHER_POLL_S * STALE_AFTER_POLLS:
+            # Held forward for a few polls, then shown as unknown.
+            vehicle.eth_rx_bytes = vehicle.eth_rx_errors = None
+        # The tether extension is asked every poll. A vehicle without it is
+        # not walked every time: `read_tether` remembers the miss and asks
+        # again only every couple of minutes, so an extension started after
+        # the flight began is still found -- which one failed first probe
+        # used to prevent for the rest of the flight.
         try:
             found = blueos.read_tether(self.host, timeout=2.5)
         except Exception:
             found = {}
-        self._tether_ok = bool(found)
         if found:
+            self._tether_ok = True
             rate = found.get("rx_mbps")
             if rate is None:
                 rate = found.get("tx_mbps")
             vehicle.tether_mbps = rate
             self._tether_seen = found
+        else:
+            if self._tether_ok is None:
+                self._tether_ok = False
+            vehicle.tether_mbps = None
 
     def _on_armed(self) -> None:
         with self._lock:
@@ -384,10 +439,12 @@ class FlightRecorder:
             return
         self.status.problem = ""
         now = time.time()
-        stamp = _stamp(now)
+        stamp = unique_flight_id(folder, now)
         self.status.flight_id = stamp
         self.status.started = now
         self.status.rows = 0
+        self.status.dropped = 0
+        self.status.last_write = 0.0
         self._rows = 0
         self._gaps = []
         self._disarm_at = None
@@ -396,16 +453,23 @@ class FlightRecorder:
 
         path = folder / f"laptop_monitor_{stamp}.csv"
         try:
-            self._fh = path.open("w", newline="", encoding="utf-8")
+            # "x": a flight record is never silently replaced.
+            self._fh = path.open("x", newline="", encoding="utf-8")
             self._writer = csv.DictWriter(self._fh, fieldnames=laptop.COLUMNS,
                                           extrasaction="ignore")
             self._writer.writeheader()
             self._fh.flush()
         except Exception as ex:
-            self.status.problem = f"Could not open {path.name}: {ex}"
+            self.status.problem = (f"NOT RECORDING: could not create {path.name} "
+                                   f"({ex}).")
             self._fh = None
             return
+        # Everything this flight writes goes here until it closes, whatever
+        # folder is chosen in the meantime.
+        self._session_dir = Path(self.flight_dir)
+        self.status.session_dir = self._session_dir
         self.status.csv_path = path
+        self.status.last_write = time.time()
         self._flushed_at = time.monotonic()
 
         self._sampler = laptop.Sampler(rov_host=self.host, flight_id=stamp)
@@ -457,21 +521,18 @@ class FlightRecorder:
         tick = time.monotonic()
         while not self._stop.is_set() and self.status.state == "recording":
             tick += laptop.DEFAULT_PERIOD_S
+            sampler = self._sampler
+            if sampler is None:
+                break
+            # A reading that fails is a blank cell -- the sampler already
+            # promises that -- so a failure here is unexpected but harmless.
             try:
-                sampler = self._sampler
-                if sampler is None:
-                    break
                 row = sampler.sample()
                 self.history.add(row)
-                if self._writer is not None:
-                    self._writer.writerow(row)
-                    self._rows += 1
-                    self.status.rows = self._rows
-                    if time.monotonic() - self._flushed_at > FLUSH_EVERY_S:
-                        self._fh.flush()
-                        self._flushed_at = time.monotonic()
             except Exception:
-                pass
+                row = None
+            if row is not None:
+                self._write_row(row)
             # Sleeping to the next tick rather than for a second keeps the
             # cadence honest when a sample runs long.
             time.sleep(max(0.0, tick - time.monotonic()))
@@ -526,15 +587,27 @@ class FlightRecorder:
         self._disarm_at = None
         self._manual = False
         self.status.by_hand = False
+        self._session_dir = None
+        self.status.session_dir = None
+        if self.status.pending_host:
+            self.host = self.status.pending_host
+            self.status.host = self.host
+            self.status.pending_host = ""
         self._changed()
 
     def _close_csv(self) -> None:
         if self._fh is not None:
             try:
                 self._fh.flush()
+                try:
+                    os.fsync(self._fh.fileno())
+                except OSError:
+                    pass
                 self._fh.close()
-            except Exception:
-                pass
+            except Exception as ex:
+                self.status.problem = (f"The flight CSV could not be closed "
+                                       f"cleanly ({ex}); its last rows may be "
+                                       f"missing.")
         self._fh = None
         self._writer = None
 
@@ -542,11 +615,49 @@ class FlightRecorder:
     #  what lands in logs/
     # ------------------------------------------------------------------
 
+    def _write_row(self, row: dict) -> None:
+        """One row to disk. A failure is shown, counted and retried -- never hidden.
+
+        Sensor failures are blank cells; a failed *write* is the recorder
+        failing, and it says so in words on the Monitoring tab for as long as
+        it lasts. The next row tries again, so a disk that recovers resumes
+        the record and the note afterwards says how many rows were lost.
+        """
+        if self._writer is None:
+            self.status.dropped += 1
+            return
+        try:
+            self._writer.writerow(row)
+            if time.monotonic() - self._flushed_at > FLUSH_EVERY_S:
+                self._fh.flush()
+                try:
+                    os.fsync(self._fh.fileno())
+                except OSError:
+                    pass
+                self._flushed_at = time.monotonic()
+        except Exception as ex:
+            self.status.dropped += 1
+            self.status.problem = (
+                f"RECORDING FAILED: rows are not reaching "
+                f"{self.status.csv_path.name if self.status.csv_path else 'the CSV'}"
+                f" ({type(ex).__name__}: {str(ex)[:80]}). {self.status.dropped:,} "
+                f"row(s) lost so far — check the drive.")
+            return
+        self._rows += 1
+        self.status.rows = self._rows
+        self.status.last_write = time.time()
+        if self.status.problem.startswith("RECORDING FAILED"):
+            self.status.problem = ""
+            self.status.note = (f"{self.status.dropped:,} row(s) could not be "
+                                f"written earlier in this flight")
+
     def _logs_dir(self) -> Path | None:
-        if not self.flight_dir:
+        # The flight in progress keeps its own folder to the end.
+        base = self._session_dir if self._session_dir is not None else self.flight_dir
+        if not base:
             return None
         try:
-            out = Path(self.flight_dir) / "logs"
+            out = Path(base) / "logs"
             out.mkdir(parents=True, exist_ok=True)
             return out
         except Exception:
@@ -565,6 +676,7 @@ class FlightRecorder:
         folder = self._logs_dir()
         if folder is None:
             return
+        session = self._session_dir or self.flight_dir
         stamp = self.status.flight_id
         start = self._start_snap
 
@@ -581,8 +693,7 @@ class FlightRecorder:
         try:
             earlier = flightfile.find_previous(
                 folder, stamp,
-                search_root=(self.flight_dir.parent
-                             if self.flight_dir else None))
+                search_root=(Path(session).parent if session else None))
             if earlier is not None:
                 previous = flightfile.compare_with_previous(
                     earlier, end.parameters or {}, end.versions or {})
@@ -605,7 +716,7 @@ class FlightRecorder:
                 capabilities=self.capabilities,
                 monitor=monitor,
                 network=self._network_summary(),
-                site=self.flight_dir.name if self.flight_dir else "",
+                site=Path(session).name if session else "",
                 previous=previous,
                 note=self.status.note or "",
             )
@@ -669,6 +780,31 @@ class FlightRecorder:
             return laptop.find_rov_interface(self.host) or ""
         except Exception:
             return ""
+
+    # ------------------------------------------------------------------
+    #  the vehicle address
+    # ------------------------------------------------------------------
+
+    def retarget(self, host: str) -> bool:
+        """Point the watcher at another address. False if it has to wait.
+
+        While idle the change is immediate: the watcher and the tether reader
+        both read `host` on every poll. During a flight it is held until the
+        flight closes, so one flight's record never describes two vehicles.
+        """
+        host = host or "192.168.2.2"
+        if host == self.host:
+            self.status.pending_host = ""
+            return True
+        if self.status.state in ("recording", "closing"):
+            self.status.pending_host = host
+            return False
+        self.host = host
+        self.status.host = host
+        self.status.armed = None
+        self._tether_ok = None
+        self._changed()
+        return True
 
     # ------------------------------------------------------------------
     #  manual override

@@ -271,7 +271,7 @@ def test_arming_starts_a_flight_and_disarming_closes_it(tmp_path, monkeypatch):
     assert record["changes"]["versions"]["blueos"]["after"] == "1.5.0-beta.40"
     assert record["parameters"]["read"] is True
     assert record["parameters"]["values"]["SURFTRAK_DEPTH"] == -1.75
-    assert record["schema"].startswith("rov_flight_ops.flight/")
+    assert record["schema"].startswith("utc.flight/")
 
     # The CSV's header must match the schema exactly.
     csv_path = logs / f"laptop_monitor_{stamp}.csv"

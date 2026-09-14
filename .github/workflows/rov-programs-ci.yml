@@ -1,0 +1,99 @@
+name: ROV programs
+
+# ROV Flight Operations and ROV Imagery Processing, the two programs split out
+# of UTC. Each is self-contained, so each is installed, linted and tested on
+# its own -- a change to one must not be able to pass by leaning on the other.
+# The UTC workflow does not cover them: its path filters are UTC's.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "rov_flight_ops/**"
+      - "rov_imagery_processing/**"
+      - "mcap_to_csv/**"
+      - ".github/workflows/rov-programs-ci.yml"
+  pull_request:
+    paths:
+      - "rov_flight_ops/**"
+      - "rov_imagery_processing/**"
+      - "mcap_to_csv/**"
+      - ".github/workflows/rov-programs-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  flight-ops:
+    # Windows: the recorder reads Windows performance counters and COM, and
+    # the launcher is a .bat. The GUI tests need a desktop, which the Windows
+    # runners have -- and a window that fails to build fails the job rather
+    # than skipping as "no display".
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: rov_flight_ops
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Install the transect extractor
+        # Analyze transects drives it. Without it the tab's tests would only
+        # exercise its "not installed" message.
+        run: pip install -e ../mcap_to_csv
+      - name: Lint
+        run: ruff check rov_flight_ops tests
+      - name: Test
+        run: pytest -q
+
+  flight-ops-pinned:
+    # The versions the launcher installs on a new laptop, via constraints.txt.
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: rov_flight_ops
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install the tested set
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" -c constraints.txt
+          pip install -e ../mcap_to_csv -c constraints.txt
+      - name: Test
+        run: pytest -q
+
+  imagery:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: rov_imagery_processing
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check rov_imagery_processing tests
+      - name: Test
+        # ffmpeg comes from the imageio-ffmpeg wheel, so nothing to install.
+        run: pytest -q

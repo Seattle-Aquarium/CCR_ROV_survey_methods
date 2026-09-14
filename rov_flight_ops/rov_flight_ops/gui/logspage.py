@@ -202,6 +202,19 @@ class LogsPage(ctk.CTkFrame):
             self._rebuild()
         self._update_previews()
 
+    def forget_vehicle(self) -> None:
+        """Drop a listing taken from a vehicle the address no longer points at."""
+        if self.inv is None:
+            return
+        self.inv = None
+        self.tree.delete(*self.tree.get_children())
+        self._nodes.clear()
+        self._by_path = {}
+        self.found_note.configure(
+            text="The vehicle address changed — search again to list this vehicle.",
+            text_color=T.WARN)
+        self._update_previews()
+
     def _tick_all(self) -> None:
         for v in self.v_kind.values():
             v.set(self.v_all.get())
@@ -271,7 +284,7 @@ class LogsPage(ctk.CTkFrame):
             else:
                 self.inv.merge(res.inv)
             found_c3 = res.inv.roots.get("c3")
-            if found_c3 and not self.c3_entry.get().strip():
+            if found_c3 and len(found_c3) == 1 and not self.c3_entry.get().strip():
                 self.c3_entry.insert(0, found_c3[0])
                 self._c3_folder()
             self._rebuild()
@@ -288,6 +301,7 @@ class LogsPage(ctk.CTkFrame):
         if inv is None:
             return
         PF.match(inv.all_files(), self._windows())
+        self._manifest = PF.load_manifest(self.app.flight_dir)
         keep = {self._nodes.get(i, ("", "", ""))[2] for i in self.tree.selection()}
         self.tree.delete(*self.tree.get_children())
         self._nodes.clear()
@@ -321,6 +335,10 @@ class LogsPage(ctk.CTkFrame):
                 text += f"\n{PF.BY_KEY[key].label}: {n}"
         if not self._windows():
             text += "\nNo valid transects on the Transects tab yet, so nothing can match 'Transects only'."
+        if any(f.end_estimated for f in inv.all_files()):
+            text += ("\n≈ marks an end time estimated from the file's size (a "
+                     "recording with no summary). Those are never picked by "
+                     "'Transects only' when cleaning the Pi.")
         self.found_note.configure(text=text, text_color=T.TEXT_MUTED)
         self._update_previews()
 
@@ -330,21 +348,37 @@ class LogsPage(ctk.CTkFrame):
         ends = [f.end for f in files if f.end]
         rec = (f"{_when(min(starts))}  →  {_when(max(ends))}" if starts and ends
                else "—")
+        if any(f.end_estimated for f in files):
+            rec = "≈ " + rec
         covers = sorted({c for f in files for c in f.covers})
         flight = self.app.flight_dir
-        copied = sum(1 for f in files if f.downloaded_to(flight)) if flight else None
+        if not flight:
+            copied = "—"
+        else:
+            states = [self._copy_state(f) for f in files]
+            verified = states.count("verified")
+            same = states.count("same size")
+            if files and verified == len(files):
+                copied = "all verified"
+            else:
+                copied = f"{verified} verified" + (f", {same} same size" if same else "")
+                copied += f" of {len(files)}"
         return (f"{len(files):,}", _gib(size), rec,
-                ", ".join(covers) or "—",
-                "—" if copied is None else
-                ("all" if files and copied == len(files) else f"{copied} of {len(files)}"))
+                ", ".join(covers) or "—", copied)
+
+    def _copy_state(self, f: PF.PiFile) -> str:
+        return PF.copy_state(f, self.app.flight_dir, getattr(self, "_manifest", None))
 
     def _file_values(self, f: PF.PiFile) -> tuple:
-        rec = (f"{_when(f.start, '%m-%d %H:%M:%S')} – {_when(f.end, '%H:%M:%S')}"
+        rec = (f"{_when(f.start, '%m-%d %H:%M:%S')} – "
+               f"{'≈' if f.end_estimated else ''}{_when(f.end, '%H:%M:%S')}"
                if f.span_known else "time unknown")
         if f.category == "c3":
             rec = _when(f.modified, "%m-%d %H:%M:%S")
+        state = self._copy_state(f)
         return ("", _gib(f.size), rec, ", ".join(f.covers) or "—",
-                "yes" if f.downloaded_to(self.app.flight_dir) else "—")
+                {"verified": "verified", "same size": "same size (unverified)",
+                 "differs": "DIFFERENT SIZE"}.get(state, "—"))
 
     def _opened(self, _event=None) -> None:
         iid = self.tree.focus()
@@ -448,7 +482,8 @@ class LogsPage(ctk.CTkFrame):
             return None
         if self.inv is not None:
             PF.match(self.inv.all_files(), self._windows())
-        choice = PF.choose(self.inv, kinds, period, self.picked())
+        choice = PF.choose(self.inv, kinds, period, self.picked(),
+                           destructive=panel is self.clean)
         if choice.not_listed:
             if retried:
                 messagebox.showinfo(
@@ -483,7 +518,9 @@ class LogsPage(ctk.CTkFrame):
                                retried)
         if choice is None:
             return
-        todo = [f for f in choice.files if not f.downloaded_to(flight)]
+        manifest = PF.load_manifest(flight)
+        todo = [f for f in choice.files
+                if PF.copy_state(f, flight, manifest) not in ("verified", "same size")]
         if not todo:
             messagebox.showinfo(self.app.APP_NAME,
                                 f"All {len(choice.files)} file(s) are already in "
@@ -510,10 +547,17 @@ class LogsPage(ctk.CTkFrame):
 
         def work(progress, cancel):
             return PF.download(todo, Path(flight), inv.host, inv.token,
-                               progress=progress, cancel=cancel)
+                               progress=progress, cancel=cancel,
+                               vehicle=inv.vehicle)
+
+        def done(_res):
+            # New recordings are on disk: the Flight summary and Analyze tabs
+            # read the folder's file list, so it is taken again now.
+            self.app.refresh_files()
+            self._rebuild()
 
         self.app.submit(work, f"Downloading {len(todo)} file(s) from the vehicle…",
-                        on_done=lambda _r: self._rebuild())
+                        on_done=done)
 
     def _delete(self, retried: bool = False) -> None:
         choice = self._resolve(self.clean, lambda: self._delete(True), retried)
@@ -521,20 +565,30 @@ class LogsPage(ctk.CTkFrame):
             return
         inv = self.inv
         flight = self.app.flight_dir
-        busy = PF.protected(choice.files, inv.skew)
-        lines = [f"Permanently delete {len(choice.files) - len(busy)} file(s), "
-                 f"{_gib(sum(f.size for f in choice.files if f not in busy))}, from "
-                 f"{inv.vehicle or 'the vehicle'} at {inv.host}?", "",
+        busy = {f.path for f in PF.protected(choice.files, inv.skew)}
+        lines = [f"Permanently delete up to {len(choice.files) - len(busy)} file(s), "
+                 f"{_gib(sum(f.size for f in choice.files if f.path not in busy))}, "
+                 f"from {inv.vehicle or 'the vehicle'} at {inv.host}?", "",
                  choice.breakdown()]
         if flight:
-            missing = [f for f in choice.files if not f.downloaded_to(flight)]
-            if missing:
-                lines += ["", f"{len(missing)} of these have no copy in this flight "
-                              f"folder ({Path(flight).name})."]
+            manifest = PF.load_manifest(flight)
+            unverified = [f for f in choice.files
+                          if PF.copy_state(f, flight, manifest) != "verified"]
+            if unverified:
+                lines += ["", f"{len(unverified)} of these have NO VERIFIED COPY in "
+                              f"this flight folder ({Path(flight).name})."]
+        else:
+            lines += ["", "No flight folder is chosen, so none of these can be "
+                          "checked against a downloaded copy."]
         if busy:
-            lines += ["", f"{len(busy)} modified in the last two minutes will be "
-                          f"left alone."]
-        lines += ["", "This cannot be undone."]
+            lines += ["", f"{len(busy)} were modified in the last two minutes or "
+                          f"have no time, and will be left alone."]
+        if choice.estimated:
+            lines += ["", f"{choice.estimated} recording(s) with estimated end times "
+                          f"were left out of 'Transects only'."]
+        lines += ["", "Before deleting, the ROV must be confirmed disarmed by a "
+                      "current heartbeat, and every file is checked again on the "
+                      "vehicle. This cannot be undone."]
         if not messagebox.askyesno(self.app.APP_NAME, "\n".join(lines),
                                    icon="warning", default="no"):
             return
@@ -548,11 +602,18 @@ class LogsPage(ctk.CTkFrame):
             if isinstance(res, PF.Refused):
                 messagebox.showerror(self.app.APP_NAME, str(res))
                 return
+            if isinstance(res, Exception):
+                messagebox.showerror(self.app.APP_NAME,
+                                     f"Deleting stopped with an error: {res}")
+                return
             if isinstance(res, PF.TransferReport):
                 gone = {f.path for f in res.done}
                 for key in list(inv.files):
                     inv.files[key] = [f for f in inv.files[key] if f.path not in gone]
                 self._rebuild()
+                if res.stopped or res.failed or res.skipped:
+                    messagebox.showwarning(self.app.APP_NAME,
+                                           res.summary())
 
         self.app.submit(work, f"Deleting {len(choice.files)} file(s) from the "
                               f"vehicle…", on_done=done)
@@ -609,7 +670,8 @@ class ActionPanel:
         return self.v_period.get()
 
     def update_preview(self, inv, picked) -> None:
-        choice = PF.choose(inv, self.kinds(), self.period(), picked)
+        choice = PF.choose(inv, self.kinds(), self.period(), picked,
+                           destructive=self is getattr(self.page, "clean", None))
         bits = []
         if choice.files:
             bits.append(f"Will use {len(choice.files):,} file(s), {_gib(choice.size)}"
@@ -629,6 +691,9 @@ class ActionPanel:
         if choice.no_time:
             bits.append(f"{choice.no_time} file(s) have no readable recording time "
                         f"and are left out of 'Transects only'.")
+        if choice.estimated:
+            bits.append(f"{choice.estimated} recording(s) have only an estimated end "
+                        f"time and are left out of 'Transects only' here.")
         if choice.note:
             bits.append(choice.note[0].upper() + choice.note[1:] + ".")
         self.note.configure(text="\n".join(bits))

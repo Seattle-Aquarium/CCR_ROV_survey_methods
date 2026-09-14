@@ -100,6 +100,63 @@ def test_the_last_line_of_the_log_is_the_last_message(app):
     assert text.endswith("newest message")
 
 
+def test_switching_flights_resets_the_plan_and_the_analyze_folder(app, tmp_path,
+                                                                 monkeypatch):
+    """Review finding F05: the previous flight's transects and output folder
+    used to survive a switch to a folder with none of its own."""
+    from rov_flight_ops.survey import Site, SurveyPlan, Transect
+
+    monkeypatch.setattr(app, "_arm_monitor", lambda: None)
+    monkeypatch.setattr("rov_flight_ops.gui.app.messagebox.askyesno",
+                        lambda *a, **k: True)
+    a, b = tmp_path / "2026_09_13_Alki", tmp_path / "2026_09_14_Centennial"
+    a.mkdir()
+    b.mkdir()
+    try:
+        app.use_flight(a)
+        app._apply_plan(SurveyPlan([Site("Alki", "t", "2026-09-13",
+                                         [Transect("T1", "10:00:00", "10:10:00")])]))
+        analyze = app.pages["analyze"]
+        analyze.refresh()
+        assert analyze._out_dir() == a
+
+        app.use_flight(b)
+        typed = [t for s in app._plan().sites for t in s.transects if t.start_tc]
+        assert typed == [], "Alki's transects were carried into Centennial"
+        assert analyze._out_dir() == b
+    finally:
+        app.flight_dir = None
+
+
+def test_committing_an_address_redirects_the_running_recorder(app, monkeypatch):
+    """Review finding F07: the box and the watcher used to disagree."""
+    from rov_flight_ops import flightlog
+
+    monkeypatch.setattr(app, "save_settings", lambda: None)
+    before_rec, before_host = app.recorder, app.settings.get("vehicle_host", "")
+    app.recorder = flightlog.FlightRecorder(host="192.168.2.2")
+    monitor = app.pages["monitor"]
+    try:
+        monitor.host_entry.delete(0, "end")
+        monitor.host_entry.insert(0, "10.0.0.9")
+        monitor._remember_host()
+        assert app.recorder.host == "10.0.0.9"
+        assert app.vehicle_host() == "10.0.0.9"
+
+        app.recorder.status.state = "recording"      # now mid-flight
+        monitor.host_entry.delete(0, "end")
+        monitor.host_entry.insert(0, "10.0.0.10")
+        monitor._remember_host()
+        assert app.recorder.host == "10.0.0.9", "a flight must keep its vehicle"
+        assert app.recorder.status.pending_host == "10.0.0.10"
+    finally:
+        app.recorder.status.state = "idle"
+        app.recorder = before_rec
+        monitor.host_entry.delete(0, "end")
+        monitor.host_entry.insert(0, before_host)
+        app.settings["vehicle_host"] = before_host
+
+
 def test_rates_are_shown_beside_each_reading():
     from rov_flight_ops.gui import monitorpage as M
     assert M.hz_text(M.refresh_hz("cpu_usage_pct")) == "1 Hz"
@@ -115,6 +172,11 @@ def test_rates_are_shown_beside_each_reading():
 
 @pytest.fixture()
 def logs(app, vehicle, tmp_path, monkeypatch):     # noqa: F811
+    # A dialog nobody answers blocks the test run forever, so every one is
+    # stubbed; a test that cares about an answer patches that one itself.
+    for name in ("showinfo", "showwarning", "showerror"):
+        monkeypatch.setattr(f"rov_flight_ops.gui.logspage.messagebox.{name}",
+                            lambda *a, **k: None)
     monitor = app.pages["monitor"]
     monitor.host_entry.delete(0, "end")
     monitor.host_entry.insert(0, vehicle.host)

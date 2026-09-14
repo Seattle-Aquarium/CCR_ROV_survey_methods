@@ -35,9 +35,18 @@ from datetime import datetime, timezone
 
 from . import flightscan as S
 
-#: ArduSub disarms when the ground station has been silent this long. Every
-#: timing judgement about a failsafe is made against it.
+#: The ground-station timeout assumed when the flight's own parameters do not
+#: record one. Used for matching times only; the report says a specific number
+#: of seconds only when it read that number from the vehicle.
 GCS_FAILSAFE_S = 3.0
+
+#: The parameter that sets it, where the firmware has one.
+GCS_TIMEOUT_PARAM = "FS_GCS_TIMEOUT"
+
+#: A failsafe message names a recording's ending only when it arrives this
+#: close before the end. One from earlier in the dive -- a failsafe that
+#: tripped and cleared -- says nothing about why the recording stopped.
+FAILSAFE_MATCH_S = 30.0
 
 #: The autopilot messages that mean the topside stopped talking. Matched on a
 #: fragment rather than the whole string, because the text carries the system
@@ -91,7 +100,11 @@ class Disarm:
 
     when: float
     recording: str = ""
-    #: `gcs failsafe`, `link lost`, `operator`, or `unexplained`.
+    #: What the evidence supports, and no more:
+    #:   `gcs failsafe`  the autopilot's own failsafe message, at the ending
+    #:   `disarmed`      a closed recording armed to its end, with no message --
+    #:                   the vehicle disarmed, for a reason nothing recorded
+    #:   `unexplained`   anything else, including a recording never closed
     cause: str = "unexplained"
     text: str = ""
     #: What the topside was seeing when it happened.
@@ -205,27 +218,52 @@ def analyse(day: S.FlightDay) -> DayReport:
 # ---- disarms --------------------------------------------------------------
 
 
+def gcs_timeout_s(day: S.FlightDay) -> float | None:
+    """The ground-station timeout the vehicle was set to, if a snapshot says."""
+    for _flight, snapshot in sorted(day.snapshots.items(), reverse=True):
+        value = (snapshot.parameters or {}).get(GCS_TIMEOUT_PARAM)
+        try:
+            if value is not None and float(value) > 0:
+                return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def _find_disarms(day: S.FlightDay, report: DayReport) -> None:
-    """Every recording's ending, and the autopilot's own account of it."""
+    """Every recording's ending, and what the evidence says about it.
+
+    Attribution needs evidence at the ending itself. A failsafe message counts
+    only when it lands in the last `FAILSAFE_MATCH_S` before the recording
+    stops; a recording armed to the end of a *closed* file is a disarm with no
+    recorded reason, not proof that somebody chose it; and a recording that
+    was never closed stays unexplained, because an interrupted recorder and a
+    disarm can look alike.
+    """
+    timeout = gcs_timeout_s(day) or GCS_FAILSAFE_S
     for recording in day.recordings:
         if not recording.end:
             continue
+        ending = recording.armed_to or recording.end
         failsafe = None
         for when, _severity, text in recording.statustexts:
             lowered = text.lower()
-            if any(fragment in lowered for fragment in FAILSAFE_TEXTS):
-                if failsafe is None or when > failsafe[0]:
-                    failsafe = (when, text)
-        disarm = Disarm(when=recording.armed_to or recording.end,
-                        recording=recording.name)
+            if not any(fragment in lowered for fragment in FAILSAFE_TEXTS):
+                continue
+            if not ending - FAILSAFE_MATCH_S <= when <= recording.end + timeout:
+                continue
+            if failsafe is None or when > failsafe[0]:
+                failsafe = (when, text)
+        disarm = Disarm(when=ending, recording=recording.name)
         if failsafe is not None:
             disarm.when = failsafe[0]
             disarm.text = failsafe[1]
             disarm.cause = "gcs failsafe"
-        elif recording.armed_to and abs(recording.end - recording.armed_to) <= CLOSE_ENOUGH_S:
-            # Armed to the last heartbeat and then the file closed: the
-            # vehicle was disarmed deliberately, or the recorder was stopped.
-            disarm.cause = "operator"
+        elif (recording.closed and recording.armed_to
+              and abs(recording.end - recording.armed_to) <= CLOSE_ENOUGH_S):
+            # Armed to the last heartbeat of a file that was closed properly.
+            # The vehicle disarmed; nothing recorded why.
+            disarm.cause = "disarmed"
         session = day.monitor_at(disarm.when)
         if session is not None:
             disarm.laptop = session.at(disarm.when)
@@ -641,12 +679,15 @@ def _raise_findings(day: S.FlightDay, report: DayReport) -> None:
     if failsafes:
         led = [d for d in failsafes if d.lead_s is not None
                and 0 <= d.lead_s <= 20]
+        configured = gcs_timeout_s(day)
         detail = (
-            f"The vehicle disarmed itself {len(failsafes)} time"
-            f"{'s' if len(failsafes) != 1 else ''} because the ground station "
-            f"stopped heartbeating for more than {GCS_FAILSAFE_S:.0f} seconds. "
-            f"Each recording ends there: the recorder writes only while armed, "
-            f"so the broken files are the disarms, not a recorder fault.")
+            f"The autopilot reported a ground-station failsafe at the end of "
+            f"{len(failsafes)} recording{'s' if len(failsafes) != 1 else ''}: "
+            f"it stopped hearing the ground station's heartbeat"
+            + (f" for more than {configured:g} seconds (FS_GCS_TIMEOUT as flown)"
+               if configured else "")
+            + ". Each of those recordings ends there, so the ending is the "
+              "failsafe rather than a recorder fault.")
         if led:
             detail += (f" In {len(led)} of them the topside link had already "
                        f"gone silent {min(d.lead_s for d in led):.0f}"

@@ -5,7 +5,7 @@ pymavlink>=2.4       # ArduPilot .BIN dataflash logs
 Pillow>=10           # banner, charts and the dive profile
 numpy>=1.24          # telemetry indexing
 psutil>=5.9          # the topside monitor
-pywin32>=306         # COM, for the battery reading
+pywin32>=306; sys_platform == "win32"   # COM, for the battery reading
 matplotlib>=3.8      # the flight report
 customtkinter>=5.2   # GUI
 tzdata>=2024.1       # Windows ships no timezone database

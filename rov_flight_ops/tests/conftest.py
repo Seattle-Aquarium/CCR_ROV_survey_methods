@@ -56,7 +56,7 @@ def pytest_ignore_collect(collection_path: Path, config) -> bool:
 
 
 @pytest.fixture(scope="session")
-def app():
+def app(tmp_path_factory):
     """One application, shared by every test that needs a window.
 
     CustomTkinter and Tk both keep process-wide state -- the default root, the
@@ -66,21 +66,40 @@ def app():
     and which skipped its entire file, so seventeen tests could quietly not
     run. One session-scoped window removes the question.
 
+    Its settings and cache live in a temporary LOCALAPPDATA, so a test that
+    types a vehicle address can never overwrite the one saved on this laptop.
+
     Tests may change the mode, the geometry or the open page; each puts back
     what it changed.
     """
+    import os
+    import tkinter
+
     ctk = pytest.importorskip("customtkinter")
     del ctk
     from rov_flight_ops.gui.app import App
 
+    saved = os.environ.get("LOCALAPPDATA")
+    os.environ["LOCALAPPDATA"] = str(tmp_path_factory.mktemp("localappdata"))
     try:
-        a = App()
-    except Exception as ex:                      # no display, e.g. on CI
-        pytest.skip(f"no display: {ex}")
-    a.withdraw()
-    a.update()
-    yield a
-    try:
-        a.destroy()
-    except Exception:
-        pass
+        try:
+            a = App()
+        except tkinter.TclError as ex:
+            # Only a missing display is a reason to skip. Any other failure to
+            # build the window is a broken application, and must fail loudly
+            # rather than hide behind "no display".
+            if "display" in str(ex).lower() or "no $display" in str(ex).lower():
+                pytest.skip(f"no display: {ex}")
+            raise
+        a.withdraw()
+        a.update()
+        yield a
+        try:
+            a.destroy()
+        except Exception:
+            pass
+    finally:
+        if saved is None:
+            os.environ.pop("LOCALAPPDATA", None)
+        else:
+            os.environ["LOCALAPPDATA"] = saved

@@ -28,6 +28,7 @@ not going to be looking at this.
 
 from __future__ import annotations
 
+import time
 import tkinter
 from pathlib import Path
 from tkinter import messagebox
@@ -78,6 +79,24 @@ def refresh_hz(column: str) -> float:
 
 def hz_text(hz: float) -> str:
     return f"{hz:g} Hz"
+
+
+def achieved_hz(history, seconds: float = 60.0) -> float | None:
+    """The row rate actually achieved over the last minute, or None.
+
+    The labels are targets; this is the measurement. A laptop that cannot
+    keep up shows it here as a number below one.
+    """
+    try:
+        times = [t for t, _v in history.series("elapsed_time_s")]
+    except Exception:
+        return None
+    if len(times) < 5:
+        return None
+    recent = [t for t in times if t >= times[-1] - seconds]
+    if len(recent) < 5 or recent[-1] <= recent[0]:
+        return None
+    return (len(recent) - 1) / (recent[-1] - recent[0])
 
 
 #: The fast network trace runs beside the row while a flight records. It is
@@ -193,6 +212,7 @@ class MonitorPage(ctk.CTkFrame):
         if saved:
             self.host_entry.insert(0, saved)
         self.host_entry.bind("<FocusOut>", lambda _e: self._remember_host())
+        self.host_entry.bind("<Return>", lambda _e: self._remember_host())
 
         r = ctk.CTkFrame(c.body, fg_color="transparent")
         r.grid(row=1, column=0, sticky="w")
@@ -221,13 +241,9 @@ class MonitorPage(ctk.CTkFrame):
         say(box, text)
 
     def _remember_host(self) -> None:
-        settings = getattr(self.app, "settings", None)
-        if settings is None:
-            return
-        typed = self.host_entry.get().strip()
-        if settings.get("vehicle_host", "") != typed:
-            settings["vehicle_host"] = typed
-            self.app.save_settings()
+        setter = getattr(self.app, "set_vehicle_host", None)
+        if callable(setter):
+            setter(self.host_entry.get())
 
     def _check_network(self) -> None:
         host = self._host()
@@ -294,8 +310,9 @@ class MonitorPage(ctk.CTkFrame):
 
     def _build_chart_card(self, body, row: int) -> None:
         c = Card(body, "4.  Live monitoring",
-                 "One group at a time, each reading on its own scale, with how "
-                 "often it is refreshed under its name. Charts fill while a "
+                 "One group at a time, each reading on its own scale, with the "
+                 "rate it is meant to refresh at under its name (targets -- the "
+                 "achieved row rate is shown in section 3). Charts fill while a "
                  "flight records. A blank strip is a sensor this laptop does "
                  "not publish — the list beside the CSV says which, and why.")
         c.grid(row=row, column=0, sticky="ew")
@@ -367,11 +384,14 @@ class MonitorPage(ctk.CTkFrame):
         return rec
 
     def _host(self) -> str:
+        # Whatever is in the box is committed first, so the recorder never
+        # starts on one address while the box shows another.
         try:
-            typed = self.host_entry.get().strip()
+            self._remember_host()
         except Exception:
-            typed = ""
-        return typed or "192.168.2.2"
+            pass
+        committed = getattr(self.app, "vehicle_host", lambda: None)()
+        return committed or "192.168.2.2"
 
     def _toggle_watch(self) -> None:
         rec = self.recorder
@@ -386,7 +406,7 @@ class MonitorPage(ctk.CTkFrame):
                     "will not guess one, so a flight is never filed somewhere "
                     "nobody looks.")
                 return
-            rec.host = self._host()
+            rec.retarget(self._host())
             rec.start_watching()
         self._sync_buttons()
 
@@ -399,7 +419,7 @@ class MonitorPage(ctk.CTkFrame):
                 messagebox.showinfo(self.app.title(),
                                     "Choose a flight folder first.")
                 return
-            rec.host = self._host()
+            rec.retarget(self._host())
             if not rec.watching:
                 rec.start_watching()
             rec.start_manually()
@@ -475,16 +495,27 @@ class MonitorPage(ctk.CTkFrame):
             T.OK if st.state == "recording" else T.TEXT_MUTED)
         self.state_label.configure(text=st.line(), text_color=colour)
 
-        bits = []
-        if st.csv_path is not None and st.state == "recording":
-            bits.append(f"writing {st.csv_path.name}")
-        if rec.flight_dir:
-            bits.append(f"logs in {Path(rec.flight_dir) / 'logs'}")
+        bits = [f"vehicle {rec.host}" + ("" if rec.watching else " (not watching)")]
+        if st.pending_host:
+            bits.append(f"switching to {st.pending_host} when this flight closes")
+        if st.state == "recording":
+            if st.csv_path is not None:
+                bits.append(f"writing {st.csv_path}")
+            if st.last_write:
+                age = time.time() - st.last_write
+                bits.append(f"last row written {age:.0f} s ago"
+                            + ("  <-- NOT WRITING" if age > 5 else ""))
+            achieved = achieved_hz(rec.history)
+            if achieved is not None:
+                bits.append(f"rows at {achieved:.2f} Hz achieved (target "
+                            f"{1 / laptop.DEFAULT_PERIOD_S:g} Hz)")
+        elif rec.flight_dir:
+            bits.append(f"next flight goes to {Path(rec.flight_dir) / 'logs'}")
         missing = [k for k, v in (rec.capabilities or {}).items()
                    if v.startswith("unavailable")]
         if missing:
             bits.append("not readable on this laptop: " + ", ".join(missing))
-        self.detail.configure(text="     ".join(bits))
+        self.detail.configure(text="\n".join(bits))
         self._sync_buttons()
 
     # ------------------------------------------------------------------

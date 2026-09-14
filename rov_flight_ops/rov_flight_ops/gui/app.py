@@ -31,6 +31,7 @@ import customtkinter as ctk
 from .. import discovery, settings
 from ..config import AppConfig
 from ..survey import PLAN_FILENAME, Site, SurveyPlan, plan_path
+from . import theme as T
 from .shell import Shell
 from .widgets import Card, SiteFrame, button, entry, output_box, say
 
@@ -58,13 +59,41 @@ class App(Shell):
         settings.save(self.settings)
 
     def vehicle_host(self) -> str | None:
-        """The address typed on Monitoring, or None to search for the vehicle."""
+        """The committed vehicle address, or None to search for the vehicle.
+
+        Committed, not whatever is half-typed in the box: the address is
+        applied -- to the recorder, the logs tab and the preview together --
+        when the box is left or Enter is pressed, so nothing reads a value the
+        recorder is not also using.
+        """
         page = self.pages.get("monitor")
-        try:
-            typed = page.host_entry.get().strip()
-        except Exception:
-            typed = self.settings.get("vehicle_host", "")
-        return typed or None
+        commit = getattr(page, "_remember_host", None)
+        if callable(commit):
+            # Clicking a button does not take focus from the box, so a typed
+            # address is committed here too, before anything reads it.
+            try:
+                commit()
+            except Exception:
+                pass
+        return self.settings.get("vehicle_host", "") or None
+
+    def set_vehicle_host(self, typed: str) -> None:
+        """Commit a new vehicle address everywhere at once."""
+        typed = (typed or "").strip()
+        if typed == self.settings.get("vehicle_host", ""):
+            return
+        self.settings["vehicle_host"] = typed
+        self.save_settings()
+        shown = typed or "192.168.2.2"
+        rec = self.recorder
+        if rec is not None and not rec.retarget(shown):
+            self._log(f"Vehicle address set to {shown}. The flight being recorded "
+                      f"keeps using {rec.host} until it closes.")
+        else:
+            self._log(f"Vehicle address set to {shown}.")
+        logs = self.pages.get("logs")
+        if logs is not None:
+            logs.forget_vehicle()
 
     # ------------------------------------------------------------------
     #  tabs
@@ -118,6 +147,35 @@ class App(Shell):
 
         monitor.refresh()
 
+        # The recorder's state, on every tab. A recording that fails while the
+        # operator is on BlueOS logs must not wait to be noticed until someone
+        # opens Monitoring again.
+        self.recorder_badge = ctk.CTkLabel(self, text="", font=T.FONT_SMALL,
+                                           text_color=T.TEXT_MUTED, anchor="e")
+        self.recorder_badge.grid(row=1, column=0, sticky="e", padx=18, pady=(8, 0))
+        self.after(1000, self._update_badge)
+
+    def _update_badge(self) -> None:
+        try:
+            rec = self.recorder
+            st = rec.status if rec is not None else None
+            if rec is None or not rec.watching:
+                text, colour = "Not watching for the ROV", T.TEXT_MUTED
+            elif st.problem:
+                short = st.problem if len(st.problem) < 90 else st.problem[:87] + "…"
+                text, colour = f"⚠  {short}", T.WARN
+            elif st.state == "recording":
+                text, colour = (f"●  Recording {st.flight_id}  ·  {st.rows:,} rows  ·  "
+                                f"{rec.host}"), T.OK
+            elif st.state == "closing":
+                text, colour = f"Closing {st.flight_id}…", T.TEXT
+            else:
+                text, colour = f"Watching {rec.host} for arming", T.TEXT_MUTED
+            self.recorder_badge.configure(text=text, text_color=colour)
+        except Exception:
+            pass
+        self.after(1000, self._update_badge)
+
     # ------------------------------------------------------------------
     #  the flight folder
     # ------------------------------------------------------------------
@@ -153,18 +211,65 @@ class App(Shell):
             self._reveal(self.flight_dir)
 
     def use_flight(self, path: Path) -> None:
-        """Adopt a flight folder as the current one and rescan it."""
-        self.flight_dir = Path(path)
+        """Adopt a flight folder as the current one, resetting what belonged
+        to the last one.
+
+        A flight being recorded is not moved: it finishes in the folder it
+        started in, and only the next flight goes to the new one -- the
+        operator is told so and asked first. Transects typed for the previous
+        flight are not silently carried over when the new folder has none.
+        """
+        new = Path(path)
+        old = self.flight_dir
+        rec = self.recorder
+        if (rec is not None and rec.status.state in ("recording", "closing")
+                and old is not None and new != old):
+            if not messagebox.askyesno(
+                APP_NAME,
+                f"{rec.status.flight_id} is being recorded into\n{old}\n\n"
+                f"It will finish there. Flights after it will be recorded "
+                f"into\n{new}\n\nSwitch the flight folder?"):
+                return
+        self.flight_dir = new
         self.folder_entry.delete(0, "end")
         self.folder_entry.insert(0, str(self.flight_dir))
-        self._scan()
+        self._scan(previous=old)
 
-    def _scan(self) -> None:
+    def refresh_files(self) -> None:
+        """Look at the flight folder again after files have arrived in it.
+
+        Only what is on disk -- not the plan, which may hold unsaved edits.
+        """
+        if not self.flight_dir:
+            return
+        self.discovery = discovery.discover(self.flight_dir)
+        say(self.found, self.discovery.summary())
+        for key in ("analyze", "health", "summary"):
+            page = self.pages.get(key)
+            if page is not None and hasattr(page, "refresh"):
+                try:
+                    page.refresh()
+                except Exception as ex:
+                    self._log(f"{type(page).__name__}.refresh failed: {ex}")
+
+    def _scan(self, previous: Path | None = None) -> None:
         if not self.flight_dir:
             return
         disc = discovery.discover(self.flight_dir)
         self.discovery = disc
         say(self.found, disc.summary())
+
+        saved = plan_path(self.flight_dir)
+        if not saved.is_file() and previous is not None and previous != self.flight_dir:
+            typed = [t for sf in self._sites for t in sf.to_site().transects
+                     if t.start_tc or t.end_tc]
+            if not typed or messagebox.askyesno(
+                APP_NAME,
+                f"{self.flight_dir.name} has no saved transects.\n\n"
+                f"Clear the {len(typed)} transect(s) entered for "
+                f"{previous.name}?\n\n(No keeps them, to save into the new "
+                f"folder.)"):
+                self._apply_plan(SurveyPlan([]))
 
         guess_project, guess_date = _guess_from_path(self.flight_dir)
         for sf in self._sites:
@@ -207,7 +312,7 @@ class App(Shell):
                 self.recorder = FlightRecorder(host=host, flight_dir=self.flight_dir)
             self.recorder.flight_dir = self.flight_dir
             if not self.recorder.watching:
-                self.recorder.host = host
+                self.recorder.retarget(host)
                 self.recorder.start_watching()
                 self._log("Monitoring: watching for the ROV to arm. The laptop "
                           "and tether will be recorded to logs/ for the length "
