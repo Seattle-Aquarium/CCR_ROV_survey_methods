@@ -454,18 +454,26 @@ class Sampler:
                                             name="utc-arp")
         self._arp_thread.start()
 
-    def stop(self) -> None:
+    def stop(self, *, wait: bool = True) -> None:
+        """Stop the helper threads and release the counters.
+
+        Call it from the thread that calls `sample()`, or once that thread
+        has stopped: the counters are that thread's to close. The slow, ARP
+        and ping threads each hold nothing the others use -- the ping thread
+        closes its own ICMP handle -- so `wait=False` signals them and
+        returns without waiting for a WMI query or an ARP resolution to
+        finish.
+        """
         self._slow_stop.set()
         self._arp_stop.set()
-        if self._slow_thread is not None:
-            self._slow_thread.join(timeout=3.0)
-            self._slow_thread = None
-        # Four seconds, because a resolution already in flight takes three and
-        # a thread joined too early is a thread still running at exit.
-        if self._arp_thread is not None:
-            self._arp_thread.join(timeout=4.0)
-            self._arp_thread = None
-        self.pinger.stop()
+        self.pinger.stop(wait=wait)
+        if wait:
+            if self._slow_thread is not None:
+                self._slow_thread.join(timeout=3.0)
+            # Four seconds, because a resolution already in flight takes three
+            # and a thread joined too early is a thread still running at exit.
+            if self._arp_thread is not None:
+                self._arp_thread.join(timeout=4.0)
         self.counters.close()
 
     # ---- the readings that are dear to take ----------------------------

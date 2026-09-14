@@ -29,7 +29,8 @@ never break another. Two things are deliberately *not* separate:
 
 Because the copies can drift, a fix to shared logic has to be made in both
 folders. The GUI's shared files (`gui/shell.py`, `widgets.py`, `theme.py`,
-`gradients.py`) and `mcap_extract.py` are currently identical in both.
+`gradients.py`), `mcap_extract.py` and `diagnostics.py` are currently identical
+in both.
 
 ---
 
@@ -125,6 +126,20 @@ actually achieved**. Specifically:
 * **A flight keeps its folder.** Choosing a different flight folder while a
   flight is being recorded asks first; the open flight finishes in its own
   folder and only the next one goes to the new folder.
+* **The buttons do not wait on the recorder.** *Start monitoring*, *Record now* and
+  *Stop* hand the work to the recorder's own thread and return at once; the
+  button reads *Starting monitoring…* or *Closing…* and is greyed out until it
+  is done, so a second press cannot queue the opposite. Closing a flight reads
+  every parameter off the vehicle; against a vehicle that is not answering that
+  read is given **90 seconds** and then abandoned, and the flight record says
+  so. The status also shows when rows were last **synced** to disk (written is
+  not the same as on the drive).
+* **A worker that does not stop is reported, not assumed stopped.** If the
+  sampler or the network trace is still stuck inside a read when a flight
+  closes, its files are closed by it when the read returns, and the Monitoring
+  card and every tab's status line say *a recorder worker is stuck*. A new
+  flight still records normally — it has its own workers and files — but
+  restart the program when convenient.
 
 ### 4. Live monitoring
 
@@ -383,10 +398,60 @@ Older flights with recordings loose in `logs/` are read exactly as before.
     growing at the same path is re-extracted, not read from the old cache.
   * the marker is removed before extraction and written last, atomically, so an
     interrupted extraction is a cache miss rather than a half-written table.
-  * one program at a time extracts a flight: a lock file refreshed while the
-    work runs; a lock left by a crash goes stale after two minutes.
-  * UTC's own extractor (unchanged) does not check fingerprints. A cache it
-    writes is rebuilt once by these programs, and it can read theirs.
+  * one program at a time extracts a flight: an **operating-system lock** on
+    `extract.lock`, held for the whole extraction and released when it ends —
+    or when the program ends, however it ends. Nothing is inferred from how
+    long ago progress was reported, and the lock file is never deleted.
+  * *Stop* during an extraction takes effect within a few thousand messages;
+    the half-built cache is left without its marker, so it is never used.
+  * **UTC's extractor takes no lock and does not check fingerprints.** A cache
+    it writes is rebuilt once by these programs, and it can read theirs — but
+    do not extract the same flight in UTC while this program or ROV Imagery
+    Processing is extracting it.
+
+## Diagnostics and reporting a problem
+
+The program keeps its own log, on this laptop's disk and never on the flight
+drive, in
+
+```
+%LOCALAPPDATA%\CCR_ROV\rov_flight_ops\diagnostics\
+```
+
+The **Diagnostics** button at the top right, beside *Dark mode*, opens it.
+(If that folder cannot be written, the program falls back to
+`%TEMP%\CCR_ROV\rov_flight_ops\diagnostics\`, and failing that runs without
+one — it never stops recording over it.)
+
+* `app.log` — start-up facts (program version and git commit, Python,
+  Windows), every job started, stopped and finished with its duration, every
+  recorder transition (*starting a recording*, *closing flight …*, how it
+  closed), and **every unexpected error with its traceback** — including errors
+  in button callbacks and in background threads, which used to vanish because
+  the program has no console. Repeats of the same error are counted rather
+  than logged in full. Rotated at 1 MB; five old files kept.
+* **Stalls.** If the window stops responding for 8 seconds, the stacks of
+  every thread are written to `app.log` once, with what the program said it was
+  doing, and the stall's length is logged when it recovers.
+* `faults.log` — what Python writes if the interpreter itself crashes: the
+  stack of every thread at the moment of the crash.
+* Vehicle File Browser tokens, and anything else that looks like a credential,
+  are replaced with `<redacted>`. Nothing is sent anywhere.
+
+**After a freeze or a crash**, before starting the program again if you can:
+
+1. Note the time, and what you were doing (which tab, which button, recording
+   or not, was the tether up).
+2. Press *Diagnostics* (or open the folder above) and send `app.log`,
+   `app.log.1` and `faults.log`, with the flight's `logs/` folder if a flight was
+   being recorded.
+3. If Windows showed "not responding" and you ended the program, say so: that
+   leaves no fault dump, only the stall report in `app.log`.
+
+**What this cannot catch.** A power cut, a killed process, or Windows ending a
+program that was "not responding" leave no fault dump. A stall that also stops
+Python's own threads (deep inside a driver, say) cannot be reported by the
+watchdog, and appears only as a gap in `app.log`.
 
 ---
 
@@ -417,6 +482,16 @@ the tests; each wants one look at the real thing:
       download the mcaps and preview with *Flight folder*; the two traces should
       sit within a few seconds of each other.
 - [ ] **Rates** — arm, confirm charts fill and the Hz labels read sensibly.
+- [ ] **Responsiveness** (from the 14 September review), with Cockpit and the
+      cameras running: Start/Stop monitoring and Record now/Stop several times
+      each — the window keeps redrawing and the buttons grey out while each
+      runs; a brief disarm and re-arm (one flight); a long disarm (closes on
+      its own); pull the tether mid-recording and press Stop (closes within
+      about two minutes, record notes the abandoned snapshot); close the window
+      mid-recording (the window stays up while it closes, then goes); open a
+      large C3 listing with *List individual files*. Afterwards, open
+      *Diagnostics* and check `app.log` has no stall reports or errors you did
+      not expect, and read the achieved row rate on Monitoring.
 
 ---
 
@@ -440,6 +515,7 @@ rov_flight_ops/
             summarypage.py, healthpage.py   Flight summary
             transectpage.py  Analyze transects
         pifiles.py           Pi files: list, spans, choose, download, delete
+        diagnostics.py       app.log, faults.log, stall watchdog (same file as imagery's copy)
         previewsource.py     where the transect preview's depth comes from
         telemetry_cache.py   the telemetry reader (the flight-ops part of UTC's pipeline)
         blueos.py, flightlog.py, laptop.py, netdiag.py, nettrace.py, ...
@@ -452,7 +528,10 @@ python -m pytest --runlive  # also the scripts that need real data or a display
 ```
 
 `tests/test_review_fixes.py` reproduces each failure case from the 13 September
-2026 independent evaluation and holds the repaired behaviour. The GUI tests use
+2026 independent evaluation and holds the repaired behaviour;
+`tests/test_resilience.py` does the same for the 14 September responsiveness
+review, with event barriers rather than sleeps, and real subprocesses for the
+cache lock and the crash log. The GUI tests use
 a temporary `LOCALAPPDATA`, so they never touch this laptop's settings or
 cache, and only skip when there is genuinely no display.
 
@@ -490,3 +569,27 @@ tether-diagnostics probe that is retried rather than given up on for the whole
 flight. One defect the review did not flag was fixed at the same time: the split
 had renamed the flight record's schema label to `rov_flight_ops.flight/1`; it is
 back to `utc.flight/1`, the same as UTC's.
+
+## Changes after the 14 September 2026 responsiveness review
+
+A second review looked for causes of freezes and of one crash. Its seven
+findings were each checked against the code and confirmed. The crash itself
+was not diagnosed — nothing from the incident was available — so the work is
+in two halves: remove the freezes and races that were found, and make sure the
+next incident leaves evidence.
+
+| | finding | what changed |
+|---|---|---|
+| R1 | Start/Stop monitoring, Record now/Stop and closing the window did hardware setup, thread joins and the closing vehicle snapshot inside the button callback, freezing the window — unbounded against a vehicle that was not answering | a recorder lifecycle thread carries out queued requests in order; buttons grey out while one runs; the closing snapshot has a 90 s budget; closing the window keeps it responsive and says truthfully if the recorder did not finish |
+| R2 | a timed join was treated as a stopped thread: a restart cleared a still-running worker's stop signal, a late opening snapshot could land in the next flight, and the counters, ICMP handle and trace files could be closed beneath a worker still using them | every watch and every flight has its own stop signal, workers and files; one path closes a flight; resources are closed by the thread that uses them; a stuck worker is reported as *degraded* |
+| R3 | one exception in a result handler stopped the job queue for good, and a finished job's queued result could be handed to the next job's callback | per-job ids and callbacks; a job is running until its result is delivered; the queue is serviced in a protected, time-bounded pass with progress coalesced; a Stop is reported as a stop, not an error |
+| R4 | no record of callback errors, thread deaths or stalls under `pythonw` | `diagnostics.py`: rotating `app.log`, `faults.log`, a stall watchdog, credential scrubbing, and the Diagnostics button — see [Diagnostics](#diagnostics-and-reporting-a-problem) |
+| R5 | Stop in Analyze transects waited for the whole site; extraction ignored Stop | Stop reaches inside extraction and the transect extractor at its next progress report; partial caches are never marked valid |
+| R6 | choosing a flight folder, and every visit to BlueOS logs, walked the disk on the window's thread; the output pane re-read itself on every line and grew without limit | folder scans and copy checks run in the background, and a scan for a folder already left is dropped; large folders open in batches; the output pane keeps its last 2,000 lines (the log keeps everything) |
+| R7 | the extraction lock went "stale" after two minutes without progress, so a paused extractor could lose it and then delete its successor's lock | an operating-system lock, released by the OS if the owner dies, never deleted |
+
+Measured on this development laptop (not the field laptop) with the real
+counters and an unreachable vehicle address: the worst gap between runs of a
+50 ms window timer was about 80 ms while recording, and 155 ms across a
+100-second Stop whose closing snapshot got no answer. That is a check on this
+machine, not a guarantee for another.

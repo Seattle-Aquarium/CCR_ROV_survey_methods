@@ -126,7 +126,7 @@ def preview_store(flight_dir: Path | None, windows: Sequence[tuple[str, float, f
     if source in (AUTO, FOLDER) and flight_dir:
         try:
             store, warns = ensure_telemetry(Path(flight_dir), cfg, windows=plain,
-                                            progress=progress)
+                                            progress=progress, cancel=cancel)
             return store, list(warns), "the flight folder's recordings"
         except FileNotFoundError as ex:
             notes.append(str(ex))

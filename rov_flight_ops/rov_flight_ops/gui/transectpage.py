@@ -22,6 +22,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from . import theme as T
+from .shell import JobStopped
 from .widgets import Card, button, entry, label, output_box
 
 APP_NAME = "ROV Flight Operations"
@@ -291,10 +292,18 @@ class TransectPage(ctk.CTkFrame):
             reports: list[str] = []
             for i, site in enumerate(sites):
                 if cancel.is_set():
-                    reports.append("Cancelled.")
-                    break
+                    raise JobStopped(f"before site {site.name}")
                 base = i / len(sites)
                 span = 1.0 / len(sites)
+
+                def report(f, m, b=base, s=span):
+                    # The extractor has no Stop of its own, but it reports
+                    # progress every 20,000 messages while reading and between
+                    # every later stage -- so a Stop is raised from here, at
+                    # the next report, rather than waiting for the site.
+                    if cancel.is_set():
+                        raise JobStopped(f"while {m}" if m else "")
+                    progress(b + s * f, m)
 
                 specs = [
                     pipeline.TransectSpec(
@@ -313,8 +322,13 @@ class TransectPage(ctk.CTkFrame):
                     save_location=out,
                     transects=specs,
                     make_map=want_map,
-                    progress=lambda f, m, b=base, s=span: progress(b + s * f, m),
+                    progress=report,
                 )
+                if cancel.is_set():
+                    # Stopped inside a stage that finished without another
+                    # report: what it wrote is on disk but the run is not whole.
+                    raise JobStopped(f"after site {site.name}; its CSVs may be "
+                                     f"incomplete")
                 reports.append(f"{site.name}: " + "; ".join(
                     result.summary_lines()[0:1]))
                 for r in result.results:
@@ -327,5 +341,15 @@ class TransectPage(ctk.CTkFrame):
                     reports.append(f"   ! {w}")
             return reports
 
-        if self.app.submit(work, "Extracting transect CSVs"):
+        def done(res) -> None:
+            if isinstance(res, JobStopped):
+                self.note.configure(
+                    text=f"Stopped {res}. Transect CSVs written before the stop "
+                         f"are in {out_root}; the rest were not written.")
+            elif isinstance(res, BaseException):
+                self.note.configure(text=f"Failed: {res}")
+            else:
+                self.note.configure(text="Finished — the report is in the log below.")
+
+        if self.app.submit(work, "Extracting transect CSVs", on_done=done):
             self.note.configure(text="Running — progress is in the footer.")

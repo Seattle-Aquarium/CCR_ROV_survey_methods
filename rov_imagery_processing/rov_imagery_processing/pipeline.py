@@ -178,6 +178,7 @@ def ensure_telemetry(
     windows: Sequence[tuple[float, float]] | None = None,
     progress: ProgressCB | None = None,
     force: bool = False,
+    cancel=None,
 ) -> tuple[TelemetryStore, list[str]]:
     """Telemetry for a flight, reading its mcap only if the cache is cold.
 
@@ -228,7 +229,8 @@ def ensure_telemetry(
     if blocked:
         raise RuntimeError("\n".join(blocked))
 
-    ex = mcap_extract.extract(chosen, cache, progress=progress, force=force)
+    ex = mcap_extract.extract(chosen, cache, progress=progress, force=force,
+                              cancel=cancel)
     return TelemetryStore.load(ex.telemetry_csv), warnings + list(ex.warnings)
 
 
@@ -341,7 +343,7 @@ def _run(
 
         # ---- 2. mcap -------------------------------------------------
         ex = mcap_extract.extract(disc.mcaps, cache, progress=st.sub("extract"),
-                                  force=req.force_extract)
+                                  force=req.force_extract, cancel=cancel)
         res.warnings.extend(ex.warnings)
         if ex.video.frames == 0:
             res.errors.append(
@@ -513,7 +515,7 @@ def _run(
                     ff.log_cb and ff.log_cb(traceback.format_exc())
         st.finish("render", "composites complete")
 
-    except ff.CancelledError:
+    except (ff.CancelledError, mcap_extract.ExtractionCancelled):
         res.cancelled = True
     except Exception as ex_:                      # unexpected: report, don't crash
         res.errors.append(f"{type(ex_).__name__}: {ex_}")

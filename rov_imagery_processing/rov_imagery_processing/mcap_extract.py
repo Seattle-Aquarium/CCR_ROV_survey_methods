@@ -26,10 +26,12 @@ absolute epoch timeline.
 from __future__ import annotations
 
 import csv
+import errno
 import io
 import json
 import re
 import struct
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -397,12 +399,22 @@ def select_channels_streaming(
 #: added -- are simply rebuilt once.
 CACHE_SCHEMA = 2
 
-#: A lock not refreshed for this long belongs to a process that has gone.
-LOCK_STALE_S = 120.0
+#: How many messages are read between checks of the Stop signal. Checking is
+#: one attribute read, so this is about keeping the loop tight, not about cost.
+CANCEL_EVERY = 2000
 
 
 class ExtractionBusy(RuntimeError):
     """Another program is already extracting this flight's telemetry."""
+
+
+class ExtractionCancelled(Exception):
+    """Stop was pressed. The cache is left without a marker, so it is not used."""
+
+
+def _check(cancel) -> None:
+    if cancel is not None and cancel.is_set():
+        raise ExtractionCancelled("stopped before the telemetry was fully extracted")
 
 
 def source_fingerprint(mcaps: Sequence[Path]) -> list[dict]:
@@ -421,52 +433,83 @@ def source_fingerprint(mcaps: Sequence[Path]) -> list[dict]:
 
 
 class _CacheLock:
-    """One extraction per flight cache, across every program sharing it.
+    """One extraction per flight cache, across every program that takes it.
 
-    A lock file created exclusively and refreshed while the work runs. One
-    left behind by a crash goes stale after `LOCK_STALE_S` and is taken over.
+    An operating-system lock on one byte of ``extract.lock`` -- `msvcrt` on
+    Windows, `flock` elsewhere -- held for as long as the extraction runs.
+
+    An earlier version used a lock *file* that went stale after two minutes
+    without a progress report. A long pause with no report -- a slow drive, a
+    large recording's summary being read -- let a second extractor decide the
+    first had died, take over, and then have its lock deleted by the first
+    when that finished. The operating system knows whether the owner is alive
+    and nothing here guesses: the lock is released when the owner closes it,
+    or when its process ends however it ends. The file itself is never
+    deleted, so there is never a moment when two processes each hold a lock
+    on a different file of the same name.
+
+    It protects only programs that take it: ROV Flight Operations and ROV
+    Imagery Processing. UTC's extractor predates it and takes no lock; do not
+    run UTC's extraction on a flight while one of these is extracting it.
     """
 
     def __init__(self, cache_dir: Path):
         self.path = Path(cache_dir) / "extract.lock"
-        self._touched = 0.0
+        self._fh = None
 
     def __enter__(self):
-        import os
-        import time
-        for _attempt in range(2):
-            try:
-                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(fd, str(os.getpid()).encode())
-                os.close(fd)
-                self._touched = time.monotonic()
-                return self
-            except FileExistsError:
-                try:
-                    age = time.time() - self.path.stat().st_mtime
-                except OSError:
-                    continue
-                if age < LOCK_STALE_S:
-                    raise ExtractionBusy(
-                        f"Another program is extracting this flight's telemetry "
-                        f"right now ({self.path}). Try again when it has "
-                        f"finished.") from None
-                self.path.unlink(missing_ok=True)
-        raise ExtractionBusy(f"Could not take the extraction lock {self.path}.")
-
-    def touch(self) -> None:
-        import os
-        import time
-        if time.monotonic() - self._touched > 5.0:
-            try:
-                os.utime(self.path)
-            except OSError:
-                pass
-            self._touched = time.monotonic()
+        fh = open(self.path, "a+b")                      # noqa: SIM115 - held
+        try:
+            _lock_byte(fh)
+        except BlockingIOError:
+            fh.close()
+            raise ExtractionBusy(
+                f"Another program is extracting this flight's telemetry right "
+                f"now ({self.path}). Try again when it has finished.") from None
+        except OSError as ex:
+            fh.close()
+            raise ExtractionBusy(
+                f"Could not lock the telemetry cache ({self.path}): {ex}") from None
+        self._fh = fh
+        return self
 
     def __exit__(self, *_exc):
-        self.path.unlink(missing_ok=True)
+        fh, self._fh = self._fh, None
+        if fh is not None:
+            try:
+                _unlock_byte(fh)
+            except OSError:
+                pass
+            finally:
+                fh.close()                  # closing releases it regardless
         return False
+
+
+if sys.platform == "win32":
+    import msvcrt
+
+    def _lock_byte(fh) -> None:
+        fh.seek(0)
+        try:
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as ex:
+            # Windows reports a region another handle holds as EACCES or
+            # EDEADLOCK; either way, somebody else has it.
+            if ex.errno in (errno.EACCES, errno.EDEADLOCK):
+                raise BlockingIOError(ex.errno, str(ex)) from None
+            raise
+
+    def _unlock_byte(fh) -> None:
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+else:
+    import fcntl
+
+    def _lock_byte(fh) -> None:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _unlock_byte(fh) -> None:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 def extract(
@@ -475,12 +518,18 @@ def extract(
     *,
     progress: ProgressCB | None = None,
     force: bool = False,
+    cancel=None,
 ) -> ExtractResult:
     """Extract every mcap into one merged cache directory.
 
     mcaps are processed in chronological order (by first message time) so the
     concatenated H.264 stream and the telemetry share a single, monotonic
     epoch timeline.
+
+    `cancel` is an Event. It is checked before each recording and every
+    `CANCEL_EVERY` messages within one; when it is set `ExtractionCancelled`
+    is raised, the lock is released, and the products already written are
+    left without the marker that would make them a cache hit.
     """
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -511,24 +560,18 @@ def extract(
         except Exception:
             pass  # unreadable marker: just re-extract
 
-    with _CacheLock(cache_dir) as lock:
-        outer = progress
-
-        def progress(frac, msg=""):
-            lock.touch()
-            if outer:
-                outer(frac, msg)
-
+    _check(cancel)
+    with _CacheLock(cache_dir):
         return _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv,
-                        marker, progress)
+                        marker, progress, cancel)
 
 
 def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
-             progress) -> ExtractResult:
+             progress, cancel=None) -> ExtractResult:
     """The extraction itself, under the cache lock."""
     # The marker goes first and comes back last: an extraction that dies part
-    # way leaves products with no marker, which is a cache miss next time
-    # rather than a half-written table taken as whole.
+    # way -- or is stopped -- leaves products with no marker, which is a cache
+    # miss next time rather than a half-written table taken as whole.
     marker.unlink(missing_ok=True)
     sources = source_fingerprint(mcaps)
     ordered, warnings = select_mcaps(mcaps)
@@ -556,6 +599,7 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
         byte_off = 0
 
         for mi, mpath in enumerate(ordered):
+            _check(cancel)
             if progress:
                 progress(done_bytes / total_bytes,
                          f"reading {mpath.name} ({mi + 1}/{len(ordered)})")
@@ -637,6 +681,8 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
                         if keep is not None and channel.topic not in keep:
                             continue
                         nread += 1
+                        if nread % CANCEL_EVERY == 0:
+                            _check(cancel)
                         if nread % 20000 == 0 and progress:
                             within = min(1.0, nread / expected)
                             frac = (done_bytes + size * within) / total_bytes
@@ -675,6 +721,8 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
 
                         n_rows += _write_telemetry(tw, mt, t, message.data)
 
+            except ExtractionCancelled:
+                raise                          # a Stop is not a damaged file
             except Exception as ex:
                 # a file that fails partway still leaves whatever it wrote;
                 # report it and carry on with the remaining recordings
@@ -692,6 +740,7 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
             f"({', '.join(sorted(vi.resolutions))}); the inset may be unreliable"
         )
 
+    _check(cancel)
     res = ExtractResult(cache_dir, ordered, h264_path, frames_csv, telem_csv, vi,
                         t_start, t_end, n_rows, warnings)
     payload = res.to_json()

@@ -130,6 +130,15 @@ class _Watch:
     moved: int = 0
 
 
+def _close_quietly(handle) -> None:
+    if handle is not None:
+        try:
+            handle.flush()
+            handle.close()
+        except Exception:
+            pass
+
+
 class Tracer:
     """The fast network trace for one flight. Start it, stop it, read it.
 
@@ -202,17 +211,26 @@ class Tracer:
             self._threads.append(thread)
         return True
 
-    def stop(self) -> None:
-        """Stop both threads and close the files. Safe to call twice."""
+    def stop(self) -> bool:
+        """Stop both threads and close the files. Safe to call twice.
+
+        Each loop closes the file it writes as it exits, so a loop still
+        running when the wait runs out is not written to after its file is
+        closed -- it closes the file itself when it gets there. True when both
+        loops have gone.
+        """
         self._stop.set()
         for thread in self._threads:
             thread.join(timeout=3.0)
-        self._threads = []
+        alive = [t.name for t in self._threads if t.is_alive()]
         self._note("trace stopped",
                    f"{self.ticks} ticks, {self.echoes} echoes, "
-                   f"{self.lost} of them lost")
-        self._close_files()
+                   f"{self.lost} of them lost"
+                   + (f"; {', '.join(alive)} still finishing" if alive else ""))
+        if not self._threads:
+            self._close_files()                      # never started
         self._write_sidecars()
+        return not alive
 
     # ------------------------------------------------------------------
     #  which interfaces
@@ -276,15 +294,16 @@ class Tracer:
             return False
 
     def _close_files(self) -> None:
-        for handle in (self._fast_fh, self._ping_fh):
-            if handle is not None:
-                try:
-                    handle.flush()
-                    handle.close()
-                except Exception:
-                    pass
-        self._fast_fh = self._ping_fh = None
-        self._fast_writer = self._ping_writer = None
+        self._close_fast()
+        self._close_pings()
+
+    def _close_fast(self) -> None:
+        handle, self._fast_fh, self._fast_writer = self._fast_fh, None, None
+        _close_quietly(handle)
+
+    def _close_pings(self) -> None:
+        handle, self._ping_fh, self._ping_writer = self._ping_fh, None, None
+        _close_quietly(handle)
 
     def _write_sidecars(self) -> None:
         """The events as text, and everything static about the run as JSON."""
@@ -331,25 +350,28 @@ class Tracer:
     def _fast_loop(self) -> None:
         tick = time.monotonic()
         rescan_at = tick + RESCAN_S
-        while not self._stop.is_set():
-            tick += self.period
-            try:
-                if time.monotonic() >= rescan_at:
-                    rescan_at = time.monotonic() + RESCAN_S
-                    before = len(self._watch)
-                    order = self._rescan()
-                    if len(self._watch) != before:
-                        # A new interface appeared. Its columns are not in the
-                        # header already written, so it is noted rather than
-                        # added: a header that changes halfway down a CSV is
-                        # worse than a missing column.
-                        new = [w.alias for w in order if w not in self._order]
-                        self._note("interface appeared", ", ".join(new)
-                                   + " — not in this file's columns")
-                self._one_tick()
-            except Exception:
-                pass
-            time.sleep(max(0.0, tick - time.monotonic()))
+        try:
+            while not self._stop.is_set():
+                tick += self.period
+                try:
+                    if time.monotonic() >= rescan_at:
+                        rescan_at = time.monotonic() + RESCAN_S
+                        before = len(self._watch)
+                        order = self._rescan()
+                        if len(self._watch) != before:
+                            # A new interface appeared. Its columns are not in
+                            # the header already written, so it is noted rather
+                            # than added: a header that changes halfway down a
+                            # CSV is worse than a missing column.
+                            new = [w.alias for w in order if w not in self._order]
+                            self._note("interface appeared", ", ".join(new)
+                                       + " — not in this file's columns")
+                    self._one_tick()
+                except Exception:
+                    pass
+                self._stop.wait(max(0.0, tick - time.monotonic()))
+        finally:
+            self._close_fast()
 
     def _one_tick(self) -> None:
         now = time.time()
@@ -428,8 +450,15 @@ class Tracer:
     # ------------------------------------------------------------------
 
     def _echo_loop(self) -> None:
+        try:
+            self._echo_run()
+        finally:
+            self._close_pings()
+
+    def _echo_run(self) -> None:
         echo = W.Echo(self.host)
         if not echo.open():
+            echo.close()
             self._note("echo unavailable",
                        "ICMP could not be opened; the ping file will be empty")
             return
@@ -462,7 +491,7 @@ class Tracer:
                             self._ping_fh.flush()
                     except Exception:
                         pass
-                time.sleep(max(0.0, tick - time.monotonic()))
+                self._stop.wait(max(0.0, tick - time.monotonic()))
         finally:
             echo.close()
 

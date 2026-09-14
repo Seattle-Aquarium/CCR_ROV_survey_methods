@@ -394,9 +394,13 @@ class MonitorPage(ctk.CTkFrame):
         return committed or "192.168.2.2"
 
     def _toggle_watch(self) -> None:
+        """Queue the change and return: the recorder does the work on its own
+        thread, and the buttons wait until it is done."""
         rec = self.recorder
+        if rec.transitioning:
+            return
         if rec.watching:
-            rec.stop_watching()
+            rec.request("unwatch")
         else:
             if self.app.flight_dir is None:
                 messagebox.showinfo(
@@ -407,23 +411,36 @@ class MonitorPage(ctk.CTkFrame):
                     "nobody looks.")
                 return
             rec.retarget(self._host())
-            rec.start_watching()
-        self._sync_buttons()
+            rec.request("watch")
+        self._follow()
 
     def _toggle_manual(self) -> None:
         rec = self.recorder
+        if rec.transitioning or rec.status.state in ("starting", "closing"):
+            return
         if rec.status.state == "recording":
-            rec.stop_manually()
+            rec.request("stop")
         else:
             if self.app.flight_dir is None:
                 messagebox.showinfo(self.app.title(),
                                     "Choose a flight folder first.")
                 return
             rec.retarget(self._host())
-            if not rec.watching:
-                rec.start_watching()
-            rec.start_manually()
-        self._sync_buttons()
+            rec.request("record")
+        self._follow()
+
+    def _follow(self) -> None:
+        """Show a lifecycle request's progress promptly, until it is done."""
+        rec = getattr(self.app, "recorder", None)
+        try:
+            self._sync_buttons()
+            if self.canvas.winfo_ismapped():
+                self._update_state()
+        except Exception:
+            pass
+        if rec is not None and (rec.transitioning
+                                or rec.status.state in ("starting", "closing")):
+            self.after(250, self._follow)
 
     def _open_logs(self) -> None:
         if not self.app.flight_dir:
@@ -459,10 +476,22 @@ class MonitorPage(ctk.CTkFrame):
     def _sync_buttons(self) -> None:
         rec = getattr(self.app, "recorder", None)
         watching = bool(rec and rec.watching)
-        self.watch_btn.configure(
-            text="Stop monitoring" if watching else "Start monitoring")
-        recording = bool(rec and rec.status.state == "recording")
-        self.manual_btn.configure(text="Stop" if recording else "Record now")
+        busy = bool(rec and rec.transitioning)
+        if busy and rec.status.transition:
+            watch_text = f"{rec.status.transition}…"
+        else:
+            watch_text = "Stop monitoring" if watching else "Start monitoring"
+        # Disabled while a request is under way, so a second press cannot
+        # queue the opposite of what the first one is still doing.
+        self.watch_btn.configure(text=watch_text,
+                                 state="disabled" if busy else "normal")
+        state = rec.status.state if rec else "idle"
+        recording = state == "recording"
+        self.manual_btn.configure(
+            text={"starting": "Starting…", "closing": "Closing…"}.get(
+                state, "Stop" if recording else "Record now"),
+            state="disabled" if busy or state in ("starting", "closing")
+            else "normal")
 
     def _tick(self) -> None:
         """Once a second, matching the data. Reschedules itself forever.
@@ -496,6 +525,8 @@ class MonitorPage(ctk.CTkFrame):
         self.state_label.configure(text=st.line(), text_color=colour)
 
         bits = [f"vehicle {rec.host}" + ("" if rec.watching else " (not watching)")]
+        if st.degraded:
+            bits.append(f"⚠ {st.degraded}")
         if st.pending_host:
             bits.append(f"switching to {st.pending_host} when this flight closes")
         if st.state == "recording":
@@ -505,6 +536,12 @@ class MonitorPage(ctk.CTkFrame):
                 age = time.time() - st.last_write
                 bits.append(f"last row written {age:.0f} s ago"
                             + ("  <-- NOT WRITING" if age > 5 else ""))
+            # Written is not the same as on the disk: rows are synced every
+            # few seconds, and this is the last time that succeeded.
+            if st.last_sync:
+                bits.append(f"last synced to disk {time.time() - st.last_sync:.0f} s ago")
+        elif st.state == "idle" and st.outcome:
+            bits.append(f"last flight: {st.outcome}")
             achieved = achieved_hz(rec.history)
             if achieved is not None:
                 bits.append(f"rows at {achieved:.2f} Hz achieved (target "

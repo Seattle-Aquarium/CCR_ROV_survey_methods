@@ -132,9 +132,40 @@ extracted twice.
 A cached extraction is used only when it was built from the **same source files
 (path, size and modification time) with the current cache schema** and all its
 products are present, so a recording recopied or repaired at the same path is
-re-extracted rather than read from the old cache. Only one program extracts a
-flight at a time (a lock file, stale after two minutes). This came out of the 13
+re-extracted rather than read from the old cache. This came out of the 13
 September 2026 review of ROV Flight Operations, which shares the cache.
+
+Only one program extracts a flight at a time: an **operating-system lock** on
+`extract.lock`, held for the whole extraction and released when it ends or
+when the program ends, however it ends (since the 14 September 2026 review;
+before, a lock file was declared stale after two minutes without progress, and
+a paused extraction could lose it). *Stop* during an extraction takes effect
+within a few thousand messages, and a half-built cache is never marked valid.
+**UTC's extractor takes no lock**: do not extract the same flight in UTC while
+this program or ROV Flight Operations is extracting it.
+
+## Diagnostics and reporting a problem
+
+The program keeps its own log, on this laptop's disk, in
+`%LOCALAPPDATA%\CCR_ROV\rov_imagery_processing\diagnostics\` — the
+**Diagnostics** button at the top right opens it. `app.log` records start-up
+facts, every job with its duration and outcome, and every unexpected error with
+its traceback (including errors in button callbacks and background threads,
+which used to vanish under `pythonw`); if the window stops responding for 8
+seconds, every thread's stack is written there once. `faults.log` holds the
+stacks if the interpreter itself crashes. Tokens are redacted and nothing is
+sent anywhere.
+
+After a freeze or crash: note the time and what you were doing, then send
+`app.log`, `app.log.1` and `faults.log`. A power cut, a killed process, or
+Windows ending a "not responding" program leave no fault dump — say so if that
+is what happened.
+
+The job queue and the log behind this are the same files as in ROV Flight
+Operations (`gui/shell.py`, `diagnostics.py`): each job's result goes only to
+that job, one failing result handler no longer stops the queue, a flood of
+progress cannot starve the window, and the output pane keeps its last 2,000
+lines. `tests/test_resilience.py` holds those behaviours here too.
 
 ---
 
@@ -152,6 +183,7 @@ rov_imagery_processing/
             shell.py        banner fold, tabs, resizable output (same file as flight ops' copy)
             widgets.py      cards, resize grips, site/transect editors
             importpage.py, processpage.py, bannertools.py, videopage.py
+        diagnostics.py      app.log, faults.log, stall watchdog (same file as flight ops' copy)
         lightroom/          the RAW develop batch and its Lightroom plug-in
         pipeline.py, compose.py, overlay.py, sorting.py, ingest.py, photos.py, ...
     tests/

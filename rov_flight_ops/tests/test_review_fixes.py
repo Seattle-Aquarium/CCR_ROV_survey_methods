@@ -224,12 +224,21 @@ class _BrokenWriter:
         raise OSError("disk full")
 
 
+def _open_session(rec, folder: Path, **kw):
+    """A flight in progress, without the sampler or the vehicle behind it."""
+    session = flightlog._Session(1, "2026-09-13_130512", folder / "logs", folder,
+                                 rec.host, kw.get("manual", False))
+    rec._session = session
+    rec.status.state = "recording"
+    return session
+
+
 def test_a_write_failure_is_shown_and_counted(tmp_path):
     rec = flightlog.FlightRecorder(host="test", flight_dir=tmp_path)
-    rec.status.state = "recording"
-    rec._writer = _BrokenWriter()
-    rec._write_row(dict.fromkeys(laptop.COLUMNS))
-    rec._write_row(dict.fromkeys(laptop.COLUMNS))
+    session = _open_session(rec, tmp_path)
+    session.writer = _BrokenWriter()
+    rec._write_row(session, dict.fromkeys(laptop.COLUMNS))
+    rec._write_row(session, dict.fromkeys(laptop.COLUMNS))
     assert rec.status.problem.startswith("RECORDING FAILED")
     assert "disk full" in rec.status.problem
     assert rec.status.dropped == 2 and rec.status.rows == 0
@@ -238,14 +247,14 @@ def test_a_write_failure_is_shown_and_counted(tmp_path):
 
 def test_a_recovered_disk_clears_the_alarm_but_keeps_the_count(tmp_path):
     rec = flightlog.FlightRecorder(host="test", flight_dir=tmp_path)
-    rec.status.state = "recording"
-    rec._writer = _BrokenWriter()
-    rec._write_row({})
+    session = _open_session(rec, tmp_path)
+    session.writer = _BrokenWriter()
+    rec._write_row(session, {})
     out = tmp_path / "rows.csv"
-    rec._fh = out.open("w", newline="", encoding="utf-8")
-    rec._writer = csv.DictWriter(rec._fh, fieldnames=["a"], extrasaction="ignore")
-    rec._write_row({"a": 1})
-    rec._fh.close()
+    session.fh = out.open("w", newline="", encoding="utf-8")
+    session.writer = csv.DictWriter(session.fh, fieldnames=["a"], extrasaction="ignore")
+    rec._write_row(session, {"a": 1})
+    session.fh.close()
     assert rec.status.problem == ""
     assert "1 row(s) could not be written" in rec.status.note
     assert rec.status.last_write > 0
@@ -259,12 +268,9 @@ def test_a_recovered_disk_clears_the_alarm_but_keeps_the_count(tmp_path):
 def test_the_open_flight_keeps_its_folder_when_the_window_moves_on(tmp_path):
     a, b = tmp_path / "A", tmp_path / "B"
     rec = flightlog.FlightRecorder(host="test", flight_dir=a)
-    rec._session_dir = a
-    rec.status.state = "recording"
+    session = _open_session(rec, a)
     rec.flight_dir = b                       # the operator chose another folder
-    assert rec._logs_dir() == a / "logs"
-    rec._session_dir = None
-    rec.status.state = "idle"
+    assert session.folder == a / "logs"
     assert rec._logs_dir() == b / "logs", "the next flight goes to the new folder"
 
 
@@ -276,15 +282,14 @@ def test_an_address_typed_while_idle_redirects_the_watcher():
 
 def test_an_address_typed_during_a_flight_waits_for_it_to_close(tmp_path):
     rec = flightlog.FlightRecorder(host="old-host", flight_dir=tmp_path)
-    rec.status.state = "recording"
+    session = _open_session(rec, tmp_path)
     assert rec.retarget("new-host") is False
     assert rec.host == "old-host" and rec.status.pending_host == "new-host"
     # The closing path applies it.
-    rec._sample = None
-    rec._sampler = None
     rec._snapshot = lambda since_log="": flightlog.Snapshot()
-    rec._write_files = lambda end, reason: None
-    rec._end_flight(reason="test")
+    rec._write_files = lambda *a, **k: None
+    assert rec.stop_manually(wait=True) is True
+    assert session.done.is_set()
     assert rec.host == "new-host" and rec.status.pending_host == ""
 
 
@@ -349,8 +354,8 @@ def test_two_programs_cannot_extract_one_flight_at_once(tmp_path):
     cache = tmp_path / "cache"
     cache.mkdir()
     write_mcap(src, seconds=2)
-    (cache / "extract.lock").write_text("12345")        # someone else, just now
-    with pytest.raises(mcap_extract.ExtractionBusy):
+    # Someone else holds it. (Across real processes: test_resilience.)
+    with mcap_extract._CacheLock(cache), pytest.raises(mcap_extract.ExtractionBusy):
         mcap_extract.extract([src], cache)
 
 

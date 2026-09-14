@@ -18,14 +18,16 @@ Operations, a separate program.
 
 from __future__ import annotations
 
+import logging
 import re
+import sys
 from datetime import date as _date
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from .. import discovery
+from .. import diagnostics, discovery
 from ..config import AppConfig
 from ..pipeline import RunResult
 from ..survey import PLAN_FILENAME, Site, SurveyPlan, plan_path
@@ -251,7 +253,7 @@ class App(Shell):
         def work(progress, cancel):
             store, warns = ensure_telemetry(
                 flight, cfg, windows=[(a, b) for _n, a, b in windows],
-                progress=progress)
+                progress=progress, cancel=cancel)
             style = (depthplot.PlotStyle() if mode == "dark"
                      else depthplot.PlotStyle.light())
             img = depthplot.render_profile(store, windows, width=980, height=300,
@@ -309,9 +311,18 @@ def _guess_from_path(p: Path | None) -> tuple[str, str]:
 
 
 def main() -> None:
+    # First, so that anything that goes wrong from here on leaves a record.
+    diagnostics.setup()
     ctk.set_default_color_theme("blue")
-    app = App()
-    app.mainloop()
+    try:
+        app = App()
+        app.mainloop()
+    except BaseException:
+        diagnostics.log_exception("the window", *sys.exc_info(),
+                                  level=logging.CRITICAL)
+        raise
+    finally:
+        logging.getLogger(__name__).info("---- %s exited ----", APP_NAME)
 
 
 if __name__ == "__main__":

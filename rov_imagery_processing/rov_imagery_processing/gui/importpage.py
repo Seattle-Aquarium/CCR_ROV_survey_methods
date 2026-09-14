@@ -281,7 +281,7 @@ class ImportPage(ctk.CTkFrame):
                 progress(0.0, "reading telemetry…")
                 store, _w = ensure_telemetry(
                     flight, cfg, windows=[(a, b) for _n, a, b in windows],
-                    progress=lambda f, m="": progress(f * 0.2, m))
+                    progress=lambda f, m="": progress(f * 0.2, m), cancel=cancel)
             sub = lambda f, m="": progress(0.2 + f * 0.8, m)
             if moving:
                 return sorting.sort_flight(

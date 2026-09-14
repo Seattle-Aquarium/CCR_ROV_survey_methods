@@ -22,13 +22,21 @@ the part that shrinks.
 
 **One worker.** Every tab starts its jobs through `submit`, and a job reports
 through a queue the Tk loop drains -- Tk is not thread-safe, so no worker ever
-touches a widget.
+touches a widget. Each job has its own id, its own Stop signal and its own
+callback, and stays the running job until its result has been handed over --
+not merely until its thread ends -- so one job's result can never reach the
+next job's callback. The drain survives a callback that raises, hands the
+loop back after a bounded slice, and keeps only the newest progress update
+from each batch.
 """
 
 from __future__ import annotations
 
+import logging
 import queue
+import sys
 import threading
+import time
 import tkinter
 import traceback
 from collections.abc import Callable
@@ -37,9 +45,46 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
+from .. import diagnostics
 from . import gradients as G
 from . import theme as T
 from .widgets import Grip, button, one_line_height
+
+log = logging.getLogger(__name__)
+#: The shared output pane, copied into the diagnostics log.
+output_log = logging.getLogger(diagnostics.PACKAGE + ".output")
+
+#: A drain pass hands the event loop back after this many messages or this
+#: long, whichever comes first, so a flood of progress cannot starve input.
+DRAIN_EVERY_MS = 80
+DRAIN_MAX_MESSAGES = 200
+DRAIN_MAX_S = 0.05
+
+#: Lines the shared output pane keeps. Older lines are dropped from the
+#: screen in one block; the diagnostics log has the whole run.
+LOG_MAX_LINES = 2000
+LOG_TRIM_LINES = 500
+
+
+class JobStopped(BaseException):  # noqa: N818 - it is not an error
+    """Raised inside a job's work to leave it at a checkpoint after Stop.
+
+    A BaseException, deliberately: code the job calls into -- the transect
+    extractor, for one -- recovers from an ``except Exception`` around each
+    file, and a Stop must not be mistaken for a damaged file and skipped past.
+    """
+
+
+class _Job:
+    """One submitted job: its id, its Stop signal and who wants its result."""
+
+    def __init__(self, job_id: int, label: str, on_done) -> None:
+        self.id = job_id
+        self.label = label
+        self.on_done = on_done
+        self.cancel = threading.Event()
+        self.thread: threading.Thread | None = None
+        self.started = time.monotonic()
 
 
 def _font_kw(font: tuple) -> dict:
@@ -162,9 +207,18 @@ class Shell(ctk.CTk):
         #: tab name -> the pages built into it, each refreshed when it shows.
         self._tab_pages: dict[str, list] = {}
         self._queue: queue.Queue[tuple] = queue.Queue()
-        self._worker: threading.Thread | None = None
+        #: The running job, until its result has been handed over.
+        self._job: _Job | None = None
+        self._job_seq = 0
+        #: The last job's Stop signal, for anything that still reads it.
         self._cancel = threading.Event()
-        self._on_done = None
+        #: key -> the newest background read asked for under that key.
+        self._bg_gen: dict[str, int] = {}
+        self._closing = False
+        self._log_empty = True
+        self._beat_due = time.monotonic()
+        self._beat_seen = False
+        self._late_logged = 0.0
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -175,7 +229,11 @@ class Shell(ctk.CTk):
         self.build_tabs()
         if self.nav.sections:
             self.nav.select(self.nav.sections[0])
-        self.after(80, self._drain)
+        self.after(DRAIN_EVERY_MS, self._drain)
+        # The watchdog starts counting from here: building the window is
+        # start-up, however long it takes, not a stall.
+        self._beat_due = time.monotonic() + diagnostics.HEARTBEAT_S
+        self.after(int(diagnostics.HEARTBEAT_S * 1000), self._heartbeat)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ------------------------------------------------------------------
@@ -211,20 +269,28 @@ class Shell(ctk.CTk):
 
         self.controls = ctk.CTkFrame(self.header, fg_color=T.HEADER_BG,
                                      corner_radius=0)
+        # Where the diagnostics log is, one click away for whoever is asked
+        # to send it after a problem.
+        self.diag_btn = ctk.CTkButton(
+            self.controls, text="Diagnostics", width=90, height=28,
+            corner_radius=6, font=T.FONT_SMALL, fg_color="transparent",
+            hover_color=T.SURFACE_ALT, text_color=T.TEXT_MUTED, border_width=0,
+            bg_color=T.HEADER_BG, command=self.open_diagnostics)
+        self.diag_btn.grid(row=0, column=0, padx=(0, 10))
         self.theme_switch = ctk.CTkSwitch(
             self.controls, text="Dark mode", command=self._toggle_theme,
             font=T.FONT_SMALL, text_color=T.TEXT,
             progress_color=T.ACCENT, button_color=T.SURFACE_ALT,
             bg_color=T.HEADER_BG)
         self.theme_switch.select()
-        self.theme_switch.grid(row=0, column=0, padx=(0, 10))
+        self.theme_switch.grid(row=0, column=1, padx=(0, 10))
         self.fold_btn = ctk.CTkButton(
             self.controls, text="▲", width=34, height=28, corner_radius=6,
             font=("Segoe UI Symbol", 14), fg_color="transparent",
             hover_color=T.SURFACE_ALT,
             text_color=T.TEXT, border_width=1, border_color=T.BORDER,
             bg_color=T.HEADER_BG, command=self.toggle_banner)
-        self.fold_btn.grid(row=0, column=1)
+        self.fold_btn.grid(row=0, column=2)
         self._fold_tip = "Hide the title banner"
 
         self._rule_photo = None
@@ -366,6 +432,8 @@ class Shell(ctk.CTk):
                 try:
                     refresh()
                 except Exception as ex:
+                    diagnostics.log_exception(f"{type(page).__name__}.refresh",
+                                              *sys.exc_info())
                     self._log(f"{type(page).__name__}.refresh failed: {ex}")
 
     def scroll_body(self, parent) -> ctk.CTkScrollableFrame:
@@ -456,79 +524,219 @@ class Shell(ctk.CTk):
         """Run ``work(progress, cancel)`` on the worker thread.
 
         Returns False if a job is already running rather than starting a
-        second one -- two jobs moving the same files would race.
+        second one -- two jobs moving the same files would race. A job is
+        running from here until its result (or its error) has been handed to
+        `on_done`, so a finished job whose result is still queued still
+        counts.
         """
-        if self._worker and self._worker.is_alive():
+        if self._job is not None:
             messagebox.showinfo(self.APP_NAME, "A job is already running. Wait "
                                                "for it to finish, or press Stop.")
             return False
-        self._cancel.clear()
-        self._on_done = on_done
+        self._job_seq += 1
+        job = _Job(self._job_seq, label or "", on_done)
+        self._job = job
+        self._cancel = job.cancel
         self.cancel_btn.configure(state="normal")
         self.progress.set(0.0)
         if label:
             self._log("─" * 60)
             self._log(label)
             self.status.configure(text=label)
+        log.info("job %d started: %s", job.id, label or "(unlabelled)")
+        diagnostics.note_activity("job", f"#{job.id} {label or ''}")
+        put = self._queue.put
 
         def runner() -> None:
             try:
-                out = work(lambda f, m="": self._queue.put(("progress", f, m)),
-                           self._cancel)
-                self._queue.put(("done", out))
-            except Exception as ex:
-                self._queue.put(("crash", traceback.format_exc(), ex))
+                out = work(lambda f, m="": put(("progress", job.id, f, m)),
+                           job.cancel)
+                put(("done", job.id, out))
+            except BaseException as ex:          # noqa: BLE001 - reported, not lost
+                if job.cancel.is_set():
+                    # Whatever a job raises on its way out after Stop is the
+                    # stop, not a fault, and is reported as one.
+                    put(("stopped", job.id, ex))
+                else:
+                    put(("crash", job.id, traceback.format_exc(), ex))
 
-        self._worker = threading.Thread(target=runner, daemon=True)
-        self._worker.start()
+        job.thread = threading.Thread(target=runner, daemon=True,
+                                      name=f"job-{job.id}")
+        job.thread.start()
         return True
 
     @property
     def busy(self) -> bool:
-        return bool(self._worker and self._worker.is_alive())
+        return self._job is not None
 
     def _cancel_run(self) -> None:
-        if self._worker and self._worker.is_alive():
-            self._cancel.set()
+        job = self._job
+        if job is not None and not job.cancel.is_set():
+            job.cancel.set()
+            log.info("job %d: Stop pressed", job.id)
             self.status.configure(text="Stopping…")
 
-    def _drain(self) -> None:
-        try:
-            while True:
-                item = self._queue.get_nowait()
-                kind = item[0]
-                if kind == "progress":
-                    _, frac, msg = item
-                    self.progress.set(max(0.0, min(1.0, float(frac or 0))))
-                    if msg:
-                        self.status.configure(text=msg)
-                elif kind == "done":
-                    self._finish(item[1])
-                elif kind == "crash":
-                    self._log("Unexpected error:\n" + item[1])
-                    self.status.configure(text=f"Failed: {item[2]}")
-                    self.cancel_btn.configure(state="disabled")
-                    # A page waiting on its result is told, so it can put its
-                    # own widgets back rather than saying "Reading…" forever.
-                    cb, self._on_done = self._on_done, None
-                    if cb is not None:
-                        try:
-                            cb(item[2])
-                        except Exception:
-                            self._log("on_done failed:\n" + traceback.format_exc())
-        except queue.Empty:
-            pass
-        self.after(80, self._drain)
+    def background(self, key: str, work: Callable[[], object],
+                   on_result: Callable[[object], None]) -> int:
+        """Run a read-only ``work()`` off the Tk thread, beside the worker.
 
-    def _finish(self, res) -> None:
+        For reading the disk -- folder scans, copy checks -- which must not
+        wait behind a download and must not freeze the window either.
+        `on_result` is called on the Tk thread with the result (or the
+        exception), and only if no newer call has been made with the same
+        `key` since: a scan of a folder the operator has already moved away
+        from is dropped rather than shown.
+        """
+        gen = self._bg_gen.get(key, 0) + 1
+        self._bg_gen[key] = gen
+        put = self._queue.put
+
+        def run() -> None:
+            try:
+                out = work()
+            except Exception as ex:
+                diagnostics.log_exception(f"background read {key}",
+                                          *sys.exc_info(), level=logging.WARNING)
+                out = ex
+            put(("bg", key, gen, on_result, out))
+
+        threading.Thread(target=run, daemon=True, name=f"bg-{key}").start()
+        return gen
+
+    def _drain(self) -> None:
+        """Hand queued worker messages to the window, then come back.
+
+        The next pass is scheduled in `finally`, so a callback that raises is
+        logged and the queue is still serviced afterwards -- before, one
+        exception here stopped every later job from ever reporting.
+        """
+        if self._closing:
+            return
+        try:
+            self._drain_pass()
+        except Exception:
+            diagnostics.log_exception("output queue", *sys.exc_info())
+        finally:
+            if not self._closing:
+                try:
+                    self.after(DRAIN_EVERY_MS, self._drain)
+                except tkinter.TclError:
+                    pass                               # the window is gone
+
+    def _drain_pass(self) -> None:
+        deadline = time.monotonic() + DRAIN_MAX_S
+        progress: dict[int, tuple] = {}
+        for _ in range(DRAIN_MAX_MESSAGES):
+            if time.monotonic() > deadline:
+                break
+            try:
+                item = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if item[0] == "progress":
+                # Replaceable: only the newest of a batch is drawn.
+                progress[item[1]] = item[2:]
+                continue
+            if item[0] in ("done", "crash", "stopped"):
+                pending = progress.pop(item[1], None)
+                if pending is not None:
+                    self._show_progress(item[1], *pending)
+            self._handle(item)
+        for job_id, (frac, msg) in progress.items():
+            self._show_progress(job_id, frac, msg)
+        job = self._job
+        if (job is not None and job.thread is not None
+                and not job.thread.is_alive() and self._queue.empty()):
+            # Every message a thread sends is queued before it exits, so a
+            # thread already dead when the queue is then seen empty ended
+            # without a result. (In that order: the other way round races.)
+            self._retire(job, "ended without reporting a result")
+            self.status.configure(text="The job ended without a result.")
+
+    def _show_progress(self, job_id: int, frac, msg) -> None:
+        if self._job is None or self._job.id != job_id:
+            return
+        self.progress.set(max(0.0, min(1.0, float(frac or 0))))
+        if msg:
+            self.status.configure(text=msg)
+
+    def _handle(self, item: tuple) -> None:
+        kind = item[0]
+        try:
+            if kind == "bg":
+                _, key, gen, on_result, out = item
+                if self._bg_gen.get(key) == gen:
+                    on_result(out)
+                return
+            job = self._job
+            if job is None or job.id != item[1]:
+                log.warning("dropped a %s from job %s, which is no longer the "
+                            "running job", kind, item[1])
+                return
+            # Retired before its callback runs, so the callback can start the
+            # next job, and a callback that fails still leaves Stop disabled.
+            if kind == "done":
+                self._retire(job, "stopped" if job.cancel.is_set() else "finished")
+                self._finish(item[2], job)
+            elif kind == "crash":
+                self._retire(job, "failed")
+                self._crashed(job, item[2], item[3])
+            elif kind == "stopped":
+                self._retire(job, "stopped part way")
+                self._stopped(job, item[2])
+        except Exception:
+            diagnostics.log_exception(f"handling a {kind} message", *sys.exc_info())
+            try:
+                self._log("A result could not be shown; the details are in the "
+                          "diagnostics log.")
+            except Exception:
+                pass
+
+    def _retire(self, job: _Job, outcome: str) -> None:
+        if self._job is job:
+            self._job = None
+        diagnostics.note_activity("job", None)
+        log.info("job %d %s after %.1f s: %s", job.id, outcome,
+                 time.monotonic() - job.started, job.label)
+        try:
+            self.cancel_btn.configure(state="disabled")
+        except Exception:
+            pass
+
+    def _crashed(self, job: _Job, tb: str, ex) -> None:
+        log.error("job %d raised:\n%s", job.id, tb)
+        self._log("Unexpected error:\n" + tb)
+        self.status.configure(text=f"Failed: {ex}")
+        # A page waiting on its result is told, so it can put its own widgets
+        # back rather than saying "Reading…" forever.
+        if job.on_done is not None:
+            try:
+                job.on_done(ex)
+            except Exception:
+                self._log("on_done failed:\n" + traceback.format_exc())
+                diagnostics.log_exception("on_done after a failure", *sys.exc_info())
+
+    def _stopped(self, job: _Job, ex) -> None:
+        log.info("job %d stopped at: %s: %s", job.id, type(ex).__name__, ex)
+        self._log(f"Stopped before it finished ({ex})." if str(ex) else
+                  "Stopped before it finished.")
+        self.status.configure(text="Stopped before it finished.")
+        if job.on_done is not None:
+            try:
+                job.on_done(ex)
+            except Exception:
+                self._log("on_done failed:\n" + traceback.format_exc())
+                diagnostics.log_exception("on_done after a stop", *sys.exc_info())
+
+    def _finish(self, res, job: _Job | None = None) -> None:
         """Report whatever the worker returned."""
-        self.cancel_btn.configure(state="disabled")
-        cb, self._on_done = self._on_done, None
+        cb = job.on_done if job is not None else None
         if cb is not None:
             try:
                 cb(res)
             except Exception:
                 self._log("on_done failed:\n" + traceback.format_exc())
+                diagnostics.log_exception("on_done", *sys.exc_info())
 
         if self.finish_special(res):
             return
@@ -546,8 +754,12 @@ class Shell(ctk.CTk):
             for e in getattr(r, "errors", []) or []:
                 self._log(f"ERROR: {e}")
             opened = opened or getattr(r, "root", None) or getattr(r, "target", None)
-        self.status.configure(text="Done.")
-        self._reveal(opened)
+        stopped = job is not None and job.cancel.is_set()
+        # A stopped job is not a finished one, and does not say so.
+        self.status.configure(text="Stopped before it finished." if stopped
+                              else "Done.")
+        if not stopped:
+            self._reveal(opened)
 
     def finish_special(self, res) -> bool:
         """A subclass's chance to report a result its own way. True = handled."""
@@ -566,22 +778,98 @@ class Shell(ctk.CTk):
     def _log(self, text: str) -> None:
         # The newline goes before each message rather than after it, so the
         # last line of the log is the last message and not an empty line --
-        # which is what a pane dragged down to one line shows.
+        # which is what a pane dragged down to one line shows. Whether the
+        # pane is empty is remembered rather than read back out of it, and
+        # the pane is trimmed in blocks: reading or keeping the whole text
+        # made every message slower than the last over a long day.
+        output_log.info("%s", text)
         self.log.configure(state="normal")
-        first = not self.log.get("1.0", "end-1c")
-        self.log.insert("end", ("" if first else "\n") + text)
+        self.log.insert("end", ("" if self._log_empty else "\n") + text)
+        self._log_empty = False
+        try:
+            lines = int(str(self.log.index("end-1c")).split(".")[0])
+            if lines > LOG_MAX_LINES:
+                self.log.delete("1.0", f"{lines - LOG_MAX_LINES + LOG_TRIM_LINES}.0")
+        except Exception:
+            pass
         self.log.see("end")
         self.log.configure(state="disabled")
 
+    # ------------------------------------------------------------------
+    #  staying diagnosable
+    # ------------------------------------------------------------------
+
+    def report_callback_exception(self, exc, val, tb) -> None:   # noqa: D401
+        """Tk's hook for an exception in a callback -- a button, a timer.
+
+        Tk's own version prints to stderr, which does not exist under
+        pythonw, so these used to vanish without trace.
+        """
+        diagnostics.log_exception("window callback", exc, val, tb)
+        try:
+            self.status.configure(
+                text=f"Something went wrong: {val} — recorded in the "
+                     f"diagnostics log.")
+        except Exception:
+            pass
+
+    def _heartbeat(self) -> None:
+        """Tells the diagnostics watchdog the window is still running."""
+        if self._closing:
+            return
+        now = time.monotonic()
+        late = max(0.0, now - self._beat_due)
+        # The first beat can be late by however long mainloop took to start.
+        diagnostics.beat(late if self._beat_seen else 0.0)
+        if not self._beat_seen:
+            self._beat_seen = True
+            late = 0.0
+        if late > 1.0 and now - self._late_logged > 60.0:
+            self._late_logged = now
+            log.warning("the window ran its heartbeat %.1f s late%s", late,
+                        f" ({diagnostics.activity_text().strip()})"
+                        if diagnostics.activity_text() else "")
+        self._beat_due = now + diagnostics.HEARTBEAT_S
+        try:
+            self.after(int(diagnostics.HEARTBEAT_S * 1000), self._heartbeat)
+        except tkinter.TclError:
+            pass
+
+    def open_diagnostics(self) -> None:
+        where = diagnostics.open_folder()
+        self._log(f"Diagnostics are in {where}")
+
+    # ------------------------------------------------------------------
+    #  closing
+    # ------------------------------------------------------------------
+
     def _on_close(self) -> None:
-        if self._worker and self._worker.is_alive():
+        if self._closing:
+            return
+        job = self._job
+        if job is not None:
             if not messagebox.askyesno(self.APP_NAME,
                                        "A job is in progress. Quit anyway?"):
                 return
-            self._cancel.set()
+            job.cancel.set()
         if self.before_close():
+            self.close_now()
+
+    def close_now(self) -> None:
+        """Destroy the window. Queued worker messages are not delivered."""
+        if self._closing:
+            return
+        self._closing = True
+        log.info("window closed")
+        try:
             self.destroy()
+        except tkinter.TclError:
+            pass
 
     def before_close(self) -> bool:
-        """A subclass's last word before the window closes. False = stay open."""
+        """A subclass's last word before the window closes.
+
+        False keeps the window open; a subclass that needs time to shut down
+        returns False and calls `close_now` itself when it is done.
+        """
         return True

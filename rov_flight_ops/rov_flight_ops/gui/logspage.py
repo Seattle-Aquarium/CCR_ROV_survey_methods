@@ -65,6 +65,12 @@ class LogsPage(ctk.CTkFrame):
         self._nodes: dict[str, tuple[str, str, str]] = {}   # iid -> (kind, cat, prefix/path)
         self._by_path: dict[str, PF.PiFile] = {}
         self._individual = False
+        #: Copy states from the last background check, and what they were for.
+        self._states: dict[str, str] = {}
+        self._states_for: tuple | None = None
+        #: Bumped by every rebuild, so batches of rows for an old tree stop.
+        self._tree_gen = 0
+        self._keep: set[str] = set()
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
@@ -207,6 +213,7 @@ class LogsPage(ctk.CTkFrame):
         if self.inv is None:
             return
         self.inv = None
+        self._tree_gen += 1
         self.tree.delete(*self.tree.get_children())
         self._nodes.clear()
         self._by_path = {}
@@ -301,8 +308,9 @@ class LogsPage(ctk.CTkFrame):
         if inv is None:
             return
         PF.match(inv.all_files(), self._windows())
-        self._manifest = PF.load_manifest(self.app.flight_dir)
         keep = {self._nodes.get(i, ("", "", ""))[2] for i in self.tree.selection()}
+        self._keep = keep
+        self._tree_gen += 1
         self.tree.delete(*self.tree.get_children())
         self._nodes.clear()
         self._by_path = {f.path: f for f in inv.all_files()}
@@ -341,6 +349,53 @@ class LogsPage(ctk.CTkFrame):
                      "'Transects only' when cleaning the Pi.")
         self.found_note.configure(text=text, text_color=T.TEXT_MUTED)
         self._update_previews()
+        self._check_copies()
+
+    # ---- what is already in the flight folder ---------------------------
+
+    def _check_copies(self) -> None:
+        """Work out, off the window's thread, which files are already copied.
+
+        One stat per file -- thousands for a C3 folder, on a drive that may be
+        synchronising -- used to run inside every rebuild, which is every time
+        this tab is shown. The tree shows "checking…" until the answer comes
+        back, and an answer for a flight folder or a listing that has since
+        been replaced is dropped.
+        """
+        inv, flight = self.inv, self.app.flight_dir
+        if inv is None or not flight:
+            return
+        files = list(inv.all_files())
+
+        def work() -> dict[str, str]:
+            manifest = PF.load_manifest(flight)
+            return {f.path: PF.copy_state(f, flight, manifest) for f in files}
+
+        def shown(states) -> None:
+            if isinstance(states, Exception):
+                return
+            if inv is not self.inv or flight != self.app.flight_dir:
+                return
+            self._states = states
+            self._states_for = (flight, inv)
+            self._fill_copied()
+
+        self.app.background("logs-copies", work, shown)
+
+    def _fill_copied(self) -> None:
+        if self.inv is None:
+            return
+        column = len(COLUMNS) - 1
+        for iid, (kind, cat, key) in list(self._nodes.items()):
+            if not self.tree.exists(iid):
+                continue
+            if kind == "file":
+                f = self._by_path.get(key)
+                value = self._file_values(f)[column] if f is not None else "—"
+            else:
+                files = [f for f in self.inv.files.get(cat, []) if f.rel.startswith(key)]
+                value = self._agg(files)[column]
+            self.tree.set(iid, "copied", value)
 
     def _agg(self, files) -> tuple:
         size = sum(f.size for f in files)
@@ -352,10 +407,12 @@ class LogsPage(ctk.CTkFrame):
             rec = "≈ " + rec
         covers = sorted({c for f in files for c in f.covers})
         flight = self.app.flight_dir
+        states = [self._copy_state(f) for f in files] if flight else []
         if not flight:
             copied = "—"
+        elif None in states:
+            copied = "checking…"
         else:
-            states = [self._copy_state(f) for f in files]
             verified = states.count("verified")
             same = states.count("same size")
             if files and verified == len(files):
@@ -366,8 +423,16 @@ class LogsPage(ctk.CTkFrame):
         return (f"{len(files):,}", _gib(size), rec,
                 ", ".join(covers) or "—", copied)
 
-    def _copy_state(self, f: PF.PiFile) -> str:
-        return PF.copy_state(f, self.app.flight_dir, getattr(self, "_manifest", None))
+    def _copy_state(self, f: PF.PiFile) -> str | None:
+        """The last background answer for this file, or None if there is none
+        yet for this flight folder and this listing."""
+        made_for = self._states_for
+        # By identity: comparing two listings field by field would walk every
+        # file in them, which is the cost this cache exists to avoid.
+        if (made_for is None or made_for[0] != self.app.flight_dir
+                or made_for[1] is not self.inv):
+            return None
+        return self._states.get(f.path)
 
     def _file_values(self, f: PF.PiFile) -> tuple:
         rec = (f"{_when(f.start, '%m-%d %H:%M:%S')} – "
@@ -377,6 +442,7 @@ class LogsPage(ctk.CTkFrame):
             rec = _when(f.modified, "%m-%d %H:%M:%S")
         state = self._copy_state(f)
         return ("", _gib(f.size), rec, ", ".join(f.covers) or "—",
+                "checking…" if state is None and self.app.flight_dir else
                 {"verified": "verified", "same size": "same size (unverified)",
                  "differs": "DIFFERENT SIZE"}.get(state, "—"))
 
@@ -412,11 +478,32 @@ class LogsPage(ctk.CTkFrame):
             self.tree.insert(iid, "end", iid=child, text=f"{name}/",
                              values=self._agg(dirs[name]))
             self.tree.insert(child, "end", iid=f"{child}::more", text="…")
-        for f in leaves:
+        self._insert_leaves(iid, cat, leaves, self._tree_gen)
+
+    #: Rows inserted per turn of the event loop when a folder is opened.
+    LEAF_BATCH = 300
+
+    def _insert_leaves(self, iid: str, cat: str, leaves: list, gen: int) -> None:
+        """A folder's files, a batch at a time, so thousands do not freeze it.
+
+        A rebuild in the meantime makes the rest of the batches stale, and
+        they stop.
+        """
+        if gen != self._tree_gen or not self.tree.exists(iid):
+            return
+        batch, rest = leaves[:self.LEAF_BATCH], leaves[self.LEAF_BATCH:]
+        keep = getattr(self, "_keep", set())
+        for f in batch:
             child = f"file:{f.path}"
+            if self.tree.exists(child):
+                continue
             self._nodes[child] = ("file", cat, f.path)
             self.tree.insert(iid, "end", iid=child, text=f.name,
                              values=self._file_values(f))
+            if f.path in keep:
+                self.tree.selection_add(child)
+        if rest:
+            self.after(1, lambda: self._insert_leaves(iid, cat, rest, gen))
 
     def _toggle_individual(self) -> None:
         self._individual = not self._individual

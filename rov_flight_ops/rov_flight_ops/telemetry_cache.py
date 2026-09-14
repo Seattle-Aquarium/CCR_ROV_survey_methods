@@ -58,10 +58,12 @@ def ensure_telemetry(
     windows: Sequence[tuple[float, float]] | None = None,
     progress: ProgressCB | None = None,
     force: bool = False,
+    cancel=None,
 ) -> tuple[TelemetryStore, list[str]]:
     """Telemetry for a flight, reading its mcap only if the cache is cold.
 
-    Returns (store, warnings). Raises if there is no mcap to read.
+    Returns (store, warnings). Raises if there is no mcap to read, and
+    `mcap_extract.ExtractionCancelled` if `cancel` is set part way.
     """
     app = app or AppConfig()
 
@@ -103,7 +105,8 @@ def ensure_telemetry(
     if blocked:
         raise RuntimeError("\n".join(blocked))
 
-    ex = mcap_extract.extract(chosen, cache, progress=progress, force=force)
+    ex = mcap_extract.extract(chosen, cache, progress=progress, force=force,
+                              cancel=cancel)
     return TelemetryStore.load(ex.telemetry_csv), warnings + list(ex.warnings)
 
 

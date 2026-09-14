@@ -139,6 +139,10 @@ class Counters:
         self._arrays: dict[str, ctypes.c_void_p] = {}
         self.missing: list[str] = []
         self._primed = False
+        #: Held around every PDH call and around closing. Closing a query
+        #: while another thread is inside a call on it hands PDH a freed
+        #: handle; this makes `close` wait for that call instead.
+        self._lock = threading.Lock()
         if _PDH is None:
             self.missing = sorted({*SCALARS, *ARRAYS})
             return
@@ -166,18 +170,20 @@ class Counters:
 
     def collect(self) -> None:
         """Take one reading of every counter. Cheap: this is the whole cost."""
-        if self._query is not None:
-            _PDH.PdhCollectQueryData(self._query)
-            self._primed = True
+        with self._lock:
+            if self._query is not None:
+                _PDH.PdhCollectQueryData(self._query)
+                self._primed = True
 
     def scalar(self, name: str) -> float | None:
-        h = self._scalars.get(name)
-        if h is None or not self._primed:
-            return None
-        v = _CounterValue()
-        rc = _PDH.PdhGetFormattedCounterValue(
-            h, PDH_FMT_DOUBLE | PDH_FMT_NOCAP100, None, ctypes.byref(v))
-        return None if rc != 0 else v.doubleValue
+        with self._lock:
+            h = self._scalars.get(name)
+            if h is None or not self._primed or self._query is None:
+                return None
+            v = _CounterValue()
+            rc = _PDH.PdhGetFormattedCounterValue(
+                h, PDH_FMT_DOUBLE | PDH_FMT_NOCAP100, None, ctypes.byref(v))
+            return None if rc != 0 else v.doubleValue
 
     def array(self, name: str) -> dict[str, float]:
         """Every instance of a wildcard counter.
@@ -188,9 +194,13 @@ class Counters:
         comparison against PDH_MORE_DATA never matches and the counter looks
         empty, which is exactly what happened the first time this was written.
         """
-        h = self._arrays.get(name)
-        if h is None or not self._primed:
-            return {}
+        with self._lock:
+            h = self._arrays.get(name)
+            if h is None or not self._primed or self._query is None:
+                return {}
+            return self._array(h)
+
+    def _array(self, h) -> dict[str, float]:
         size = wintypes.DWORD(0)
         count = wintypes.DWORD(0)
         rc = _PDH.PdhGetFormattedCounterArrayW(
@@ -213,12 +223,15 @@ class Counters:
         return out
 
     def close(self) -> None:
-        if self._query is not None:
-            try:
-                _PDH.PdhCloseQuery(self._query)
-            except Exception:
-                pass
-            self._query = None
+        with self._lock:
+            if self._query is not None:
+                try:
+                    _PDH.PdhCloseQuery(self._query)
+                except Exception:
+                    pass
+                self._query = None
+                self._scalars = {}
+                self._arrays = {}
 
 
 # --------------------------------------------------------------------------
@@ -446,6 +459,8 @@ class Pinger:
             return False
 
     def start(self) -> None:
+        """Open the handle and start pinging. Once per Pinger: a stopped
+        Pinger is not restarted, because its old thread may still be exiting."""
         if _ICMP is None or self._thread is not None:
             return
         handle = _ICMP.IcmpCreateFile()
@@ -475,16 +490,30 @@ class Pinger:
         return float(reply.RoundTripTime)
 
     def _run(self) -> None:
-        while not self._stop.is_set():
-            t0 = time.monotonic()
+        try:
+            while not self._stop.is_set():
+                t0 = time.monotonic()
+                try:
+                    rtt = self._ping_once()
+                except Exception:
+                    rtt = None
+                with self._lock:
+                    self._last = rtt
+                    self._recent.append(rtt)
+                self._stop.wait(max(0.0, self.period - (time.monotonic() - t0)))
+        finally:
+            # The handle is this thread's: closed here, after its last ping,
+            # never by `stop` while a ping may still be using it.
+            self._close_handle()
+
+    def _close_handle(self) -> None:
+        with self._lock:
+            handle, self._handle = self._handle, None
+        if handle is not None and _ICMP is not None:
             try:
-                rtt = self._ping_once()
+                _ICMP.IcmpCloseHandle(handle)
             except Exception:
-                rtt = None
-            with self._lock:
-                self._last = rtt
-                self._recent.append(rtt)
-            self._stop.wait(max(0.0, self.period - (time.monotonic() - t0)))
+                pass
 
     def read(self) -> tuple[float | None, float | None]:
         """(latest round trip in ms, packet loss % over the recent window)."""
@@ -494,17 +523,22 @@ class Pinger:
             lost = sum(1 for r in self._recent if r is None)
             return self._last, 100.0 * lost / len(self._recent)
 
-    def stop(self) -> None:
+    def stop(self, *, wait: bool = True) -> bool:
+        """Stop pinging. True once the thread has gone and its handle is closed.
+
+        A thread still inside a ping when the wait runs out keeps the handle
+        and closes it itself as it exits.
+        """
         self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=2.0)
-            self._thread = None
-        if self._handle is not None and _ICMP is not None:
-            try:
-                _ICMP.IcmpCloseHandle(self._handle)
-            except Exception:
-                pass
-            self._handle = None
+        thread = self._thread
+        if thread is not None:
+            if wait:
+                thread.join(timeout=2.0)
+            if thread.is_alive():
+                return False
+        else:
+            self._close_handle()
+        return True
 
 
 # --------------------------------------------------------------------------

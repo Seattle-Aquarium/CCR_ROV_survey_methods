@@ -348,7 +348,8 @@ def _prepare_mcap_side(
             return None
         return lambda f, m="": progress(lo + (hi - lo) * f, f"{label}: {m}")
 
-    ex = mcap_extract.extract(chosen, cache, progress=stage(0.0, 0.6))
+    ex = mcap_extract.extract(chosen, cache, progress=stage(0.0, 0.6),
+                              cancel=cancel)
     warnings.extend(ex.warnings)
     if ex.video.frames == 0:
         raise SideBySideError(

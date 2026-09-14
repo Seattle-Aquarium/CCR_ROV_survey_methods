@@ -204,6 +204,62 @@ def test_a_search_shows_totals_and_a_type_can_be_selected(app, logs):
     assert "2 file(s)" in logs.sel_note.cget("text")
 
 
+def test_copy_checks_run_off_the_window_and_a_stale_answer_is_dropped(
+        app, logs, tmp_path, monkeypatch):
+    """Review finding R6: every visit to this tab stat-ed every listed file on
+    the window's thread. Now the tree says "checking…" until the answer comes
+    back, and an answer for a flight folder already left is not shown."""
+    import threading
+
+    logs._search()
+    wait_idle(app)
+    release = threading.Event()
+    real = PF.copy_state
+
+    def slow(f, flight, manifest=None):
+        release.wait(10)
+        return real(f, flight, manifest)
+
+    monkeypatch.setattr(PF, "copy_state", slow)
+    logs._states_for = None
+    began = time.monotonic()
+    logs._rebuild()
+    assert time.monotonic() - began < 0.5, "the rebuild waited on the disk"
+    assert logs.tree.item("cat:bin", "values")[4] == "checking…"
+    pump(app, 0.2)
+    assert logs.tree.item("cat:bin", "values")[4] == "checking…"
+    release.set()
+    assert_eventually = time.monotonic() + 10
+    while (logs.tree.item("cat:bin", "values")[4] == "checking…"
+           and time.monotonic() < assert_eventually):
+        pump(app, 0.05)
+    assert logs.tree.item("cat:bin", "values")[4].endswith("of 2")
+
+    # Started for one folder, answered after the operator moved to another.
+    release.clear()
+    logs._states_for = None
+    logs._rebuild()
+    other = tmp_path / "other"
+    other.mkdir()
+    app.flight_dir = other
+    release.set()
+    pump(app, 0.5)
+    assert logs._states_for is None or logs._states_for[0] == other
+
+
+def test_a_large_folder_opens_in_batches(app, logs, monkeypatch):
+    logs._search()
+    wait_idle(app)
+    monkeypatch.setattr(type(logs), "LEAF_BATCH", 1)
+    logs._toggle_individual()
+    try:
+        assert len(logs.tree.get_children("cat:bin")) == 1
+        pump(app, 0.2)
+        assert len(logs.tree.get_children("cat:bin")) == 2
+    finally:
+        logs._toggle_individual()
+
+
 def test_individual_files_open_up_and_can_be_picked_one_by_one(app, logs):
     logs._search()
     wait_idle(app)

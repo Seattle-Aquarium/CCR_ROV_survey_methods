@@ -21,14 +21,17 @@ Imagery -- photos and video -- is ROV Imagery Processing, a separate program.
 
 from __future__ import annotations
 
+import logging
 import re
+import sys
+import time
 from datetime import date as _date
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from .. import discovery, settings
+from .. import diagnostics, discovery, settings
 from ..config import AppConfig
 from ..survey import PLAN_FILENAME, Site, SurveyPlan, plan_path
 from . import theme as T
@@ -36,6 +39,8 @@ from .shell import Shell
 from .widgets import Card, SiteFrame, button, entry, output_box, say
 
 APP_NAME = "ROV Flight Operations"
+
+log = logging.getLogger(__name__)
 
 
 class App(Shell):
@@ -53,6 +58,10 @@ class App(Shell):
         self.recorder = None
         self.discovery: discovery.Discovery | None = None
         self._sites: list[SiteFrame] = []
+        #: The recorder's "close" request while the window waits on it.
+        self._close_request = None
+        self._close_began = 0.0
+        self._close_asked_at = 0.0
         super().__init__()
 
     def save_settings(self) -> None:
@@ -159,7 +168,7 @@ class App(Shell):
         try:
             rec = self.recorder
             st = rec.status if rec is not None else None
-            if rec is None or not rec.watching:
+            if rec is None:
                 text, colour = "Not watching for the ROV", T.TEXT_MUTED
             elif st.problem:
                 short = st.problem if len(st.problem) < 90 else st.problem[:87] + "…"
@@ -167,13 +176,22 @@ class App(Shell):
             elif st.state == "recording":
                 text, colour = (f"●  Recording {st.flight_id}  ·  {st.rows:,} rows  ·  "
                                 f"{rec.host}"), T.OK
+            elif st.state == "starting":
+                text, colour = f"Starting {st.flight_id}…", T.TEXT
             elif st.state == "closing":
                 text, colour = f"Closing {st.flight_id}…", T.TEXT
+            elif st.transition:
+                text, colour = f"{st.transition}…", T.TEXT
+            elif not rec.watching:
+                text, colour = "Not watching for the ROV", T.TEXT_MUTED
             else:
                 text, colour = f"Watching {rec.host} for arming", T.TEXT_MUTED
+            if st is not None and st.degraded and not st.problem:
+                text, colour = f"{text}  ·  ⚠ a recorder worker is stuck", T.WARN
             self.recorder_badge.configure(text=text, text_color=colour)
         except Exception:
-            pass
+            diagnostics.log_exception("recorder badge", *sys.exc_info(),
+                                      level=logging.WARNING)
         self.after(1000, self._update_badge)
 
     # ------------------------------------------------------------------
@@ -222,7 +240,7 @@ class App(Shell):
         new = Path(path)
         old = self.flight_dir
         rec = self.recorder
-        if (rec is not None and rec.status.state in ("recording", "closing")
+        if (rec is not None and rec.status.state in ("starting", "recording", "closing")
                 and old is not None and new != old):
             if not messagebox.askyesno(
                 APP_NAME,
@@ -240,24 +258,48 @@ class App(Shell):
 
         Only what is on disk -- not the plan, which may hold unsaved edits.
         """
-        if not self.flight_dir:
+        self._discover()
+
+    def _discover(self) -> None:
+        """Walk the flight folder off the window's thread.
+
+        A flight folder on a synchronised or external drive can take seconds
+        to walk, and used to hold the window for all of them. The result is
+        shown only if the folder is still the one chosen: switching flights
+        while a walk is under way drops the old walk's result.
+        """
+        flight = self.flight_dir
+        if not flight:
             return
-        self.discovery = discovery.discover(self.flight_dir)
-        say(self.found, self.discovery.summary())
-        for key in ("analyze", "health", "summary"):
-            page = self.pages.get(key)
-            if page is not None and hasattr(page, "refresh"):
-                try:
-                    page.refresh()
-                except Exception as ex:
-                    self._log(f"{type(page).__name__}.refresh failed: {ex}")
+        say(self.found, f"Reading {flight}…")
+
+        def shown(disc) -> None:
+            if flight != self.flight_dir:
+                return
+            if isinstance(disc, Exception):
+                say(self.found, f"Could not read {flight}: {disc}")
+                return
+            self.discovery = disc
+            say(self.found, disc.summary())
+            for key in ("analyze", "health", "summary"):
+                page = self.pages.get(key)
+                if page is not None and hasattr(page, "refresh"):
+                    try:
+                        page.refresh()
+                    except Exception as ex:
+                        diagnostics.log_exception(f"{type(page).__name__}.refresh",
+                                                  *sys.exc_info())
+                        self._log(f"{type(page).__name__}.refresh failed: {ex}")
+
+        self.background("flight-folder", lambda: discovery.discover(flight), shown)
 
     def _scan(self, previous: Path | None = None) -> None:
         if not self.flight_dir:
             return
-        disc = discovery.discover(self.flight_dir)
-        self.discovery = disc
-        say(self.found, disc.summary())
+        # The last flight's file list is not this one's, even for the moment
+        # before the new walk finishes.
+        self.discovery = None
+        self._discover()
 
         saved = plan_path(self.flight_dir)
         if not saved.is_file() and previous is not None and previous != self.flight_dir:
@@ -313,11 +355,14 @@ class App(Shell):
             self.recorder.flight_dir = self.flight_dir
             if not self.recorder.watching:
                 self.recorder.retarget(host)
-                self.recorder.start_watching()
+                # Queued, not done here: opening the performance counters and
+                # asking WMI about the battery is slow on a busy laptop.
+                self.recorder.request("watch")
                 self._log("Monitoring: watching for the ROV to arm. The laptop "
                           "and tether will be recorded to logs/ for the length "
                           "of each flight.")
         except Exception as ex:
+            diagnostics.log_exception("starting monitoring", *sys.exc_info())
             self._log(f"Monitoring could not start: {ex}")
 
     # ------------------------------------------------------------------
@@ -381,8 +426,31 @@ class App(Shell):
     # ------------------------------------------------------------------
 
     def before_close(self) -> bool:
+        """Close the recorder properly, with the window still running.
+
+        Closing a flight reads every parameter off the vehicle, which can take
+        a minute and a half against one that has stopped answering. That used
+        to happen inside this callback, and the window froze -- "not
+        responding" -- until it was done or somebody ended the program. Now
+        the recorder closes on its own thread, the window shows how it is
+        going, and it closes when the recorder is finished.
+        """
         rec = self.recorder
-        if rec is not None and rec.status.state == "recording":
+        waiting = self._close_request
+        if waiting is not None and not waiting.is_set():
+            if messagebox.askyesno(
+                APP_NAME,
+                f"Still closing the recorder: {rec.status.line()}\n\n"
+                f"Close now without waiting? Rows already written are on the "
+                f"disk, but this flight's record may be missing or "
+                f"incomplete.", icon="warning", default="no"):
+                log.warning("window closed by the operator before the recorder "
+                            "finished closing: %s", rec.status.line())
+                self.close_now()
+            return False
+        if rec is None:
+            return True
+        if rec.status.state in ("starting", "recording", "closing"):
             if not messagebox.askyesno(
                 APP_NAME,
                 f"{rec.status.flight_id} is still being recorded.\n\n"
@@ -391,12 +459,56 @@ class App(Shell):
                 f"disarms.\n\nQuit anyway?"
             ):
                 return False
-        if rec is not None:
-            try:
-                rec.stop_watching()
-            except Exception:
-                pass
-        return True
+        self._close_request = rec.request("close")
+        self._close_began = time.monotonic()
+        self._close_asked_at = 0.0
+        self._log("Closing the recorder before the window closes…")
+        self._await_close()
+        return False
+
+    #: How long the window waits on the recorder before asking whether to
+    #: stop waiting. Longer than a closing snapshot that gets no answer.
+    CLOSE_ASK_AFTER_S = 150.0
+
+    def _await_close(self) -> None:
+        req, rec = self._close_request, self.recorder
+        if req is None or self._closing:
+            return
+        waited = time.monotonic() - self._close_began
+        if req.is_set():
+            st = rec.status
+            if req.result is True:
+                log.info("recorder closed cleanly in %.1f s; closing the window",
+                         waited)
+                self.close_now()
+                return
+            detail = st.degraded or st.problem or st.outcome or st.line()
+            log.warning("recorder did not close cleanly after %.1f s: %s",
+                        waited, detail)
+            messagebox.showwarning(
+                APP_NAME,
+                f"The recorder did not finish closing cleanly:\n\n{detail}\n\n"
+                f"Rows already written are on the disk. Check the flight's "
+                f"logs folder; the diagnostics log has the details.")
+            self.close_now()
+            return
+        self.status.configure(text=f"Closing: {rec.status.line()} "
+                                   f"({waited:.0f} s)")
+        if waited > self.CLOSE_ASK_AFTER_S and (
+                time.monotonic() - self._close_asked_at > self.CLOSE_ASK_AFTER_S):
+            self._close_asked_at = time.monotonic()
+            if messagebox.askyesno(
+                APP_NAME,
+                f"The recorder has been closing for {waited:.0f} s and has not "
+                f"finished: {rec.status.line()}\n\nClose the window anyway? "
+                f"Rows already written are on the disk, but this flight's "
+                f"record may be missing or incomplete.",
+                icon="warning", default="no"):
+                log.warning("window closed after waiting %.0f s for the "
+                            "recorder: %s", waited, rec.status.line())
+                self.close_now()
+                return
+        self.after(200, self._await_close)
 
 
 def _guess_from_path(p: Path | None) -> tuple[str, str]:
@@ -415,9 +527,18 @@ def _guess_from_path(p: Path | None) -> tuple[str, str]:
 
 
 def main() -> None:
+    # First, so that anything that goes wrong from here on leaves a record.
+    diagnostics.setup()
     ctk.set_default_color_theme("blue")
-    app = App()
-    app.mainloop()
+    try:
+        app = App()
+        app.mainloop()
+    except BaseException:
+        diagnostics.log_exception("the window", *sys.exc_info(),
+                                  level=logging.CRITICAL)
+        raise
+    finally:
+        log.info("---- %s exited ----", APP_NAME)
 
 
 if __name__ == "__main__":
