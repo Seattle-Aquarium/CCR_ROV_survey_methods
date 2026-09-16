@@ -32,20 +32,30 @@
 \definecolor{Mediterranean}{HTML}{1963B0}  % PMS 2132  primary
 \definecolor{Algae}{HTML}{00C389}          % PMS 2414  secondary
 \definecolor{Seafoam}{HTML}{3CCBDA}        % PMS 2226  secondary
+\definecolor{PurpleStar}{HTML}{7A5EA8}     % PMS 2081  accent
+\definecolor{Coral}{HTML}{F58674}          % PMS 2345  accent
 \definecolor{Pumice}{HTML}{EEEEEE}         % Cool Gray 1/50%  neutral
 \definecolor{Stone}{HTML}{575757}          % Cool Gray 11     neutral
+
+% One Ocean bright 3-colour gradient -- Algae -> Seafoam -> Purple Star,
+% the same stops as RULE_GRADIENT in rov_flight_ops/rov_flight_ops/gui/
+% theme.py (BRIGHT_GRADIENTS_3["algae_seafoam_purple"]), evenly blended
+% per the spec diagram on guidelines p.19. Drawn as two tikz left/right-color
+% shades (0..50%, 50..100%) rather than one \pgfdeclarehorizontalshading,
+% which does not reliably stretch to an arbitrary target width.
+\newlength{\halfbar}
 
 %----------------------------------------------------------------------
 %  Grid geometry
 %  Widths resolve exactly to \textwidth, rule thicknesses included:
-%      \tabw + \rulew + 6*\datw + 5*\rulew  ==  \textwidth
+%      \tabw + \rulew + 7*\datw + 6*\rulew  ==  \textwidth
 %----------------------------------------------------------------------
 \setlength{\tabcolsep}{0pt}
 \setlength{\parindent}{0pt}
 
 \newlength{\rulew}\setlength{\rulew}{0.4pt}          % vertical hairline
-\newlength{\datw}\setlength{\datw}{\dimexpr(\textwidth-0.34in-6\rulew)/6\relax}
-\newlength{\notew}\setlength{\notew}{\dimexpr 6\datw+5\rulew\relax}
+\newlength{\datw}\setlength{\datw}{\dimexpr(\textwidth-0.34in-7\rulew)/7\relax}
+\newlength{\notew}\setlength{\notew}{\dimexpr 7\datw+6\rulew\relax}
 \newlength{\notewb}\setlength{\notewb}{\dimexpr\notew+\rulew\relax}
 \newlength{\tabw}\setlength{\tabw}{\dimexpr\textwidth-\notewb\relax}
 
@@ -71,8 +81,25 @@
 \newcommand{\lbl}[1]{{\fontsize{7.4}{8.4}\selectfont\bfseries\color{Salish}%
   \MakeUppercase{#1}}\hspace{5pt}}
 
-% One pre-dive checklist item
-\newcommand{\pdi}[1]{{\fontsize{8.6}{10}\selectfont #1}}
+% One pre-flight / post-flight checklist item
+\newcommand{\pdi}[1]{{\fontsize{7.8}{9.2}\selectfont #1}}
+
+% A checklist section: a coloured-frame box with a rail label (#2, in frame
+% colour #1) beside an item grid (#3). PRE-FLIGHT and POST-FLIGHT are the
+% same shape and differ only in frame colour, label, and items.
+\newlength{\chkw}\setlength{\chkw}{0.80in}
+\newcommand{\checklist}[3]{%
+  \begin{tcolorbox}[
+    enhanced, sharp corners, rounded corners=west, arc=3pt,
+    colback=Pumice!45, colframe=#1, boxrule=0.9pt,
+    left=8pt, right=8pt, top=4pt, bottom=4pt, boxsep=0pt]
+    \begin{minipage}[c]{\chkw}
+      {\fontsize{7.4}{8.4}\selectfont\bfseries\color{Salish}#2}
+    \end{minipage}%
+    \begin{minipage}[c]{\dimexpr\linewidth-\chkw\relax}
+      #3
+    \end{minipage}
+  \end{tcolorbox}}
 
 % Stacked column heading: name over a Seafoam unit hint
 \newcommand{\hd}[2]{%
@@ -82,13 +109,13 @@
   \end{tabular}}
 
 % One transect block: a data row above a full-width notes row.
-% \cline{2-7} leaves column 1 untouched so the Salish number rail runs
+% \cline{2-8} leaves column 1 untouched so the Salish number rail runs
 % unbroken through the pair; the closing \hline then separates transects.
 \newcommand{\transect}[1]{%
   \textcolor{white}{\bfseries\fontsize{9}{10}\selectfont #1}\datastrut
-    & & & & & & \\
-  \arrayrulecolor{Stone!25}\cline{2-7}
-  & \multicolumn{6}{@{}>{\columncolor{Pumice}}p{\notew}@{}}{%
+    & & & & & & & \\
+  \arrayrulecolor{Stone!25}\cline{2-8}
+  & \multicolumn{7}{@{}>{\columncolor{Pumice}}p{\notew}@{}}{%
       \notestrut\hspace{5pt}%
       {\fontsize{6}{7}\selectfont\color{Stone}\MakeUppercase{notes}}} \\
   \arrayrulecolor{Stone!45}\hline
@@ -109,11 +136,14 @@
   \raggedleft\includegraphics[width=0.72in]{SAQ_PrimaryLogo_MedBlue.pdf}
 \end{minipage}
 
-\vspace{5pt}
-{\color{Salish}\rule{\textwidth}{2.2pt}}\\[1.2pt]
-{\color{Seafoam}\rule{\textwidth}{0.9pt}}
+\vspace{3pt}
+\setlength{\halfbar}{0.5\textwidth}
+\begin{tikzpicture}[baseline]
+  \shade[left color=Algae, right color=Seafoam] (0,0) rectangle (\halfbar,3.0pt);
+  \shade[left color=Seafoam, right color=PurpleStar] (\halfbar,0) rectangle (\textwidth,3.0pt);
+\end{tikzpicture}
 
-\vspace{12pt}
+\vspace{5pt}
 
 %======================================================================
 %  DAY METADATA
@@ -124,7 +154,7 @@
   \lbl{Site} & \hrulefill \\
 \end{tabularx}
 
-\vspace{14pt}
+\vspace{6pt}
 
 \begin{tabularx}{\textwidth}{@{}l>{\hsize=1.5\hsize}X@{\hspace{16pt}}l>{\hsize=0.75\hsize}X@{\hspace{16pt}}l>{\hsize=0.75\hsize}X@{}}
   \lbl{Personnel} & \hrulefill &
@@ -132,29 +162,44 @@
   \lbl{Data entry lead} & \hrulefill \\
 \end{tabularx}
 
-\vspace{12pt}
+\vspace{6pt}
 
 %======================================================================
-%  PRE-DIVE GATE
+%  PRE-FLIGHT GATE
 %======================================================================
-\begin{tcolorbox}[
-  enhanced, sharp corners, rounded corners=west, arc=3pt,
-  colback=Pumice!45, colframe=Algae, boxrule=0.9pt,
-  left=8pt, right=8pt, top=5.5pt, bottom=5.5pt, boxsep=0pt]
-  \begin{minipage}[c]{0.62in}
-    {\fontsize{7.4}{8.4}\selectfont\bfseries\color{Salish}PRE-DIVE}
-  \end{minipage}%
-  \begin{minipage}[c]{\dimexpr\linewidth-0.62in\relax}
-    \begin{tabularx}{\linewidth}{@{}XX@{}}
-      \pdi{Sync cameras GoPro Labs?~\cb} &
-      \pdi{TC25 pulled up on screen?~\cb} \\[4.5pt]
-      \pdi{Camera / housing cleaned?~\cb} &
-      \pdi{Cameras recording?~\cb} \\
-    \end{tabularx}
-  \end{minipage}
-\end{tcolorbox}
+\checklist{Algae}{PRE-FLIGHT}{%
+  \begin{tabularx}{\linewidth}{@{}X@{\hspace{8pt}}X@{\hspace{8pt}}X@{\hspace{8pt}}X@{}}
+    \pdi{Clean GoPros\hfill\cb} &
+    \pdi{Sync GoPros\hfill\cb} &
+    \pdi{TC25 open\hfill\cb} &
+    \pdi{Create flight folder\hfill\cb} \\[4pt]
+    \pdi{Open software\hfill\cb} &
+    \pdi{Point to flight folder\hfill\cb} &
+    \pdi{Clean the Pi\hfill\cb} &
+    \pdi{Feed GPS to DVL\hfill\cb} \\[4pt]
+    \pdi{Power DVL\hfill\cb} &
+    \pdi{Arm ROV\hfill\cb} &
+    \pdi{Confirm monitoring\hfill\cb} &
+    \pdi{Cameras recording\hfill\cb} \\
+  \end{tabularx}}
 
-\vspace{12pt}
+\vspace{6pt}
+
+%======================================================================
+%  POST-FLIGHT GATE
+%======================================================================
+\checklist{Coral}{POST-FLIGHT}{%
+  \begin{tabularx}{\linewidth}{@{}X@{\hspace{8pt}}X@{\hspace{8pt}}X@{\hspace{8pt}}X@{}}
+    \pdi{Turn off cameras\hfill\cb} &
+    \pdi{Disarm ROV\hfill\cb} &
+    \pdi{Stop monitoring\hfill\cb} &
+    \pdi{Close Cockpit\hfill\cb} \\[4pt]
+    \pdi{Disable DVL\hfill\cb} &
+    \pdi{Logs to flights folder\hfill\cb} &
+    \pdi{Flight folder to SSD\hfill\cb} & \\
+  \end{tabularx}}
+
+\vspace{6pt}
 
 %======================================================================
 %  TRANSECT RECORD
@@ -165,11 +210,13 @@
   !{\color{Stone!25}\vrule width \rulew}D
   !{\color{Stone!25}\vrule width \rulew}D
   !{\color{Stone!25}\vrule width \rulew}D
+  !{\color{Stone!25}\vrule width \rulew}D
   !{\color{Stone!25}\vrule width \rulew}D@{}}
 
 \rowcolor{Salish}
   \hd{\#}{}\rule[-6pt]{0pt}{17pt} &
   \hd{start}{TC25 hh:mm:ss} & \hd{end}{TC25 hh:mm:ss} &
+  \hd{tgt depth}{m} &
   \hd{tgt alt}{m}      & \hd{tgt speed}{m/s} &
   \hd{tgt light}{\%}   & \hd{tgt mode}{alt-hold / man} \\
 \arrayrulecolor{Salish}\hline
@@ -188,16 +235,9 @@
 %======================================================================
 %  FOOTER
 %======================================================================
-{\color{Stone!35}\rule{\textwidth}{0.5pt}}\\[4pt]
-\begin{minipage}[t]{0.70\textwidth}
+\begin{flushright}
   {\fontsize{6.8}{8.2}\selectfont\color{Stone}%
-   Transect start/end times are the join key for post-processing: they subset
-   the \texttt{.mcap} telemetry record and isolate the matching survey imagery.
-   Record times to the second, from the TC25 clock.}
-\end{minipage}\hfill
-\begin{minipage}[t]{0.28\textwidth}
-  \raggedleft{\fontsize{6.8}{8.2}\selectfont\color{Stone}%
    Sheet \rule[-1pt]{22pt}{0.5pt} of \rule[-1pt]{22pt}{0.5pt}}
-\end{minipage}
+\end{flushright}
 
 \end{document}
