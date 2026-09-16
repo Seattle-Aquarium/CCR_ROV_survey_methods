@@ -450,6 +450,34 @@ def test_the_output_pane_stays_bounded(app, monkeypatch):
     assert app.log.get("1.0", "end-1c").endswith("message 999")
 
 
+def test_a_huge_job_result_does_not_freeze_the_output_pane(app, quiet_dialogs):
+    """14 September 2026, after a real flight: the Flight summary job returned
+    (report, sheet), and the pane was handed the report's repr -- one 4 MB
+    line -- and froze the window for good while laying it out."""
+
+    class Huge:
+        def __repr__(self):
+            return "DayReport(" + "x" * 4_000_000 + ")"
+
+    got = []
+    assert app.submit(lambda p, c: (Huge(), "sheet.pdf"), "huge result",
+                      on_done=got.append)
+    began = time.monotonic()
+    wait_idle(app)
+    assert time.monotonic() - began < 10, "the pane stalled on a huge result"
+    assert got and isinstance(got[0][0], Huge), "the page still gets the result"
+    text = app.log.get("1.0", "end-1c")
+    assert "xxxxx" * 100 not in text and text.endswith("sheet.pdf")
+
+
+def test_one_enormous_line_is_cut_before_the_pane_sees_it(app):
+    began = time.monotonic()
+    app._log("y" * 3_000_000)
+    assert time.monotonic() - began < 5
+    last = app.log.get("end-1c linestart", "end-1c")
+    assert len(last) < 3000 and "more characters" in last
+
+
 def test_a_tk_callback_exception_is_logged_with_its_traceback(app, caplog):
     caplog.set_level(logging.ERROR, logger=diagnostics.PACKAGE)
 

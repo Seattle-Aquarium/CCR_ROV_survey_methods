@@ -34,13 +34,14 @@ from rov_imagery_processing.telemetry import Series, TelemetryStore  # noqa: E40
 PDT = timezone(timedelta(hours=-7))
 
 
-def _make_video(path: Path, seconds: int, timecode: str) -> None:
+def _make_video(path: Path, seconds: int, timecode: str, gop: int = 15) -> None:
     """A tiny clip carrying a timecode track, so it can be placed on TC-25."""
     exe = ff.find_ffmpeg()
     subprocess.run(
         [exe, "-hide_banner", "-loglevel", "error", "-y",
          "-f", "lavfi", "-i", f"testsrc2=size=160x120:rate=30:duration={seconds}",
-         "-c:v", "libx264", "-preset", "ultrafast", "-g", "15",
+         "-c:v", "libx264", "-preset", "ultrafast", "-g", str(gop),
+         "-keyint_min", str(gop), "-sc_threshold", "0",
          "-pix_fmt", "yuv420p", "-timecode", timecode, str(path)],
         check=True, capture_output=True,
     )
@@ -97,6 +98,64 @@ def test_a_transect_spanning_two_chapters_is_joined():
         assert len(rep.written) == 1, rep.summary()
         assert rep.clips[0].parts == 2
         assert not rep.warnings, rep.warnings
+        assert videoclip.trim_head_s(rep.written[0]) is not None, \
+            "the join must keep the head the first part recorded"
+
+
+def test_a_trim_records_the_footage_before_its_transect():
+    """A stream copy starts on the keyframe before the transect. The OTS T1
+    trim began 0.95 s early, and the composite placed that first frame at the
+    transect's start -- the GoPro ran behind the telemetry and the inset."""
+    from rov_imagery_processing.pipeline import describe_chapters
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        src = td / "GX010001.MP4"
+        _make_video(src, 20, "12:00:00:00", gop=45)       # keyframe every 1.5 s
+        assert abs(videoclip.keyframe_at_or_before(src, 5.0) - 4.5) < 1e-3
+        assert abs(videoclip.keyframe_at_or_before(src, 4.5) - 4.5) < 1e-3
+        assert abs(videoclip.keyframe_interval(src) - 1.5) < 1e-3
+
+        ch = describe_chapters([src])
+        plan = _plan([Transect("T1", "12:00:05", "12:00:12")])
+        res = [r for r in resolve_plan(plan, ch) if r.segments]
+        rep = videoclip.trim_flight(td / "flight", res, td / "scratch")
+        out = rep.written[0]
+
+        assert abs(videoclip.trim_head_s(out) - 0.5) < 1e-3
+        info = ff.probe(out)
+        assert abs((info.duration or 0) - 7.5) < 0.2, \
+            "the head is extra footage, not a shift of the cut"
+
+        trims = dict(zip(["T1"], describe_chapters([out]), strict=True))
+        heads, notes = videoclip.trim_heads(plan, {"T1": out}, trims)
+        assert abs(heads["T1"] - 0.5) < 1e-3 and not notes
+
+
+def test_an_older_trim_has_its_head_estimated_and_says_so():
+    """No recorded head: work it out from the timecode the trim kept and its
+    keyframe spacing, which is what the cut itself did."""
+    from rov_imagery_processing.pipeline import describe_chapters
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        src = td / "GX010001.MP4"
+        _make_video(src, 20, "12:00:00:00", gop=45)
+        ch = describe_chapters([src])
+        plan = _plan([Transect("T1", "12:00:05", "12:00:12")])
+        trims = {"T1": ch[0]}          # untagged: the source stands in for it
+        heads, notes = videoclip.trim_heads(plan, {"T1": src}, trims)
+        assert abs(heads["T1"] - 0.5) < 1e-3
+        assert any("estimated" in n for n in notes), notes
+
+
+def test_estimate_head_arithmetic():
+    # OTS T1: chapter timecode 09:33:33:12, transect 09:42:45, 1.001 s GOP
+    tc = 9 * 3600 + 33 * 60 + 33 + 12 / 23.976
+    head = videoclip.estimate_head(tc, 9 * 3600 + 42 * 60 + 45, 1.001)
+    assert 0.9 < head < 1.0
+    assert videoclip.estimate_head(100.0, 103.0, 1.5) == 0.0     # on a keyframe
+    assert videoclip.estimate_head(100.0, 90.0, 1.5) == 0.0      # before the chapter
+    assert videoclip.estimate_head(None, 90.0, 1.5) is None
+    assert videoclip.estimate_head(100.0, 90.0, None) is None
 
 
 def test_no_warning_when_a_transect_is_fully_covered():

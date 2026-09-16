@@ -59,6 +59,21 @@ class RovVideo:
         return -0.5 <= o <= self.duration + 0.5
 
 
+def _stamp(*paths: Path) -> list[list]:
+    """Name, size and modification time of each input, for a cache marker.
+
+    A product is only as current as what it was built from. Without this the
+    remux was reused whenever ``rov_full.mp4`` existed, so re-extracting a
+    flight -- the fix for a bad extraction -- still composited from the video
+    built out of the bad one.
+    """
+    out = []
+    for p in paths:
+        st = Path(p).stat()
+        out.append([Path(p).name, st.st_size, st.st_mtime_ns])
+    return out
+
+
 def _read_frame_index(frames_csv: Path) -> tuple[list[float], list[int]]:
     ts: list[float] = []
     idr: list[int] = []
@@ -87,14 +102,21 @@ def remux(
     raw = cache_dir / "rov_raw.h264"
     frames_csv = cache_dir / "rov_frames.csv"
 
-    if out.is_file() and meta.is_file() and not force:
-        info = json.loads(meta.read_text())
-        if progress:
-            progress(1.0, "remux cache hit")
-        return out, info["epoch_at_pts0"], info["frames_written"]
-
     if not raw.is_file() or raw.stat().st_size == 0:
         raise FileNotFoundError(f"no ROV bitstream at {raw}")
+    source = _stamp(raw, frames_csv)
+
+    if out.is_file() and meta.is_file() and not force:
+        try:
+            info = json.loads(meta.read_text())
+            if info.get("source") == source:
+                if progress:
+                    progress(1.0, "remux cache hit")
+                return out, info["epoch_at_pts0"], info["frames_written"]
+        except (OSError, ValueError, KeyError):
+            pass                 # unreadable or stale marker: remux again
+
+    meta.unlink(missing_ok=True)
 
     ts, idr = _read_frame_index(frames_csv)
     if not any(idr):
@@ -111,6 +133,7 @@ def remux(
     ost.time_base = TIME_BASE
 
     n = written = 0
+    unindexed = 0
     last_pts = -1
     total = len(ts)
     for pkt in inp.demux(ist):
@@ -120,7 +143,12 @@ def remux(
             n += 1
             continue
         if n >= total:
-            break
+            # Counted, not written. Timestamps are paired with packets by
+            # position, so a bitstream that splits into more packets than the
+            # index has rows has put every frame after the split at the wrong
+            # time -- which has to be said, not silently truncated.
+            unindexed += 1
+            continue
         pts = int(round((ts[n] - t0) / TIME_BASE))
         if pts <= last_pts:                      # keep timestamps monotonic
             pts = last_pts + 1
@@ -138,8 +166,12 @@ def remux(
     inp.close()
 
     info = {
+        "source": source,
         "epoch_at_pts0": t0,
         "frames_written": written,
+        # packets and index rows that found no partner; both 0 when healthy
+        "packets_unindexed": unindexed,
+        "rows_unmatched": total - min(n, total),
         "span_s": ts[min(n, total) - 1] - t0,
         "width": ist.codec_context.width,
         "height": ist.codec_context.height,
@@ -197,10 +229,12 @@ def build_proxy(
         w1 = min(src_dur, window[1] + WINDOW_MARGIN_S) if src_dur else window[1]
     w1 = max(w1, w0 + 1.0)
 
+    source = _stamp(src)
     if out.is_file() and marker.is_file() and not force:
         try:
             prev = json.loads(marker.read_text())
             covers = (prev.get("fps") == rate
+                      and prev.get("source") == source
                       and prev.get("window_start", 1e18) <= w0 + 0.01
                       and prev.get("window_end", -1e18) >= w1 - 0.01)
             if covers:
@@ -209,6 +243,7 @@ def build_proxy(
                 return out, float(prev["window_start"])
         except Exception:
             pass
+    marker.unlink(missing_ok=True)
 
     if use_gpu and ff.nvenc_available("h264_nvenc"):
         enc = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", str(crf + 2)]
@@ -230,11 +265,57 @@ def build_proxy(
         cancel=cancel,
     )
     marker.write_text(json.dumps(
-        {"fps": rate, "window_start": w0, "window_end": w1, "encoder": how}
+        {"fps": rate, "window_start": w0, "window_end": w1, "encoder": how,
+         "source": source}
     ))
     if progress:
         progress(1.0, "ROV proxy ready")
     return out, w0
+
+
+#: How much longer than its window a proxy may run before its timeline is
+#: called broken. A healthy one is within a frame or two.
+PROXY_SLACK_S = 2.0
+
+
+def timeline_warnings(cache_dir: Path, proxy_duration: float | None) -> list[str]:
+    """Signs that the ROV video no longer maps linearly onto the clock.
+
+    Both checks are on numbers already written during the build, so they cost
+    nothing. Either failing means the inset will show the wrong moment.
+
+    * The remux pairs packets with index rows by position; any unpaired one
+      shifts every frame after it.
+    * The proxy is one constant-rate pass over a known window, so its length
+      is known in advance. On 14 September 2026 a 1,166 s window came out
+      1,367 s long, with gaps of up to 1.5 s, because a second camera had been
+      spliced into the stream -- and nothing said so.
+    """
+    cache_dir = Path(cache_dir)
+    out: list[str] = []
+    try:
+        full = json.loads((cache_dir / "rov_full.json").read_text())
+        extra = int(full.get("packets_unindexed", 0))
+        short = int(full.get("rows_unmatched", 0))
+        if extra or short:
+            out.append(
+                f"the ROV bitstream and its frame index disagree ({extra:,} "
+                f"packet(s) with no timestamp, {short:,} timestamp(s) with no "
+                f"packet); the ROV inset may be out of step with the GoPro")
+    except (OSError, ValueError):
+        pass
+    try:
+        cfr = json.loads((cache_dir / "rov_cfr.json").read_text())
+        span = float(cfr["window_end"]) - float(cfr["window_start"])
+        if proxy_duration and proxy_duration > span + PROXY_SLACK_S:
+            out.append(
+                f"the ROV proxy runs {proxy_duration:.0f}s for a {span:.0f}s "
+                f"window, so its timeline is broken and the ROV inset may "
+                f"show the wrong moment. Re-extract the telemetry (force) and "
+                f"check the recording's video streams.")
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return out
 
 
 def prepare(
@@ -280,6 +361,7 @@ def prepare(
     info = ff.probe(proxy)
     if not info.ok:
         raise RuntimeError(f"could not probe the ROV proxy at {proxy}")
+    warnings.extend(timeline_warnings(Path(cache_dir), info.duration))
 
     return RovVideo(
         proxy_path=proxy,

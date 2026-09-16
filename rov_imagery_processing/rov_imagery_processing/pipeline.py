@@ -30,6 +30,7 @@ from . import (
     csv_export,
     discovery,
     mcap_extract,
+    motion_sync,
     overlay,
     rov_video,
     sorting,
@@ -82,6 +83,8 @@ class RunResult:
     elapsed_s: float = 0.0
     cancelled: bool = False
     photos: sorting.SortReport | None = None
+    #: The GoPro-versus-yaw-rate measurement, per transect name.
+    motion: dict[str, motion_sync.MotionSync] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -104,6 +107,8 @@ class RunResult:
             lines.append(self.photos.summary())
         if self.sync.checked:
             lines.append(self.sync.summary())
+        for name, ms in self.motion.items():
+            lines.append(ms.summary(name))
         for w in self.warnings:
             lines.append(f"WARNING: {w}")
         for e in self.errors:
@@ -301,7 +306,9 @@ def _run(
 
     try:
         # ---- 1. discovery -------------------------------------------
-        st.plan(discover=1, extract=22, rov=18, sync=14, csv=5,
+        st.plan(discover=1, extract=22,
+                motion=10 if req.app.sync.align_with_motion else 0,
+                rov=18, sync=14, csv=5,
                 photos=12 if req.process_photos else 0,
                 render=40)
         disc = discovery.discover(req.flight_dir)
@@ -371,7 +378,11 @@ def _run(
             # No chapters: a trim's timecode is its source recording's, so
             # there is nothing here the light-based sync check can verify.
             chapters = []
-            res.resolved = resolve_from_trims(req.plan, trims)
+            # Each trim starts on the keyframe before its transect; skip that
+            # head, or the GoPro runs behind the telemetry and the inset.
+            heads, notes = videoclip.trim_heads(req.plan, trim_paths, trims)
+            res.warnings.extend(notes)
+            res.resolved = resolve_from_trims(req.plan, trims, heads)
             res.warnings.append(
                 f"compositing from {len(trims)} per-transect trim(s) in "
                 f"videos/transects/, not from full-length footage")
@@ -403,6 +414,16 @@ def _run(
                 "None of the transect times fall inside the recorded video. "
                 "Check the TC-25 times and the flight date."
             )
+
+        # ---- 3b. GoPro against the vehicle's turns --------------------
+        # Before the proxy, because a measured offset moves the span of
+        # telemetry and ROV video each transect needs.
+        if req.app.sync.align_with_motion and renderable:
+            _align_with_motion(renderable, store, cache, req.app, res,
+                               ffmpeg=ffmpeg, progress=st.sub("motion"),
+                               cancel=cancel)
+        st.finish("motion", "motion sync checked"
+                  if req.app.sync.align_with_motion else "motion sync off")
 
         # ---- 4. ROV proxy over just the needed span ------------------
         needed = [(r.epoch_start, r.epoch_end) for r in renderable]
@@ -436,7 +457,9 @@ def _run(
             res.warnings.append(
                 "the light-based TC-25 check was skipped: a trim carries its "
                 "source recording's timecode, so there is nothing to verify. "
-                "Transect times come straight from the plan.")
+                + ("The motion check is what ties the trim to the telemetry."
+                   if req.app.sync.align_with_motion else
+                   "Transect times come straight from the plan."))
             st.finish("sync", "sync check not applicable to trims")
 
         # ---- 6. telemetry CSV ----------------------------------------
@@ -521,6 +544,66 @@ def _run(
         res.errors.append(f"{type(ex_).__name__}: {ex_}")
 
     return _finish(res, started)
+
+
+def _align_with_motion(
+    renderable: Sequence[ResolvedTransect],
+    store: TelemetryStore,
+    cache: Path,
+    app: AppConfig,
+    res: RunResult,
+    *,
+    ffmpeg: str | None = None,
+    progress: ProgressCB | None = None,
+    cancel=None,
+) -> None:
+    """Measure each transect's GoPro against the yaw rate; apply what is sure.
+
+    A confident offset moves the transect's epochs, so the telemetry panel,
+    the ROV inset and the 1 Hz CSV's transect marks all follow the picture.
+    The GoPro footage itself -- which seconds of video make the transect --
+    is unchanged. Anything short of confident is reported and left alone.
+    """
+    cfg = app.sync
+    n = len(renderable)
+    for i, r in enumerate(renderable):
+        name = f"{r.site.name}/{r.transect.name}"
+
+        def sub(f: float, m: str = "", _i=i) -> None:
+            if progress:
+                progress((_i + f) / n, m)
+
+        try:
+            ms = motion_sync.check_transect(
+                r.segments, store, r.epoch_start, cache / "motion",
+                search_s=cfg.motion_search_s, min_r=cfg.motion_min_r,
+                min_peak_ratio=cfg.motion_min_peak_ratio,
+                ffmpeg=ffmpeg, progress=sub, cancel=cancel)
+        except ff.CancelledError:
+            raise
+        except Exception as ex:
+            ms = motion_sync.MotionSync(message=f"failed: {type(ex).__name__}: {ex}")
+        res.motion[name] = ms
+
+        if not ms.checked:
+            res.warnings.append(
+                f"{name}: the GoPro could not be checked against the telemetry "
+                f"({ms.message}); the timecode is being trusted as-is")
+        elif not ms.confident:
+            res.warnings.append(
+                f"{name}: the GoPro could not be confirmed against the "
+                f"telemetry ({ms.message}); the timecode is being trusted as-is")
+        elif abs(ms.offset_s) >= cfg.motion_min_shift_s:
+            off = ms.offset_s
+            r.epoch_start += off
+            r.epoch_end += off
+            behind = "behind" if off > 0 else "ahead of"
+            res.warnings.append(
+                f"{name}: the GoPro's timecode is {abs(off):.2f}s {behind} the "
+                f"vehicle's clock, measured from the picture's rotation against "
+                f"the yaw rate (r={abs(ms.r):.2f}). The telemetry and ROV inset "
+                f"have been moved {off:+.2f}s to match the picture. Check the "
+                f"GoPro's time sync before the next flight.")
 
 
 def _render_one(

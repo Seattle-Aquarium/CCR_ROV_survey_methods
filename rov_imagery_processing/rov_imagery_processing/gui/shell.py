@@ -65,6 +65,44 @@ DRAIN_MAX_S = 0.05
 LOG_MAX_LINES = 2000
 LOG_TRIM_LINES = 500
 
+#: The longest line, and the longest message, the output pane is given. Tk's
+#: text widget lays a line out whole, and a single line of a few megabytes
+#: takes it tens of minutes -- which is how the flight report froze the
+#: window on 14 September 2026: its result was printed as one 4 MB line.
+LOG_LINE_CHARS = 2000
+LOG_MESSAGE_CHARS = 40_000
+#: A job result without a summary() is printed only if its text is this
+#: short; a larger one is for the page that asked for it, not the log.
+RESULT_TEXT_CHARS = 500
+
+
+def _bounded(text: str) -> str:
+    """`text` cut to what the output pane can lay out without stalling."""
+    if len(text) > LOG_MESSAGE_CHARS:
+        text = (text[:LOG_MESSAGE_CHARS]
+                + f"\n… {len(text) - LOG_MESSAGE_CHARS:,} more characters not shown")
+    if len(text) <= LOG_LINE_CHARS:
+        return text
+    return "\n".join(
+        line if len(line) <= LOG_LINE_CHARS else
+        f"{line[:LOG_LINE_CHARS]}… ({len(line) - LOG_LINE_CHARS:,} more characters)"
+        for line in text.split("\n"))
+
+
+def _brief(result, job=None) -> str:
+    """A job result that has no summary(), as text fit for the output pane.
+
+    Short values -- a message, a path -- are printed as they always were. A
+    large object is not: its page shows it, and printing its repr is what
+    froze the window.
+    """
+    text = str(result)
+    if len(text) <= RESULT_TEXT_CHARS:
+        return text
+    log.info("job %s: its %s result (%s characters) was not printed",
+             getattr(job, "id", "?"), type(result).__name__, f"{len(text):,}")
+    return ""
+
 
 class JobStopped(BaseException):  # noqa: N818 - it is not an error
     """Raised inside a job's work to leave it at a checkpoint after Stop.
@@ -746,7 +784,7 @@ class Shell(ctk.CTk):
         for r in reports:
             if r is None:
                 continue
-            text = r.summary() if hasattr(r, "summary") else str(r)
+            text = r.summary() if hasattr(r, "summary") else _brief(r, job)
             for line in str(text).splitlines():
                 self._log(line)
             for w in getattr(r, "warnings", []) or []:
@@ -782,6 +820,7 @@ class Shell(ctk.CTk):
         # pane is empty is remembered rather than read back out of it, and
         # the pane is trimmed in blocks: reading or keeping the whole text
         # made every message slower than the last over a long day.
+        text = _bounded(str(text))
         output_log.info("%s", text)
         self.log.configure(state="normal")
         self.log.insert("end", ("" if self._log_empty else "\n") + text)

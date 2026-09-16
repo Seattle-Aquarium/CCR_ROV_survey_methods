@@ -86,6 +86,22 @@ def test_the_shared_timecode_is_never_consulted():
     assert out2[0].segments[0].dur_s == out[0].segments[0].dur_s
 
 
+def test_a_trims_head_is_skipped_and_the_clock_is_unchanged():
+    """The footage before the keyframe the cut landed on is not the transect.
+    Skipping it keeps the first composited frame at the transect's start."""
+    plan = SurveyPlan([_site(Transect("T1", "09:25:23", "09:35:37"))])
+    (plain,) = resolve_from_trims(plan, {"T1": _trim(615.4)})
+    (r,) = resolve_from_trims(plan, {"T1": _trim(615.4)}, {"T1": 0.96})
+    assert r.segments[0].in_s == pytest.approx(0.96)
+    assert r.segments[0].dur_s == pytest.approx(614.0)
+    assert r.epoch_start == plain.epoch_start
+    assert r.complete
+
+    # a head that leaves too little footage is reported as short footage
+    (s,) = resolve_from_trims(plan, {"T1": _trim(614.4)}, {"T1": 0.96})
+    assert s.segments[0].dur_s == pytest.approx(614.4 - 0.96)
+
+
 def test_a_transect_with_no_trim_is_reported_not_guessed():
     plan = SurveyPlan([_site(*PLAN_TRANSECTS)])
     out = resolve_from_trims(plan, {"T1": _trim(614.4), "T3": _trim(681.5)})

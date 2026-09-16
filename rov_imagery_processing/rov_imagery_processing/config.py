@@ -183,6 +183,22 @@ class SyncConfig:
     lights_off: float = 0.05
     min_overlap_frac: float = 0.60
 
+    #: Measure each transect's GoPro against the vehicle's yaw rate (see
+    #: `motion_sync`) and, when the measurement is unambiguous, move the
+    #: telemetry and ROV inset to match the picture. The timecode is not
+    #: always right: on 14 September 2026 it was 34.8 s behind the vehicle,
+    #: and neither the lights nor a trim could show it.
+    align_with_motion: bool = True
+    #: How far either way to look for the match.
+    motion_search_s: float = 180.0
+    #: Correlation the match must reach, and how far its peak must stand above
+    #: the correlation at every other lag, before it is acted on.
+    motion_min_r: float = 0.4
+    motion_min_peak_ratio: float = 6.0
+    #: Offsets smaller than this are reported but not applied: under a frame
+    #: or two is within what the measurement itself can resolve.
+    motion_min_shift_s: float = 0.25
+
 
 # --------------------------------------------------------------------------
 #  Paths

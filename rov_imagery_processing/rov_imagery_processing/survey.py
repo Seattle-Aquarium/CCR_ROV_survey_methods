@@ -448,19 +448,25 @@ def resolve_transect(
 def resolve_from_trims(
     plan: SurveyPlan,
     trims: dict[str, Chapter],
+    heads: dict[str, float] | None = None,
 ) -> list[ResolvedTransect]:
     """Resolve a plan against per-transect trims instead of GoPro chapters.
 
     A trim already *is* one transect, so there is nothing to search for: it
-    contributes a single segment starting at its own first frame. That matters
-    because a trim cannot be placed on the TC-25 clock by its timecode track --
-    a stream copy keeps the source chapter's timecode, so every trim from one
-    recording reports the same start.
+    contributes a single segment. That matters because a trim cannot be placed
+    on the TC-25 clock by its timecode track -- a stream copy keeps the source
+    chapter's timecode, so every trim from one recording reports the same
+    start.
+
+    The segment starts `heads[name]` seconds in: a stream copy begins on the
+    keyframe before the transect, and that footage precedes the transect's
+    start (see `videoclip`). Without a head it starts at the first frame.
 
     The pairing is by transect name, which is how the trim folders are laid
     out. A transect with no trim resolves to nothing and is reported, exactly
     as an uncovered transect would be.
     """
+    heads = heads or {}
     out: list[ResolvedTransect] = []
     for site in plan.sites:
         midnight = local_midnight_epoch(site.date_obj(), plan.timezone)
@@ -475,9 +481,12 @@ def resolve_from_trims(
                     f"no trimmed video found for {t.name}; expected one in "
                     f"videos/transects/{t.name}/")
             else:
-                have = ch.duration or 0.0
+                head = max(0.0, heads.get(t.name, 0.0))
+                have = max(0.0, (ch.duration or 0.0) - head)
+                if not ch.duration:
+                    head = 0.0
                 dur = min(have, want) if have else want
-                segments = [Segment(chapter=ch, in_s=0.0, dur_s=dur)]
+                segments = [Segment(chapter=ch, in_s=head, dur_s=dur)]
                 covered = dur
                 # A trim shorter than its transect means the trim was cut from
                 # footage that ran out, not that the times are wrong.

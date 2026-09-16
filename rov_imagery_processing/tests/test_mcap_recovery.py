@@ -245,6 +245,149 @@ def test_a_truncated_read_matches_an_intact_one(good, tmp_path):
     assert abs(recovered.t_start - intact.t_start) < 1.0
 
 
+# --------------------------------------------------------------------------
+#  more than one camera
+# --------------------------------------------------------------------------
+
+#: Real SPS NAL units from the 14 September 2026 OTS recordings.
+SPS_FORWARD = bytes.fromhex("674d4029965403c0113f2a")               # 1920x1080
+SPS_COCKPIT = bytes.fromhex(
+    "6742c01fda03c045fbc05a83030352800000030080000004478c1950")    # 960x540
+
+
+def _frame(sps: bytes, tag: bytes) -> bytes:
+    """An access unit as BlueOS records it: AUD, SPS, then a slice."""
+    return (b"\x00\x00\x00\x01\x09\xf0" + b"\x00\x00\x00\x01" + sps
+            + b"\x00\x00\x01\x65" + tag)
+
+
+def write_two_camera_mcap(path: Path, *, start: float, seconds: int,
+                          forward: bool = True, cockpit: bool = True) -> None:
+    """The OTS shape: the forward camera at 30 fps, the Madrona cockpit view
+    at 3 fps, interleaved in one recording."""
+    from mcap.writer import Writer
+
+    with open(path, "wb") as f:
+        w = Writer(f)
+        w.start()
+        mav = w.register_schema(MAVLINK_SCHEMA, "jsonschema", b"{}")
+        vid = w.register_schema(mx.VIDEO_SCHEMA, "ros2msg", b"")
+        hud = w.register_channel("mavlink/1/1/VFR_HUD", "json", mav)
+        fwd = w.register_channel("video/Streamdevvideo2/stream", "cdr", vid)
+        cpt = w.register_channel("video/madronacockpit/stream", "cdr", vid)
+        for k in range(seconds * 30):
+            ts = start + k / 30
+            t = int(ts * 1e9)
+            if k % 30 == 0:
+                w.add_message(hud, t, json.dumps(
+                    {"message": {"alt": 1.0, "heading": 90}}).encode(), t)
+            if forward:
+                w.add_message(fwd, t, _cdr_video(
+                    ts, _frame(SPS_FORWARD, b"fwd%05d" % k)), t)
+            if cockpit and k % 10 == 5:
+                w.add_message(cpt, t, _cdr_video(
+                    ts, _frame(SPS_COCKPIT, b"cpt%05d" % k)), t)
+        w.finish()
+
+
+def test_sps_nal_reads_both_real_cameras():
+    assert mx.sps_resolution(_frame(SPS_FORWARD, b"x")) == (1920, 1080)
+    assert mx.sps_resolution(_frame(SPS_COCKPIT, b"x")) == (960, 540)
+
+
+def test_only_the_forward_camera_goes_into_the_rov_stream(tmp_path):
+    """The OTS regression: the cockpit stream was spliced into the forward
+    camera's bitstream, and the proxy built from the mixture ran 1,367 s for
+    a 1,166 s window -- an inset minutes away from the GoPro."""
+    src = tmp_path / "recorder_20260914_163530.mcap"
+    write_two_camera_mcap(src, start=T0, seconds=4)
+
+    res = mx.extract([src], tmp_path / "cache", force=True)
+
+    assert res.video_topic == "video/Streamdevvideo2/stream"
+    assert res.video.frames == 4 * 30, "cockpit frames must not be counted"
+    assert res.video.resolutions == {"1920x1080"}
+    raw = res.h264_path.read_bytes()
+    assert b"cpt" not in raw and SPS_COCKPIT not in raw
+    assert raw.count(b"fwd") == 4 * 30
+    ts = [float(r.split(",")[1]) for r in
+          res.frames_csv.read_text().splitlines()[1:]]
+    assert all(b > a for a, b in zip(ts, ts[1:], strict=False)), \
+        "one camera's timestamps only ever go forward"
+    assert any("madronacockpit" in w and "ignored" in w for w in res.warnings)
+    assert json.loads((tmp_path / "cache" / "extract.json").read_text())[
+        "video_topic"] == "video/Streamdevvideo2/stream"
+
+
+def test_the_camera_is_chosen_for_the_flight_not_per_recording(tmp_path):
+    """A recording whose forward camera dropped out must contribute nothing
+    to the ROV stream -- not its cockpit view in the forward camera's place."""
+    a = tmp_path / "recorder_20260914_160000.mcap"
+    b = tmp_path / "recorder_20260914_161000.mcap"
+    write_two_camera_mcap(a, start=T0, seconds=4)
+    write_two_camera_mcap(b, start=T0 + 600, seconds=4, forward=False)
+
+    res = mx.extract([a, b], tmp_path / "cache", force=True)
+
+    assert res.video_topic == "video/Streamdevvideo2/stream"
+    assert res.video.frames == 4 * 30
+    assert b"cpt" not in res.h264_path.read_bytes()
+    assert any(b.name in w and "no video/Streamdevvideo2/stream" in w
+               for w in res.warnings), res.warnings
+
+
+def test_a_resolution_change_is_reported_not_just_the_first_sps(tmp_path):
+    """Only the first SPS used to be read, so the warning for a camera that
+    changed resolution part way through could never fire."""
+    import csv as _csv
+
+    from mcap.writer import Writer
+
+    src = tmp_path / "recorder_20260914_170000.mcap"
+    with open(src, "wb") as f:
+        w = Writer(f)
+        w.start()
+        vid = w.register_schema(mx.VIDEO_SCHEMA, "ros2msg", b"")
+        ch = w.register_channel("video/forward", "cdr", vid)
+        for k in range(20):
+            sps = SPS_FORWARD if k < 10 else SPS_COCKPIT
+            t = int((T0 + k / 30) * 1e9)
+            w.add_message(ch, t, _cdr_video(T0 + k / 30, _frame(sps, b"f")), t)
+        w.finish()
+
+    res = mx.extract([src], tmp_path / "cache", force=True)
+    assert res.video.resolutions == {"1920x1080", "960x540"}
+    assert any("resolution changes" in w for w in res.warnings)
+    with open(res.frames_csv, newline="") as fh:
+        assert len(list(_csv.DictReader(fh))) == 20
+
+
+def test_choose_video_topic_prefers_the_busiest_and_is_repeatable():
+    assert mx.choose_video_topic({}) is None
+    assert mx.choose_video_topic(
+        {"video/madronacockpit/stream": 5439,
+         "video/Streamdevvideo2/stream": 101446}) == "video/Streamdevvideo2/stream"
+    assert mx.choose_video_topic({"b": 10, "a": 10}) == "a"
+
+
+def test_a_cache_from_before_one_camera_per_flight_is_rebuilt(tmp_path):
+    """A schema-2 cache may hold two cameras in one stream, with nothing to
+    say so. It must not be taken as a hit."""
+    src = tmp_path / "recorder_20260914_163530.mcap"
+    write_two_camera_mcap(src, start=T0, seconds=2)
+    cache = tmp_path / "cache"
+    mx.extract([src], cache, force=True)
+    marker = cache / "extract.json"
+    old = json.loads(marker.read_text())
+    old["schema"] = 2
+    marker.write_text(json.dumps(old))
+
+    said: list[str] = []
+    mx.extract([src], cache, progress=lambda f, m="": said.append(m))
+    assert "telemetry cache hit" not in said
+    assert json.loads(marker.read_text())["schema"] == mx.CACHE_SCHEMA
+
+
 def test_a_zero_rangefinder_reading_is_dropped():
     """MAVLink's RANGEFINDER has no status field, so a lost bottom lock
     arrives as distance 0.0. The dataflash log, which does carry a status,

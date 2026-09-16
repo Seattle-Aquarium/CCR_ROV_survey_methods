@@ -97,6 +97,25 @@ Trim the original 4K to each transect (stream copy, seconds), build telemetry
 composites (4K / 1080p / 720p, plus a 1 Hz CSV), cut a short clip from one
 video, or put two flights side by side.
 
+**How the GoPro is lined up with the telemetry.** The transect times place the
+GoPro footage by its timecode; the telemetry and ROV camera run on the
+vehicle's clock. Before compositing, each transect's footage is checked
+against the vehicle's own turns: the down-facing picture rotates at the yaw
+rate the autopilot logs, and the lag between the two is the offset between the
+clocks. When that measurement is unambiguous and the clocks disagree, the
+telemetry and ROV inset are moved to match the picture and the run says so; when
+it is not (a transect flown dead straight), the timecode is trusted and the run
+says that instead. On 14 September 2026 the GoPro was 34.8 s behind the vehicle
+— not something the light check could see on a trim flown with steady lights.
+
+A trim starts on the keyframe before its transect (up to a second early). The
+cut records that head in the file's metadata and compositing skips it; trims
+cut before this was recorded have it estimated from their timecode.
+
+Only one camera goes into the ROV inset: the busiest video stream in the
+recordings (the forward camera). Recordings that also carry the Madrona cockpit
+view used to have both spliced into one stream.
+
 ---
 
 ## The flight folder

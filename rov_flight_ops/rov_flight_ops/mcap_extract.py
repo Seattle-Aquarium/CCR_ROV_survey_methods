@@ -17,6 +17,12 @@ late, so they are handled explicitly here:
     (``mavlink/1/1/VFR_HUD``), and a given message type can appear under several
     ids. We match on the message *type* and prefer the autopilot (1/1), rather
     than hard-coding topic strings that differ between vehicles.
+  * A recording can carry more than one video stream. Exactly one -- the
+    busiest across the flight, which is the forward camera -- is extracted.
+    On the 14 September 2026 OTS flight the 960x540 Madrona cockpit stream
+    was spliced into the 1920x1080 forward camera's bitstream: the inset
+    showed frames that were not the forward camera's, and the proxy built
+    from the mixture ran 1,367 s for a 1,166 s window.
 
 Multiple mcaps per flight are normal -- BlueOS rolls a new file whenever
 recording is restarted -- so everything here accepts a list and merges on the
@@ -124,10 +130,13 @@ class ExtractResult:
     t_end: float | None = None
     telemetry_rows: int = 0
     warnings: list[str] = field(default_factory=list)
+    #: The one video topic the ROV stream was taken from.
+    video_topic: str | None = None
 
     def to_json(self) -> dict:
         return {
             "mcaps": [str(m) for m in self.mcaps],
+            "video_topic": self.video_topic,
             "video_frames": self.video.frames,
             "video_first_ts": self.video.first_ts,
             "video_last_ts": self.video.last_ts,
@@ -196,13 +205,27 @@ def has_idr(data: bytes) -> bool:
 def sps_resolution(data: bytes) -> tuple[int, int] | None:
     """Width/height from the first SPS, so a mid-flight resolution change is
     detected rather than silently corrupting the merged stream."""
+    sps = sps_nal(data)
+    if sps is None:
+        return None
+    try:
+        return _parse_sps(sps[1:40])
+    except Exception:
+        return None
+
+
+def sps_nal(data: bytes) -> bytes | None:
+    """The first SPS NAL unit (header byte included), or None.
+
+    Returned whole so a caller can compare it with the last one seen and parse
+    only when it changes: the camera repeats its SPS on every frame, and
+    re-parsing an identical one 100,000 times per flight is wasted work.
+    """
     for h, t in _nal_iter(data):
         if t != 7:
             continue
-        try:
-            return _parse_sps(data[h + 1:h + 40])
-        except Exception:
-            return None
+        nxt = data.find(b"\x00\x00\x01", h)
+        return data[h:nxt if nxt >= 0 else len(data)]
     return None
 
 
@@ -318,20 +341,29 @@ def _sysid_rank(topic: str) -> tuple[int, int]:
 
 def select_channels(reader) -> tuple[dict[str, str], list[str]]:
     """Map message type -> chosen topic, plus the video topic list."""
+    chosen, video = _select_indexed(reader)
+    return chosen, sorted(video)
+
+
+def _select_indexed(reader) -> tuple[dict[str, str], dict[str, int]]:
+    """`select_channels`, with each video topic's message count."""
     summary = reader.get_summary()
     if summary is None:
-        return {}, []
+        return {}, {}
 
     counts: dict[int, int] = {}
     if summary.statistics:
         counts = dict(summary.statistics.channel_message_counts)
 
     by_type: dict[str, list[tuple[tuple[int, int], int, str]]] = {}
-    video_topics: list[str] = []
+    video: dict[str, int] = {}
     for ch in summary.channels.values():
         schema = summary.schemas.get(ch.schema_id)
         if schema and VIDEO_SCHEMA in schema.name:
-            video_topics.append(ch.topic)
+            # Without statistics a declared channel is all there is to go on;
+            # count it as present rather than as empty.
+            n = counts.get(ch.id, 0) if summary.statistics else 1
+            video[ch.topic] = video.get(ch.topic, 0) + n
             continue
         mt = _msg_type(ch.topic)
         if mt is None:
@@ -342,7 +374,21 @@ def select_channels(reader) -> tuple[dict[str, str], list[str]]:
             )
 
     chosen = {mt: sorted(v)[0][2] for mt, v in by_type.items()}
-    return chosen, sorted(video_topics)
+    return chosen, video
+
+
+def choose_video_topic(counts: dict[str, int]) -> str | None:
+    """The one video topic the ROV stream is built from: the busiest.
+
+    Every frame written goes into a single H.264 elementary stream, indexed
+    frame by frame against one clock, so there can only be one camera in it.
+    The forward camera runs at ~30 fps; anything else BlueOS records alongside
+    it -- the Madrona cockpit view, at a few frames per second -- is far
+    quieter. Ties go to the first name, so the choice is repeatable.
+    """
+    if not counts:
+        return None
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
 
 
 #: How many messages of a truncated file to read before deciding which channels
@@ -361,6 +407,15 @@ def select_channels_streaming(
     it up front rather than as topics appear matters: a better channel
     discovered late would already have had the worse one's rows written.
     """
+    chosen, video = _select_streaming(path, health, limit)
+    return chosen, sorted(video)
+
+
+def _select_streaming(
+    path: Path, health: McapHealth, limit: int = _DISCOVERY_MESSAGES
+) -> tuple[dict[str, str], dict[str, int]]:
+    """`select_channels_streaming`, with each video topic's message count
+    within the first `limit` messages."""
     from mcap.reader import NonSeekingReader
 
     schema_of: dict[str, str] = {}
@@ -374,10 +429,10 @@ def select_channels_streaming(
                 break
 
     by_type: dict[str, list[tuple[tuple[int, int], int, str]]] = {}
-    video_topics: list[str] = []
+    video: dict[str, int] = {}
     for topic, sname in schema_of.items():
         if VIDEO_SCHEMA in sname:
-            video_topics.append(topic)
+            video[topic] = counts.get(topic, 0)
             continue
         mt = _msg_type(topic)
         if mt is None or (mt not in WANTED and mt not in SPECIAL):
@@ -386,7 +441,7 @@ def select_channels_streaming(
             (_sysid_rank(topic), -counts.get(topic, 0), topic)
         )
     chosen = {mt: sorted(v)[0][2] for mt, v in by_type.items()}
-    return chosen, sorted(video_topics)
+    return chosen, video
 
 
 # --------------------------------------------------------------------------
@@ -397,7 +452,10 @@ def select_channels_streaming(
 #: what extraction writes changes, so an older extractor's cache is rebuilt.
 #: Markers without it -- UTC's, or this program's before the fingerprint was
 #: added -- are simply rebuilt once.
-CACHE_SCHEMA = 2
+#:
+#: 3: one video topic per flight. A schema-2 cache may hold two cameras spliced
+#: into one bitstream, and nothing in it says whether it does.
+CACHE_SCHEMA = 3
 
 #: How many messages are read between checks of the Stop signal. Checking is
 #: one attribute read, so this is about keeping the loop tight, not about cost.
@@ -556,6 +614,7 @@ def extract(
                     cache_dir, mcaps, h264_path, frames_csv, telem_csv, vi,
                     prev.get("t_start"), prev.get("t_end"),
                     prev.get("telemetry_rows", 0), prev.get("warnings", []),
+                    prev.get("video_topic"),
                 )
         except Exception:
             pass  # unreadable marker: just re-extract
@@ -586,6 +645,23 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
     total_bytes = sum(m.stat().st_size for m in ordered) or 1
     done_bytes = 0
 
+    # Which channels each recording holds, before any is read in full: the
+    # video topic has to be chosen for the flight as a whole, or a recording
+    # whose forward camera dropped out would contribute its other stream.
+    surveyed = _survey_recordings(ordered, cancel)
+    video_counts: dict[str, int] = {}
+    for rec in surveyed.values():
+        for topic, n in rec.video.items():
+            video_counts[topic] = video_counts.get(topic, 0) + n
+    video_topic = choose_video_topic(video_counts)
+    ignored = sorted(t for t, n in video_counts.items()
+                     if t != video_topic and n > 0)
+    if ignored:
+        warnings.append(
+            f"the recordings carry {len(ignored) + 1} video streams; the ROV "
+            f"inset is taken from {video_topic} and "
+            f"{', '.join(ignored)} is ignored")
+
     with open(h264_path, "wb") as fh264, \
          open(frames_csv, "w", newline="") as ff, \
          open(telem_csv, "w", newline="") as ft:
@@ -597,6 +673,7 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
 
         frame_i = 0
         byte_off = 0
+        last_sps: bytes | None = None
 
         for mi, mpath in enumerate(ordered):
             _check(cancel)
@@ -606,12 +683,8 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
             # A recording the vehicle never closed has no index, so it has to be
             # read straight through. Everything else is unchanged: the reader is
             # swapped, not the loop.
-            health = None
-            try:
-                health = scan_health(mpath)
-            except Exception:
-                pass
-            truncated = bool(health and health.recoverable)
+            rec = surveyed[mpath]
+            health, truncated = rec.health, rec.truncated
             if truncated:
                 warnings.append(
                     f"{mpath.name}: the recorder never closed this file "
@@ -621,16 +694,22 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
                 )
 
             try:
+                if rec.error is not None:
+                    raise rec.error
+                chosen = rec.chosen
+                present = sorted(t for t, n in rec.video.items() if n > 0)
+                video_topics = [video_topic] if video_topic in present else []
+                if not video_topics:
+                    warnings.append(
+                        f"{mpath.name}: no video stream" if not present else
+                        f"{mpath.name}: no {video_topic} video (only "
+                        f"{', '.join(present)}, which is not used)")
                 f = (open_repaired(mpath, health) if truncated
                      else open(mpath, "rb"))
                 with f:
                     if truncated:
                         from mcap.reader import NonSeekingReader
                         reader = NonSeekingReader(f)
-                        chosen, video_topics = select_channels_streaming(
-                            mpath, health)
-                        if not video_topics:
-                            warnings.append(f"{mpath.name}: no video stream")
                         # NonSeekingReader has no topic filter, so the loop
                         # below skips what we did not choose.
                         keep = set(chosen.values()) | set(video_topics)
@@ -643,9 +722,6 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
                     else:
                         keep = None
                         reader = make_reader(f)
-                        chosen, video_topics = select_channels(reader)
-                        if not video_topics:
-                            warnings.append(f"{mpath.name}: no video stream")
                         topics = list(chosen.values()) + video_topics
                         if not topics:
                             warnings.append(
@@ -691,9 +767,15 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
 
                         if channel.topic in video_topics:
                             ts, data = parse_compressed_video(message.data)
-                            if vi.width is None:
+                            # Every SPS that differs from the last is parsed,
+                            # not just the first: a change of resolution
+                            # part way through is what has to be caught.
+                            sps = sps_nal(data)
+                            if sps is not None and sps != last_sps:
+                                last_sps = sps
                                 if (res := sps_resolution(data)) is not None:
-                                    vi.width, vi.height = res
+                                    if vi.width is None:
+                                        vi.width, vi.height = res
                                     vi.resolutions.add(f"{res[0]}x{res[1]}")
                             fh264.write(data)
                             fw.writerow([frame_i, f"{ts:.9f}", len(data), byte_off,
@@ -742,7 +824,7 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
 
     _check(cancel)
     res = ExtractResult(cache_dir, ordered, h264_path, frames_csv, telem_csv, vi,
-                        t_start, t_end, n_rows, warnings)
+                        t_start, t_end, n_rows, warnings, video_topic)
     payload = res.to_json()
     payload.update(schema=CACHE_SCHEMA, sources=sources)
     tmp = marker.with_name(marker.name + ".part")
@@ -751,6 +833,46 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
     if progress:
         progress(1.0, f"extracted {vi.frames:,} frames, {n_rows:,} telemetry rows")
     return res
+
+
+@dataclass
+class _Recording:
+    """What one recording holds, learned before it is read in full."""
+
+    health: McapHealth | None = None
+    truncated: bool = False
+    chosen: dict[str, str] = field(default_factory=dict)
+    video: dict[str, int] = field(default_factory=dict)   # topic -> messages
+    error: Exception | None = None
+
+
+def _survey_recordings(ordered: Sequence[Path], cancel=None) -> dict[Path, _Recording]:
+    """Health and channel choice for every recording, in one cheap pass.
+
+    An intact file costs a read of its summary. A truncated one costs the
+    bounded first pass `select_channels_streaming` already made, now made
+    once here instead of inside the read. A file that cannot be surveyed
+    keeps its exception, to be reported where its read would have failed.
+    """
+    out: dict[Path, _Recording] = {}
+    for mpath in ordered:
+        _check(cancel)
+        rec = _Recording()
+        try:
+            rec.health = scan_health(mpath)
+        except Exception:
+            pass
+        rec.truncated = bool(rec.health and rec.health.recoverable)
+        try:
+            if rec.truncated:
+                rec.chosen, rec.video = _select_streaming(mpath, rec.health)
+            else:
+                with open(mpath, "rb") as f:
+                    rec.chosen, rec.video = _select_indexed(make_reader(f))
+        except Exception as ex:
+            rec.error = ex
+        out[mpath] = rec
+    return out
 
 
 def _write_telemetry(tw, mt: str, t: float, raw: bytes) -> int:
