@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import tkinter
 from collections.abc import Callable
 from datetime import date as _date
 
 import customtkinter as ctk
 
-from ..survey import Site, Transect
+from ..survey import Pause, Site, Transect
 from . import theme as T
 
 
@@ -174,6 +175,91 @@ class Grip(ctk.CTkFrame):
                              else self.minimum))
 
 
+class Repaint:
+    """Runs a redraw at most once a frame, and once more when it settles.
+
+    Tk delivers ``<Configure>`` as fast as the window manager can move the
+    edge -- far faster than a canvas full of items can be rebuilt, and faster
+    than a 60 Hz display can show. Doing the work on every one of them is what
+    made dragging a window edge lag a second behind the pointer: each event's
+    repaint delayed the next event, which was already stale by the time it was
+    drawn.
+
+    So the work runs on the next frame boundary and everything asked for in
+    between is dropped -- the intermediate sizes were never going to be seen.
+    One more pass is then scheduled for after the last event, so the final
+    size is drawn from the size it actually ended at rather than from whichever
+    event happened to land on a frame boundary. That last pass is the one that
+    has to be right; the ones during the drag only have to be quick.
+    """
+
+    #: One frame at 60 Hz. Asking for more than this cannot reach the screen.
+    FRAME_MS = 16
+    #: How long after the last event the accurate pass runs. Long enough to
+    #: sit out the gaps between a window manager's events, short enough that
+    #: letting go of the edge feels like it finished immediately.
+    SETTLE_MS = 90
+
+    def __init__(self, widget, work: Callable[[], None], *,
+                 frame_ms: int | None = None, settle_ms: int | None = None):
+        self._widget = widget
+        self._work = work
+        self.frame_ms = self.FRAME_MS if frame_ms is None else frame_ms
+        self.settle_ms = self.SETTLE_MS if settle_ms is None else settle_ms
+        self._frame_job = None
+        self._settle_job = None
+        #: True while a burst of events is still arriving, for work that can
+        #: be done cheaply now and properly at the end.
+        self.busy = False
+
+    def ask(self, _event=None) -> None:
+        """Something changed. Draw soon, and again once it has settled."""
+        self.busy = True
+        if self._frame_job is None:
+            self._frame_job = self._after(self.frame_ms, self._frame)
+        self._cancel(self._settle_job)
+        self._settle_job = self._after(self.settle_ms, self._settle)
+
+    def now(self) -> None:
+        """Draw immediately, dropping anything already scheduled."""
+        self._cancel(self._frame_job)
+        self._cancel(self._settle_job)
+        self._frame_job = self._settle_job = None
+        self.busy = False
+        self._work()
+
+    def cancel(self) -> None:
+        self._cancel(self._frame_job)
+        self._cancel(self._settle_job)
+        self._frame_job = self._settle_job = None
+        self.busy = False
+
+    # ---- internals -----------------------------------------------------
+
+    def _frame(self) -> None:
+        self._frame_job = None
+        self._work()
+
+    def _settle(self) -> None:
+        self._settle_job = None
+        self.busy = False
+        self._work()
+
+    def _after(self, ms: int, fn):
+        try:
+            return self._widget.after(ms, fn)
+        except Exception:
+            return None                   # the window is going away
+
+    def _cancel(self, job) -> None:
+        if job is None:
+            return
+        try:
+            self._widget.after_cancel(job)
+        except Exception:
+            pass                          # already run, or the window is gone
+
+
 def fit_wrap(container, *labels, margin: int = 24) -> None:
     """Keep labels wrapped to their container's width as it changes.
 
@@ -214,14 +300,162 @@ def one_line_height(wrap: str = "word") -> int:
     return base + (16 if wrap == "none" else 0)
 
 
+class OutputBox(ctk.CTkTextbox):
+    """A report box whose scrollbars settle instead of flickering.
+
+    CustomTkinter re-decides five times a second, forever, whether each
+    scrollbar is needed, and it asks the question of the lines the widget is
+    *displaying*. In a box one line tall that is a loop: showing the
+    horizontal bar costs the text a line of height, the longest line scrolls
+    out of the display, Tk then reports nothing left to scroll sideways, the
+    bar goes away, the line comes back, and around again. The first thing
+    anyone saw on opening the window was the path-to-the-vehicle box twitching
+    -- measured at 4.8 changes a second, which is exactly CustomTkinter's
+    200 ms poll interval.
+
+    So the poll is stopped and the sideways question is asked of the *text*
+    instead: the width of its longest line against the width of the text area,
+    which does not change when a scrollbar appears. The vertical bar is still
+    decided from what Tk reports, which is safe once the height is stable --
+    narrowing a box can only add wrapped lines, never remove them, so showing
+    the bar can never un-justify itself.
+
+    Decisions are made when something has actually changed -- new text, a
+    resize, a drag of the grip -- and coalesced to one per idle cycle.
+    """
+
+    #: Slack before the text counts as too wide, in pixels. A line that ends
+    #: within a couple of pixels of the edge does not earn a scrollbar.
+    SLACK_PX = 4
+    #: How many lines are measured. The longest few by character count, not
+    #: all of them: a day's log is thousands, and measuring them on every
+    #: settle would cost more than the flicker did.
+    MEASURE_LINES = 8
+
+    def __init__(self, master, **kw):
+        self._settle_pending = False
+        self._settling = False
+        #: The widest line in pixels, and the font it was measured with.
+        #: Both are worked out once per change of text rather than once per
+        #: settle: fetching the whole text across the Tcl boundary and asking
+        #: the font system to resolve a family are each dear enough to show
+        #: up while a window edge is being dragged, and neither answer
+        #: changes when only the width does.
+        self._widest_px: int | None = None
+        self._measure_font: object | None = None
+        super().__init__(master, **kw)
+        # The outer frame's own <Configure>. CTkTextbox.bind sends bindings to
+        # the inner Text widget, which is the one the scrollbars resize, so
+        # this goes on the frame directly rather than through it.
+        tkinter.Frame.bind(self, "<Configure>", self.settle, add="+")
+
+    # ---- replacing CustomTkinter's poll --------------------------------
+
+    def _check_if_scrollbars_needed(self, event=None, continue_loop: bool = False):
+        """CustomTkinter's hook, which normally reschedules itself forever.
+
+        Deliberately does not reschedule: `settle` is called when something
+        has changed instead.
+        """
+        self.settle()
+
+    def settle(self, _event=None) -> None:
+        """Re-decide the scrollbars, once, after the current work finishes."""
+        if self._settle_pending:
+            return
+        self._settle_pending = True
+        try:
+            self.after_idle(self._settle_now)
+        except Exception:                     # no event loop yet, or gone
+            self._settle_pending = False
+
+    def _settle_now(self) -> None:
+        self._settle_pending = False
+        if self._settling:
+            return
+        self._settling = True
+        try:
+            for want, flag, kw in ((self._wants_x(), "_hide_x_scrollbar",
+                                    "re_grid_x_scrollbar"),
+                                   (self._wants_y(), "_hide_y_scrollbar",
+                                    "re_grid_y_scrollbar")):
+                if getattr(self, flag) is want:          # hidden when wanted
+                    setattr(self, flag, not want)
+                    self._create_grid_for_text_and_scrollbars(**{kw: True})
+        except Exception:
+            pass                              # a settled scrollbar is nobody's
+        finally:                              # reason to lose a report
+            self._settling = False
+
+    # ---- the two questions ---------------------------------------------
+
+    def _wants_x(self) -> bool:
+        """Is the widest line wider than the text area?
+
+        Measured from the text, not from what is on screen, because what is on
+        screen is what the answer changes -- which is the whole bug.
+        """
+        try:
+            if str(self._textbox.cget("wrap")) != "none":
+                return False                  # wrapped text never runs wide
+            width = self._textbox.winfo_width()
+            if width <= 1:
+                return False
+            return self._widest() > width - self.SLACK_PX
+        except Exception:
+            return False
+
+    def _widest(self) -> int:
+        """The widest line, in pixels. Re-measured only when the text changes."""
+        if self._widest_px is not None:
+            return self._widest_px
+        lines = self._textbox.get("1.0", "end-1c").split("\n")
+        if self._measure_font is None:
+            from tkinter import font as tkfont
+            self._measure_font = tkfont.Font(font=self._textbox.cget("font"))
+        longest = sorted(lines, key=len, reverse=True)[:self.MEASURE_LINES]
+        self._widest_px = max(
+            (self._measure_font.measure(x) for x in longest), default=0)
+        return self._widest_px
+
+    def _wants_y(self) -> bool:
+        try:
+            return tuple(self._textbox.yview()) != (0.0, 1.0)
+        except Exception:
+            return False
+
+    # ---- anything that changes the answer -------------------------------
+
+    def configure(self, require_redraw=False, **kw):
+        out = super().configure(require_redraw=require_redraw, **kw)
+        if "font" in kw:
+            self._measure_font = None
+            self._widest_px = None
+        if "height" in kw or "wrap" in kw or "font" in kw:
+            self.settle()
+        return out
+
+    def insert(self, index, text, tags=None):
+        out = super().insert(index, text, tags)
+        self._widest_px = None
+        self.settle()
+        return out
+
+    def delete(self, index1, index2=None):
+        out = super().delete(index1, index2)
+        self._widest_px = None
+        self.settle()
+        return out
+
+
 def output_box(master, *, wrap: str = "word", muted: bool = True,
-               height: int | None = None) -> ctk.CTkTextbox:
+               height: int | None = None) -> OutputBox:
     """A read-only report box that opens at its smallest, one line tall."""
-    box = ctk.CTkTextbox(master, height=height or one_line_height(wrap),
-                         font=T.FONT_MONO, fg_color=T.FIELD_BG,
-                         text_color=T.TEXT_MUTED if muted else T.TEXT,
-                         border_width=1, border_color=T.BORDER,
-                         corner_radius=6, wrap=wrap)
+    box = OutputBox(master, height=height or one_line_height(wrap),
+                    font=T.FONT_MONO, fg_color=T.FIELD_BG,
+                    text_color=T.TEXT_MUTED if muted else T.TEXT,
+                    border_width=1, border_color=T.BORDER,
+                    corner_radius=6, wrap=wrap)
     box.min_height = one_line_height(wrap)          # type: ignore[attr-defined]
     return box
 
@@ -273,14 +507,60 @@ def button(master, text, command, kind: str = "primary", width: int = 120):
                          border_width=1, border_color=T.BORDER, corner_radius=6)
 
 
+class PauseCell(ctk.CTkFrame):
+    """One pause inside a transect: its own start, end, and a way to drop it.
+
+    Sits to the right of the transect's own times, because it belongs to that
+    transect rather than being a row of its own -- a pause is not a second
+    transect, and laying it out as one invited exactly that reading.
+    """
+
+    def __init__(self, master, index: int, on_remove: Callable[[PauseCell], None],
+                 on_change: Callable[[], None], start: str = "", end: str = ""):
+        super().__init__(master, fg_color=T.SURFACE, corner_radius=6,
+                         border_width=1, border_color=T.BORDER)
+        self._on_remove = on_remove
+        self.index_label = ctk.CTkLabel(self, text=f"pause {index}",
+                                        font=T.FONT_SMALL,
+                                        text_color=T.TEXT_MUTED, anchor="w")
+        self.index_label.grid(row=0, column=0, padx=(8, 6), pady=3)
+        self.start = TimeEntry(self, width=100)
+        self.start.set(start)
+        self.start.grid(row=0, column=1, padx=(0, 4), pady=3)
+        label(self, "to", muted=True).grid(row=0, column=2, padx=(0, 4))
+        self.end = TimeEntry(self, width=100)
+        self.end.set(end)
+        self.end.grid(row=0, column=3, padx=(0, 4), pady=3)
+        ctk.CTkButton(self, text="✕", width=24, height=24, corner_radius=6,
+                      font=T.FONT_SMALL, fg_color="transparent",
+                      hover_color=T.SURFACE_ALT, text_color=T.TEXT_MUTED,
+                      border_width=0, command=lambda: on_remove(self)
+                      ).grid(row=0, column=4, padx=(0, 6))
+        for e in (self.start, self.end):
+            e.set_on_change(on_change)
+
+    def renumber(self, index: int) -> None:
+        self.index_label.configure(text=f"pause {index}")
+
+    def to_pause(self) -> Pause:
+        return Pause(self.start.get().strip(), self.end.get().strip())
+
+
 class TransectRow(ctk.CTkFrame):
-    """One transect: name, TC-25 start, TC-25 end."""
+    """One transect: name, TC-25 start, TC-25 end, and any pauses inside it."""
+
+    #: Pauses laid out per line before wrapping onto the next. Two fit beside
+    #: the transect's own times on a field laptop; a third pushes the status
+    #: text off the edge.
+    PAUSES_PER_LINE = 2
 
     def __init__(self, master, on_remove: Callable[[TransectRow], None],
-                 name: str = "T1", start: str = "", end: str = ""):
+                 name: str = "T1", start: str = "", end: str = "",
+                 pauses: list[Pause] | None = None):
         super().__init__(master, fg_color="transparent")
-        self.grid_columnconfigure(5, weight=1)
+        self.grid_columnconfigure(6, weight=1)
         self._on_remove = on_remove
+        self._pauses: list[PauseCell] = []
 
         self.name = entry(self, "T1", width=70)
         self.name.insert(0, name)
@@ -296,20 +576,71 @@ class TransectRow(ctk.CTkFrame):
         self.end.set(end)
         self.end.grid(row=0, column=4, padx=(0, 10))
 
+        # The pauses live in their own frame beside the times, so adding one
+        # cannot shuffle the columns the operator's eye has already found.
+        # It is taken out of the grid while it is empty: a CustomTkinter frame
+        # with nothing in it keeps its default 200x200, which left a gap the
+        # height of a transect row under every transect that had no pauses.
+        self.pauses_frame = ctk.CTkFrame(self, fg_color="transparent",
+                                         width=0, height=0)
+        self.pauses_frame.grid(row=0, column=5, rowspan=2, sticky="w",
+                               padx=(0, 10))
+        self.pauses_frame.grid_remove()
+
         self.status = ctk.CTkLabel(self, text="", font=T.FONT_SMALL,
-                                   text_color=T.TEXT_MUTED, anchor="w")
-        self.status.grid(row=0, column=5, sticky="ew", padx=(4, 8))
+                                   text_color=T.TEXT_MUTED, anchor="w",
+                                   justify="left")
+        self.status.grid(row=0, column=6, sticky="ew", padx=(4, 8))
 
         button(self, "Remove", lambda: on_remove(self), "danger", width=80
-               ).grid(row=0, column=6)
+               ).grid(row=0, column=7)
+
+        self.add_pause_btn = button(self, "+ Add pause", self.add_pause,
+                                    "ghost", width=110)
+        self.add_pause_btn.grid(row=1, column=3, columnspan=2, sticky="w",
+                                pady=(0, 3))
 
         # Wire the callbacks only now: every widget refresh() touches exists.
         for e in (self.start, self.end):
             e.set_on_change(self.refresh)
+        for p in pauses or []:
+            self.add_pause(p.start_tc, p.end_tc)
+        self.refresh()
+
+    # ---- pauses --------------------------------------------------------
+
+    def add_pause(self, start: str = "", end: str = "") -> None:
+        cell = PauseCell(self.pauses_frame, len(self._pauses) + 1,
+                         self._remove_pause, self.refresh, start, end)
+        self._pauses.append(cell)
+        self._lay_out_pauses()
+        self.refresh()
+
+    def _remove_pause(self, cell: PauseCell) -> None:
+        if cell not in self._pauses:
+            return
+        self._pauses.remove(cell)
+        cell.destroy()
+        self._lay_out_pauses()
+        self.refresh()
+
+    def _lay_out_pauses(self) -> None:
+        for i, cell in enumerate(self._pauses):
+            cell.renumber(i + 1)
+            cell.grid(row=i // self.PAUSES_PER_LINE,
+                      column=i % self.PAUSES_PER_LINE,
+                      padx=(0, 6), pady=2, sticky="w")
+        if self._pauses:
+            self.pauses_frame.grid()
+        else:
+            self.pauses_frame.grid_remove()
+
+    # ---- the transect it stands for --------------------------------------
 
     def to_transect(self) -> Transect:
         return Transect(self.name.get().strip() or "T?",
-                        self.start.get().strip(), self.end.get().strip())
+                        self.start.get().strip(), self.end.get().strip(),
+                        pauses=[c.to_pause() for c in self._pauses])
 
     def refresh(self) -> None:
         t = self.to_transect()
@@ -320,8 +651,15 @@ class TransectRow(ctk.CTkFrame):
         if errs:
             self.status.configure(text=errs[0].split(": ", 1)[-1], text_color=T.WARN)
             return
-        mins = t.duration_s() / 60.0
-        self.status.configure(text=f"{mins:.1f} min", text_color=T.OK)
+        paused = t.paused_s()
+        if paused <= 0:
+            self.status.configure(text=f"{t.duration_s() / 60.0:.1f} min",
+                                  text_color=T.OK)
+            return
+        self.status.configure(
+            text=f"{t.active_s() / 60.0:.1f} min surveying  ·  "
+                 f"{paused / 60.0:.1f} min paused",
+            text_color=T.OK)
 
 
 class SiteFrame(ctk.CTkFrame):
@@ -372,7 +710,7 @@ class SiteFrame(ctk.CTkFrame):
             self.project.insert(0, site.project)
             self.date.insert(0, site.date)
             for t in site.transects:
-                self.add_transect(t.name, t.start_tc, t.end_tc)
+                self.add_transect(t)
         else:
             self.project.insert(0, default_project)
             self.date.insert(0, default_date or _date.today().isoformat())
@@ -380,10 +718,14 @@ class SiteFrame(ctk.CTkFrame):
 
     # ---- transects -----------------------------------------------------
 
-    def add_transect(self, name: str | None = None, start: str = "",
-                     end: str = "") -> None:
-        n = name or f"T{len(self._rows) + 1}"
-        row = TransectRow(self.rows_frame, self._remove_row, n, start, end)
+    def add_transect(self, transect: Transect | None = None) -> None:
+        """Add a row, either blank (the button) or filled from a saved plan."""
+        n = (transect.name if transect else "") or f"T{len(self._rows) + 1}"
+        row = TransectRow(
+            self.rows_frame, self._remove_row, n,
+            transect.start_tc if transect else "",
+            transect.end_tc if transect else "",
+            pauses=list(transect.pauses) if transect else None)
         row.grid(row=len(self._rows), column=0, sticky="ew", pady=1)
         self._rows.append(row)
         row.refresh()

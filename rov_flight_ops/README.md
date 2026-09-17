@@ -36,12 +36,42 @@ in both.
 
 ## Running it
 
-Double-click **`run_rov_flight_ops.bat`**.
+**Set it up once**, then start it from the desktop like anything else.
 
-The first run builds a private Python environment in
-`%LOCALAPPDATA%\CCR_ROV\rov_flight_ops\venv` and installs what the program
-needs — a few minutes, and it needs the internet that once. After that it
-starts straight away. You need Python 3.10 or newer installed, with tcl/tk.
+1. Install **Python 3.10 or newer**, with tcl/tk. Nothing else is needed.
+2. Double-click **`run_rov_flight_ops.bat`** once and let it finish. It builds
+   a private Python environment in
+   `%LOCALAPPDATA%\CCR_ROV\rov_flight_ops\venv` and installs what the program
+   needs — a few minutes, and it needs the internet that once.
+3. Double-click **`Create Desktop Shortcut.bat`**. That puts
+   **ROV Flight Operations** on the desktop, with the ROV icon.
+
+After that, start it from the desktop shortcut. Steps 1 and 2 have to happen
+first: the shortcut starts the program, it does not install it. (If you make
+the shortcut before installing, the first click will do the install and show
+you a window while it does.)
+
+The shortcut needs **no administrator rights**, and it works out where the
+repository is from its own location — so a checkout under Dropbox, OneDrive or
+anywhere else with spaces in the path is fine, and nothing is written down that
+can go stale. **If you move or rename the repository, run
+`Create Desktop Shortcut.bat` again**: it replaces the shortcut it made last
+time rather than adding a second one, so running it twice is the same as
+running it once.
+
+The shortcut points at `launch_rov_flight_ops.vbs`, which is what keeps a
+command prompt off the taskbar for the rest of the day. What that gains in
+tidiness it must not lose in diagnosability, so:
+
+| | |
+| --- | --- |
+| **normal start** | no console. Everything the launcher prints goes to `%LOCALAPPDATA%\CCR_ROV\rov_flight_ops\launch.log`. |
+| **first start, or a rebuild** | shown in a window, because it takes minutes and is worth watching. |
+| **a start that fails** | a message naming `launch.log`, and an offer to start again with the window visible so the error can be read. |
+| **debugging** | `run_rov_flight_ops.bat --console` runs with the console Python and leaves the window open, whatever happens. |
+
+Anything that goes wrong once the window is up is in the diagnostics log
+either way — see [Diagnostics](#diagnostics-and-reporting-a-problem).
 
 The *Analyze transects* tab also uses the transect extractor in
 `../mcap_to_csv`; the launcher installs it, and stops with an error if that
@@ -51,6 +81,40 @@ The launcher installs the dependency versions in **`constraints.txt`** — the s
 this was last tested with — so a new laptop does not get whatever is newest that
 day. Startup never upgrades anything. If an environment is ever broken, run
 `run_rov_flight_ops.bat --repair` to reinstall into it.
+
+The desktop icon is drawn by **`assets/make_rov_icon.py`** and lives in
+`assets/rov_flight_ops.ico`. It is an original drawing of *our* vehicle seen
+head on — the red enclosures either side of the centre tube, the red tape
+across the float blocks, the camera dome, and the two lights pointing down and
+lit. It carries eight sizes from 16 to 256 pixels, and **each size is drawn
+rather than scaled down from one bitmap**: at 16 px the icon is about ten
+usable pixels of vehicle, and anything reduced to that from a detailed drawing
+is a smear. Below 32 px it becomes a different, simpler drawing of the same
+vehicle — one dark body, two red bars, two red blocks, the dome, two lights.
+
+The script writes **seven options** to `assets/icon_options/`, with preview
+sheets showing each at every size on a light, mid and dark desktop
+(`1_at_256px.png`, `2_small_on_*.png`). To change which one the shortcut uses:
+
+```bash
+python assets/make_rov_icon.py --pick clean
+```
+
+then run `Create Desktop Shortcut.bat` again to pick up the new icon (Windows
+caches icons per shortcut).
+
+| option | |
+|---|---|
+| `faithful` | every part, including the thrusters |
+| **`bold`** | the same with a keyline round each part — **this is the one in use** |
+| `clean` | no thrusters; the calmest of the plain ones |
+| `minimal` | the small drawing used at every size, so 256 and 16 are the same picture |
+| `badge_blue`, `badge_teal` | on a rounded plate, which guarantees contrast on any wallpaper |
+| `no_beams` | lights off, if the glow ever reads as a fault |
+
+The keyline is what `bold` is for: flat fills that touch each other blur into
+one shape when the icon is reduced, and a dark line between them survives the
+reduction and holds the parts apart.
 
 **`run_netcheck.bat`** is the stand-alone topside network check (which adapter
 carries the tether, whether it is a bridge, whether Windows may power it down).
@@ -69,6 +133,24 @@ From a terminal: `python -m rov_flight_ops` (in the environment above).
   *Dark mode* switch hides the logo, title and attribution; the gradient bar,
   the switch and the button stay and rise to the top of the window. **▼**
   brings the banner back.
+* **The banner carries the three software versions** — BlueOS, ArduSub and
+  Cockpit — read off the vehicle once a minute while it is connected. Open,
+  they are a column beside the title; folded, a row to the left of the lamps.
+  A version already read is not erased when the tether drops: the tether comes
+  and goes all day and the vehicle has not changed underneath it. A dash means
+  nobody has been able to read it yet. Cockpit is normally flown from the
+  topside laptop rather than served off the vehicle, so it is looked for on
+  this machine when the vehicle has nothing to say about it.
+* **Two lamps**, *Vehicle connected* and *Logging*. Open, they sit under
+  Diagnostics and the appearance switch; folded, they are in the same row. Each
+  has three states rather than two, because there genuinely are three:
+  **grey ○** nothing, **green ○** on and waiting, **green ●** happening now.
+  *Logging* is a ring while the recorder is watching for the ROV to arm and a
+  filled dot once it is writing rows — which is the difference between two
+  transects and a recorder that has stopped. *Vehicle connected* goes out when
+  the vehicle stops answering, which `armed` alone can never show: that holds
+  its last value, so a vehicle unplugged after a disarm reads "disarmed"
+  forever.
 * **Output boxes start one line tall and are dragged open.** The shared log at
   the foot of the window has a handle on its top edge; every section with a
   report box has a handle on its bottom edge. Drag to resize; double-click the
@@ -181,6 +263,37 @@ are added for you) and press **Save**. The plan is written into the flight
 folder as `surveys.json`; it is what every later step — and ROV Imagery
 Processing — reads.
 
+#### Pauses
+
+Sometimes the vehicle is on transect and something goes wrong — Cockpit
+disarms, the video glitches, a minute goes on getting the ROV back where it
+was. That minute is inside the transect but was not surveyed, and its imagery
+must not be filed as though it were.
+
+**+ Add pause**, under each transect's *end* box, adds a start and an end
+beside the transect's own times. Add as many as a transect needs. The row then
+reads, for example, *10.5 min surveying · 1.5 min paused*.
+
+A pause has to be inside its transect, has to run forwards, and cannot overlap
+another; anything else is an error on the row rather than something quietly
+clipped, because a pause typed against the wrong transect is the mistake most
+worth catching. Times run on the transect's own clock, so a transect through
+local midnight carries its pauses with it.
+
+What a pause changes, everywhere:
+
+| | |
+| --- | --- |
+| **GoPro stills** | a frame taken during a pause matches no transect, so it is handled as off-transect — kept in `off_transect/`, or left behind, by the policy on the import page |
+| **GoPro video** | the trimmed 4K source and the telemetry composite skip the paused footage and join across it. The telemetry under the picture skips with it, so the overlay stays on the frame it belongs to |
+| **per-transect CSV** | every row is **kept** and marked in the new `Survey_state` column (`transect` / `pause`), so an analysis can filter and a check on the recording still sees an unbroken stretch of telemetry. `Distance` counts only the surveying rows |
+| **1 Hz telemetry CSV** | same, in a `survey_state` column |
+| **C3 imagery** | **not** affected. It feeds the photogrammetry models, where more coverage is simply more to work with |
+| **downloads, and the dive profile** | not affected: which recordings cover a transect is a question about when the flight happened, not about what was surveyed |
+
+A transect with no pauses behaves in every respect exactly as it always did,
+and a `surveys.json` written before pauses existed opens unchanged.
+
 ### 2. Preview the transects
 
 Draws the dive profile with the transects marked: the gut check that the
@@ -216,13 +329,24 @@ off it.
 
 Tick the file types, then **Search for files**:
 
+The types are in the order a survey day reaches for them — mcap and BIN come
+down after every flight without anyone thinking about it, C3 imagery and video
+are the next most likely, and tlog is last because the BlueOS releases we fly
+no longer write one at all:
+
 | type | on the vehicle (BlueOS File Browser path) | downloads to |
 |---|---|---|
 | **mcap** | `/system_root/usr/blueos/userdata/recorder/*.mcap` | `logs/mcap/` |
-| **mcap video** — the forward camera, extracted | `…/recorder/<recording>/*.mp4` | `logs/mcap_video/<recording>/` |
 | **BIN** — the autopilot's dataflash logs | `/ardupilot_logs/firmware/logs/*.BIN` | `logs/BIN/` |
-| **tlog** — older BlueOS releases only | `/ardupilot_logs/logs/**/*.tlog` | `logs/tlog/` |
 | **C3 imagery** — MarineSitu C3 via Madrona | the folder chosen in Madrona (see below) | `photos/C3/` (left/, right/, center/, calibration) |
+| **video** — the forward camera, extracted | `…/recorder/<recording>/*.mp4` | `logs/mcap_video/<recording>/` |
+| **tlog** — older BlueOS releases only | `/ardupilot_logs/logs/**/*.tlog` | `logs/tlog/` |
+
+**video** is the same stream that is also inside the mcap. It is called just
+*video* here because on this page it is a file type to tick, and "mcap video"
+read as though it were part of the mcap row above it. Its folder on disk keeps
+the name it has always had, so flight folders already filed do not have to
+move.
 
 The list shows **totals first** — how many files of each type and how much room
 they take, when they were recorded, which transects they cover, and how many are
@@ -250,8 +374,9 @@ same amount.
 The **In flight folder** column says **verified** only for a file this program
 downloaded (every byte arrived and its SHA-256 was recorded, and the copy is
 still that size), **same size (unverified)** for a same-size file with no such
-record — copied by hand, say — and **DIFFERENT SIZE** when the copy does not
-match.
+record — copied by hand, say — **copied, still recording** for a log the vehicle
+has gone on writing since (below), and **DIFFERENT SIZE** when the copy does
+not match.
 
 **C3 folder on the Pi.** Madrona saves "underneath the folder you select", so
 there is no fixed path. Leave the box blank and the search looks for folders
@@ -266,24 +391,56 @@ refused rather than walked.
 
 ### 2. Download files  ·  3. Clean the Pi
 
-Side by side, and chosen the same way:
+Side by side, and chosen the same way: **File types**, crossed with a **Time
+period**.
 
-* **(A) File types** — mcap, mcap video, BIN, tlog, C3 imagery.
-* **(B) Time period** — *All files*, *Transects only*, or *Manual selection*.
+The two sections offer different periods, because they are used at different
+moments. Downloading happens on the boat, straight after surfacing, with the
+ROV still powered. Clearing happens at the *start of the next survey day*, once
+the last day's files have been checked in the lab.
 
-| (B) | what is used |
-|---|---|
-| nothing chosen, or *Manual selection* | only the files selected in the list above |
-| *All files* | every file of the types in (A), **plus** anything selected above |
-| *Transects only* | files of the types in (A) whose recorded span overlaps a transect (±2 min), **plus** anything selected above. For **Clean the Pi**, recordings whose end time is only estimated (≈) are left out |
+| Time period | on | what is used |
+|---|---|---|
+| *This flight* | Download | files whose recorded span falls in the **last stretch of recording on the vehicle**. Within a flight the vehicle may disarm, be re-armed, crash Cockpit, be rebooted or be power-cycled, and each of those starts a new mcap and a new BIN — but none of them takes five minutes. So recordings more than five minutes apart are different flights, and this takes the last group. Worked out from the mcaps and BINs; the C3 imagery and video of that flight come with it |
+| *Today* | Download | everything recorded since local midnight |
+| *Previous day* | Clean the Pi | the **last day before today that has any files on the vehicle** — not literally yesterday. Survey days are not consecutive, and offering to clear yesterday after a fortnight ashore would pick nothing and look broken |
+| *All files* | both | every file of the types ticked |
+| *Transects only* | Download | files whose recorded span overlaps a transect (±2 min). Recordings whose end time is only estimated (≈) are left out |
+| *Manual selection*, or nothing chosen | both | only the files selected in the list above |
 
-(A) and (B) work **regardless of what the list above is showing** — a type that
-has not been searched yet is listed first, automatically. A live line under each
-section says exactly what the button will touch before it is pressed.
+Anything selected in the list above is added to whatever a period chose. The
+dated periods say what they worked out — *this flight: 09-16 14:02 to 15:31 —
+the last of 2 on the vehicle* — under the panel, **before** the button is
+pressed, because a period that landed on the wrong hour would otherwise only be
+visible once the files were gone. All of them allow for the vehicle's clock
+being out against the laptop's, and say so when it is.
+
+*Transects only* is deliberately **not** offered for Clean the Pi: what is
+being cleared is a day's files, not a transect's, and it would leave the
+between-transect recordings behind.
+
+The file types work **regardless of what the list above is showing** — a type
+that has not been searched yet is listed first, automatically. A live line
+under each section says exactly what the button will touch before it is
+pressed.
+
+**A log that is still being written.** The autopilot appends to its dataflash
+log for as long as the ROV has power — and the ROV has to have power for any of
+this to work at all — so a BIN is *bigger* by the time it has finished coming
+down than the listing said it would be. Insisting the two match refused every
+BIN outright. A copy that arrives **long** is therefore checked against the
+vehicle rather than rejected: the file is listed again, and a copy that ends
+inside what the vehicle now holds is kept, recorded at the size that actually
+arrived, and marked. Such a file shows as **copied, still recording** next time
+the vehicle is listed, and downloading it again once the vehicle has finished
+with it gets the whole thing and verifies normally. Deleting one is warned
+about by name. A copy that arrives **short** is still a failure — that is a
+truncated download, which is the thing the check exists to catch.
 
 **Download files** copies into the flight folder chosen on Monitoring, each type
 into its own folder (table above). Each copy is written as `.part`, synced, and
-renamed only once its size matches; mcaps are checked to begin like an mcap;
+renamed only once its size is accounted for; mcaps are checked to begin like an
+mcap;
 each file keeps the vehicle's modification time; and each completed copy is
 recorded — vehicle path, size, time and SHA-256 — in
 `logs/pi_downloads.jsonl`, which is what makes it *verified*. Files already
@@ -593,3 +750,76 @@ counters and an unreachable vehicle address: the worst gap between runs of a
 50 ms window timer was about 80 ms while recording, and 155 ms across a
 100-second Stop whose closing snapshot got no answer. That is a check on this
 machine, not a guarantee for another.
+
+## Changes after the 16 September 2026 field test
+
+The first round of changes driven by running the program on a survey day
+rather than at a desk.
+
+| | what was wrong | what changed |
+|---|---|---|
+| F1 | opening the window, the report box in *The path to the vehicle* twitched back and forth — the first thing anyone saw | CustomTkinter re-decides five times a second whether a scrollbar is needed, and asks the question of the lines *on screen*. In a box one line tall that is a loop: showing the horizontal bar costs a line of height, the longest line scrolls out of view, Tk reports nothing to scroll sideways, the bar goes, the line comes back. Measured off the video at 4.8 changes a second — exactly CustomTkinter's 200 ms poll. The poll is stopped and the question asked of the *text* instead, which a scrollbar cannot change |
+| F2 | a transect can be interrupted mid-survey, and the imagery from that stretch was filed as survey imagery | **pauses** — see [Sites and transects](#1-sites-and-transects) |
+| F3 | *mcap video* read as part of the mcap row above it | called **video**. Its folder on disk is unchanged |
+| F4 | the file types were in no useful order | mcap, BIN, C3 imagery, video, tlog — the order a survey day reaches for them |
+| F5 | "(A)" and "(B)" on the two action panels | removed |
+| F6 | **every BIN download failed**: *58,484,320 bytes arrived, the vehicle reported 58,479,625* | the autopilot appends to its log for as long as the ROV has power, and the ROV has to have power to download at all. A copy that arrives long is now checked against the vehicle and kept; one that arrives short is still a failure. See [Download files](#2-download-files--3-clean-the-pi) |
+| F7 | choosing what to download or clear meant *All files* or picking by hand | **This flight**, **Today** and **Previous day**, each worked out from the files on the vehicle and each showing what it decided before the button is pressed. *Transects only* is gone from Clean the Pi |
+| F8 | the vehicle's software versions were recorded in the flight's files but never on screen | BlueOS, ArduSub and Cockpit in the banner, in both its states |
+| F9 | nothing said at a glance that the vehicle was connected and the recording was running | two lamps in the banner, with three states each |
+| F10 | dragging a window edge left the interface catching up in stuttered jumps | below |
+| F11 | the program started from a batch file in the repository, and left a command prompt on the taskbar all day | a desktop shortcut with its own icon — see [Running it](#running-it) |
+
+### F10: what the resizing actually cost
+
+Measured on this development laptop, as the time to service one resize step
+(`update_idletasks` after a geometry change) with an hour of monitor history
+loaded. A bare CustomTkinter window of the same widget count costs about 19 ms,
+which is the floor none of this can get under.
+
+Medians of four interleaved runs; this machine varies by 10–20% between runs,
+so the ratio is the honest number rather than any single figure.
+
+| tab | before | after |
+|---|---|---|
+| Monitoring | 113–146 ms | 44–55 ms |
+| Transects | 116–187 ms | 40–55 ms |
+| BlueOS logs | 117–161 ms | 37–45 ms |
+| Flight summary | 119–131 ms | 37–50 ms |
+| Analyze transects | 121–148 ms | 33–37 ms |
+
+Four changes, in the order they mattered:
+
+1. **Only the open tab is laid out.** The five pages shared one grid cell and
+   were all still managed, so every resize measured and re-laid-out five tabs
+   to show one. They are taken out of the grid now and put back when chosen.
+   This was about two thirds of the whole cost.
+
+   The price is that a tab's first appearance pays for its whole layout at
+   once — 242 ms against 43 ms, measured — so at start-up the program opens
+   each tab in turn, one per turn of the event loop, and comes back to the
+   first. That brings the first click back to about 70 ms, and the tabs flick
+   past once while the window is starting. It warms them by *opening* them,
+   not by gridding and ungridding them without showing them: that shortcut
+   lays a page out but never lets it finish mapping, and every widget inside a
+   canvas-embedded frame — which is every card on every tab, because each tab
+   scrolls — is then left believing it was never shown. The tab opened, its
+   geometry was right to the pixel, and it drew nothing at all. Nothing in the
+   widget tree gave it away; only a screenshot did.
+2. **Repaints driven by `<Configure>` are coalesced** to one a frame, with one
+   accurate pass after the last event — so the final size is drawn from the
+   size it ended at, not from whichever event landed on a frame boundary. The
+   live charts draw at a third of the resolution while the edge is moving and
+   at full resolution the moment it stops.
+3. **The banner moves instead of redrawing.** A width change moves three
+   things — the ground, the gradient rule and the controls — and nothing else
+   in it depends on the width. 25.7 ms per frame became 1.5 ms.
+4. **CustomTkinter's scrollbars no longer flush the layout** on every redraw
+   (`gui/ctk_tuning.py`, which is the one place this program reaches into
+   another library's internals, and is written to do nothing at all if a
+   future CustomTkinter does not look the way it expects).
+
+The remaining cost is CustomTkinter redrawing each visible widget's rounded
+rectangle as it resizes, which is inherent to the framework. Getting under
+about 35 ms would mean changing framework, and that is not worth it for this
+program.

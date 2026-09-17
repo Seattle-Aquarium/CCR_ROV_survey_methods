@@ -305,10 +305,15 @@ class TransectPage(ctk.CTkFrame):
                         raise JobStopped(f"while {m}" if m else "")
                     progress(b + s * f, m)
 
+                # The whole transect, with its pauses passed alongside rather
+                # than cut out of the windows: the rows stay in the CSV and
+                # are marked, so an analysis can drop them and a check on the
+                # recording still sees an unbroken stretch of telemetry.
                 specs = [
                     pipeline.TransectSpec(
                         f"{site.name}_{t.name}" if prefix else t.name,
                         [(t.start_tc, t.end_tc)],
+                        pauses=[(p.start_tc, p.end_tc) for p in t.pauses],
                     )
                     for t in site.transects
                 ]

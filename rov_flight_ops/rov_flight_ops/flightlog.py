@@ -218,6 +218,22 @@ class Status:
     degraded: str = ""
     #: How the last flight closed, in words.
     outcome: str = ""
+    #: When the vehicle last answered the arm poll, and how long it took.
+    #: `armed` alone cannot stand in for this: it holds its last value, so a
+    #: vehicle that was disarmed and has since been unplugged still reads
+    #: "disarmed" forever. This is the thing that goes stale.
+    last_seen: float = 0.0
+    link_ms: float | None = None
+
+    @property
+    def reachable(self) -> bool:
+        """Did the vehicle answer recently enough to call it connected?
+
+        Three poll intervals: one missed answer is a dropped packet, three in
+        a row is the tether.
+        """
+        return (self.last_seen > 0
+                and time.time() - self.last_seen < ARM_POLL_S * 3)
 
     def line(self) -> str:
         if self.problem:
@@ -536,6 +552,9 @@ class FlightRecorder:
                 if watch.stop.is_set():
                     break
                 self.status.armed = armed
+                if ms is not None:
+                    self.status.last_seen = time.time()
+                    self.status.link_ms = ms
                 vehicle = self._vehicle()
                 if vehicle is not None:
                     vehicle.reachable = ms is not None

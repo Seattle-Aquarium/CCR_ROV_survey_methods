@@ -1332,6 +1332,84 @@ def read_versions(host: str) -> dict:
     return out
 
 
+#: What the banner asks each service to answer in. Short, because this runs
+#: every minute for the whole survey day and a vehicle that is not there must
+#: not hold the poll open.
+VERSION_TIMEOUT_S = 5.0
+
+#: How an extension or container names Cockpit. Matched case-insensitively
+#: against both, because an extension can be installed under one name and its
+#: container run under another.
+COCKPIT_NAMES = ("cockpit",)
+
+
+def read_versions_brief(host: str, timeout: float = VERSION_TIMEOUT_S) -> dict:
+    """BlueOS, ArduSub and Cockpit -- cheap enough to keep on the banner.
+
+    `read_versions` is the one that goes in a flight's record: it enumerates
+    every extension and every container, and waits up to twenty-five seconds
+    for Kraken to answer. That is right once a flight and wrong every minute,
+    so this asks the three questions the banner shows and nothing else.
+
+    Missing answers come back as "" rather than raising. A vehicle that is not
+    plugged in yet is the normal state of affairs for most of a survey day,
+    and the banner says so by showing a dash.
+    """
+    out = {"blueos": "", "ardusub": "", "cockpit": "", "cockpit_from": ""}
+
+    a = _get(f"http://{host}/version-chooser/v1.0/version/current",
+             timeout=timeout)
+    if a.ok:
+        out["blueos"] = _first_string(a.body, ("version", "tag", "name"))
+
+    a = _get(f"http://{host}/ardupilot-manager/v1.0/firmware_info",
+             timeout=timeout)
+    if a.ok:
+        try:
+            out["ardusub"] = json.loads(a.body).get("version", "") or ""
+        except Exception:
+            pass
+
+    tag = _cockpit_on_vehicle(host, timeout)
+    if tag:
+        out["cockpit"], out["cockpit_from"] = tag, "vehicle"
+    return out
+
+
+def _cockpit_on_vehicle(host: str, timeout: float) -> str:
+    """Cockpit's tag as the vehicle has it installed, or "".
+
+    Cockpit is normally flown as a desktop client on the topside laptop, in
+    which case the vehicle has nothing to say about it and this returns
+    nothing -- see `laptop.cockpit_version`. It is also installable as a
+    BlueOS extension, and a vehicle that has it that way is the one whose
+    version actually governs what the pilot is looking at, so it wins.
+    """
+    for path in ("/v2.0/installed_extensions", "/v2.0/container/"):
+        a = _get(_base(host, KRAKEN_PORT) + path, timeout=timeout,
+                 limit=900_000)
+        if not a.ok:
+            continue
+        try:
+            entries = json.loads(a.body) or []
+        except Exception:
+            continue
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            name = str(e.get("name") or e.get("identifier") or "").lstrip("/")
+            if not any(w in name.lower() for w in COCKPIT_NAMES):
+                continue
+            tag = e.get("tag") or e.get("version") or ""
+            if not tag:
+                # A container names its version in its image: "…/cockpit:1.2.3"
+                image = str(e.get("image") or "")
+                tag = image.rsplit(":", 1)[-1] if ":" in image else ""
+            if tag:
+                return str(tag)
+    return ""
+
+
 # --------------------------------------------------------------------------
 #  the flight itself: is it armed, and what was set while it flew
 # --------------------------------------------------------------------------

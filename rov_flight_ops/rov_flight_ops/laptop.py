@@ -38,12 +38,15 @@ is meant to save.
 
 from __future__ import annotations
 
+import os
+import re
 import socket
 import struct
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 
 try:
     import psutil
@@ -96,6 +99,76 @@ COCKPIT_PROCESSES = ("cockpit.exe",)
 #: whose command line mentions the vehicle are taken, so an unrelated browser
 #: window is not blamed for the laptop being busy.
 COCKPIT_BROWSERS = ("chrome.exe", "msedge.exe", "firefox.exe")
+
+#: An Electron app installed by Squirrel lives in ``…\Cockpit\app-1.19.0\``,
+#: so its version is in its own path. Read first because it needs nothing but
+#: the path -- no COM, no file-version API, no elevation.
+_APP_DIR_VERSION = re.compile(r"[\\/]app-(\d+(?:\.\d+)+[^\\/]*)[\\/]")
+
+#: Where the client is installed when it is not running, so the banner can
+#: still name a version before anybody has opened it.
+_COCKPIT_INSTALL_DIRS = (
+    r"%LOCALAPPDATA%\Cockpit",
+    r"%LOCALAPPDATA%\Programs\Cockpit",
+    r"%PROGRAMFILES%\Cockpit",
+    r"%PROGRAMFILES(X86)%\Cockpit",
+)
+
+
+def cockpit_version() -> str:
+    """The Cockpit desktop client's version on this laptop, or "".
+
+    Cockpit is normally flown from the topside laptop rather than served off
+    the vehicle, so this is usually the version that matters -- and the
+    vehicle has nothing to say about it. Three ways are tried, cheapest
+    first, and every one of them is allowed to fail: a laptop without Cockpit
+    installed is a perfectly ordinary laptop to be running this on.
+    """
+    exe = _cockpit_exe()
+    if exe:
+        m = _APP_DIR_VERSION.search(str(exe))
+        if m:
+            return m.group(1)
+        stamped = _file_version(exe)
+        if stamped:
+            return stamped
+    return ""
+
+
+def _cockpit_exe() -> Path | None:
+    """The client's executable: the running one, else the newest installed."""
+    if psutil is not None:
+        for p in psutil.process_iter(["name", "exe"]):
+            try:
+                if (p.info["name"] or "").lower() in COCKPIT_PROCESSES:
+                    exe = p.info["exe"]
+                    if exe:
+                        return Path(exe)
+            except Exception:
+                continue
+    best: Path | None = None
+    for raw in _COCKPIT_INSTALL_DIRS:
+        root = Path(os.path.expandvars(raw))
+        if "%" in str(root) or not root.is_dir():
+            continue
+        for exe in list(root.glob("app-*/*.exe")) + list(root.glob("*.exe")):
+            if exe.name.lower() in COCKPIT_PROCESSES and (
+                    best is None or exe.stat().st_mtime > best.stat().st_mtime):
+                best = exe
+    return best
+
+
+def _file_version(exe: Path) -> str:
+    """The version stamped into an executable, via pywin32. "" without it."""
+    try:
+        import win32api  # type: ignore
+
+        info = win32api.GetFileVersionInfo(str(exe), "\\")
+        ms, ls = info["FileVersionMS"], info["FileVersionLS"]
+        parts = (ms >> 16, ms & 0xFFFF, ls >> 16, ls & 0xFFFF)
+        return ".".join(str(p) for p in parts).rstrip(".0") or "0"
+    except Exception:
+        return ""
 
 
 # --------------------------------------------------------------------------
@@ -859,6 +932,11 @@ class History:
     minutes: int = 15
     _rows: list[dict] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    #: Bumped whenever the rows change. A drawing routine can hold on to a
+    #: series it has already built and rebuild only when this moves -- which
+    #: is once a second, not once per <Configure> event while a window edge
+    #: is being dragged.
+    version: int = 0
 
     @property
     def limit(self) -> int:
@@ -869,6 +947,7 @@ class History:
             self._rows.append(row)
             if len(self._rows) > self.limit:
                 del self._rows[:len(self._rows) - self.limit]
+            self.version += 1
 
     def series(self, column: str) -> list[tuple[float, float]]:
         """(elapsed seconds, value) for one column, blanks dropped."""
@@ -896,3 +975,4 @@ class History:
     def clear(self) -> None:
         with self._lock:
             self._rows.clear()
+            self.version += 1

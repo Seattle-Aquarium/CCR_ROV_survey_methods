@@ -34,8 +34,29 @@ from .. import pifiles as PF
 from . import theme as T
 from .widgets import Card, button, checkbox, entry, fit_wrap, label
 
-PERIODS = (("All files", PF.PERIOD_ALL), ("Transects only", PF.PERIOD_TRANSECTS),
-           ("Manual selection", PF.PERIOD_MANUAL))
+#: What can be picked on each panel, in the order a survey day reaches for it.
+#:
+#: Downloading happens on the boat, straight after the flight, with the ROV
+#: still powered -- so "This flight" is the one that gets pressed, and "Today"
+#: the one for catching up at the end of the day.
+DOWNLOAD_PERIODS = (
+    ("This flight", PF.PERIOD_THIS_FLIGHT),
+    ("Today", PF.PERIOD_TODAY),
+    ("All files", PF.PERIOD_ALL),
+    ("Transects only", PF.PERIOD_TRANSECTS),
+    ("Manual selection", PF.PERIOD_MANUAL),
+)
+
+#: Clearing happens at the start of the *next* survey day, once the last day's
+#: files have been checked in the lab -- so "Previous day" is the one that
+#: gets pressed. "Transects only" is deliberately absent: what is being
+#: cleared is a day's worth of files, not a transect's, and the one time it
+#: mattered it would have left the between-transect recordings behind.
+CLEAN_PERIODS = (
+    ("Previous day", PF.PERIOD_PREVIOUS_DAY),
+    ("All files", PF.PERIOD_ALL),
+    ("Manual selection", PF.PERIOD_MANUAL),
+)
 
 COLUMNS = (("files", "Files", 70, "e"), ("size", "Size", 90, "e"),
            ("recorded", "Recorded (vehicle clock)", 250, "w"),
@@ -82,16 +103,20 @@ class LogsPage(ctk.CTkFrame):
         self.download = ActionPanel(
             left, self, "2.  Download files",
             "Copies into the flight folder chosen on Monitoring, each type "
-            "into its own folder: logs/mcap, logs/mcap_video, logs/BIN, "
-            "logs/tlog, photos/C3. Files already there are skipped.",
-            "Download files", danger=False, command=self._download)
+            "into its own folder: logs/mcap, logs/BIN, photos/C3, "
+            "logs/mcap_video, logs/tlog. Files already there are skipped. "
+            "This flight is the usual one, straight after surfacing.",
+            "Download files", danger=False, command=self._download,
+            periods=DOWNLOAD_PERIODS)
         self.clean = ActionPanel(
             right, self, "3.  Clean the Pi",
             "Deletes from the vehicle. Refused while the ROV is armed; files "
             "modified in the last two minutes are left alone; a record of "
             "every deletion is kept in the flight's logs folder. It cannot be "
-            "undone.",
-            "Delete files", danger=True, command=self._delete)
+            "undone. Previous day is the usual one: the last day's files have "
+            "been checked in the lab by the time the next one starts.",
+            "Delete files", danger=True, command=self._delete,
+            periods=CLEAN_PERIODS)
         self._update_previews()
 
     # ------------------------------------------------------------------
@@ -415,10 +440,12 @@ class LogsPage(ctk.CTkFrame):
         else:
             verified = states.count("verified")
             same = states.count("same size")
+            growing = states.count("growing")
             if files and verified == len(files):
                 copied = "all verified"
             else:
                 copied = f"{verified} verified" + (f", {same} same size" if same else "")
+                copied += f", {growing} still recording" if growing else ""
                 copied += f" of {len(files)}"
         return (f"{len(files):,}", _gib(size), rec,
                 ", ".join(covers) or "—", copied)
@@ -444,6 +471,7 @@ class LogsPage(ctk.CTkFrame):
         return ("", _gib(f.size), rec, ", ".join(f.covers) or "—",
                 "checking…" if state is None and self.app.flight_dir else
                 {"verified": "verified", "same size": "same size (unverified)",
+                 "growing": "copied, still recording",
                  "differs": "DIFFERENT SIZE"}.get(state, "—"))
 
     def _opened(self, _event=None) -> None:
@@ -659,11 +687,22 @@ class LogsPage(ctk.CTkFrame):
                  choice.breakdown()]
         if flight:
             manifest = PF.load_manifest(flight)
-            unverified = [f for f in choice.files
-                          if PF.copy_state(f, flight, manifest) != "verified"]
+            states = {f.path: PF.copy_state(f, flight, manifest)
+                      for f in choice.files}
+            unverified = [f for f in choice.files if states[f.path] != "verified"]
+            growing = [f for f in choice.files if states[f.path] == "growing"]
             if unverified:
                 lines += ["", f"{len(unverified)} of these have NO VERIFIED COPY in "
                               f"this flight folder ({Path(flight).name})."]
+            if growing:
+                # Almost always the autopilot log that was still open when it
+                # was downloaded. The copy is good as far as it goes and is
+                # short of everything written after it; downloading again now
+                # the vehicle has finished with it gets the whole thing.
+                lines += [f"{len(growing)} of those were copied while the "
+                          f"vehicle was still writing them, so the copy stops "
+                          f"short of what is on the vehicle now. Download "
+                          f"them again before deleting."]
         else:
             lines += ["", "No flight folder is chosen, so none of these can be "
                           "checked against a downloaded copy."]
@@ -707,17 +746,22 @@ class LogsPage(ctk.CTkFrame):
 
 
 class ActionPanel:
-    """File types (A) and a time period (B), and the button that acts on them."""
+    """File types and a time period, and the button that acts on them."""
+
+    #: Radio buttons per line. Three fit across a half-width card on a field
+    #: laptop; a fourth pushes the last one under the card's edge.
+    PERIODS_PER_LINE = 3
 
     def __init__(self, parent, page: LogsPage, title: str, subtitle: str,
-                 verb: str, *, danger: bool, command):
+                 verb: str, *, danger: bool, command,
+                 periods=DOWNLOAD_PERIODS):
         self.page = page
         c = Card(parent, title, subtitle)
         c.grid(row=0, column=0, sticky="nsew")
         c.body.grid_columnconfigure(0, weight=1)
 
-        label(c.body, "(A)  File types", font=T.FONT_H2).grid(row=0, column=0,
-                                                              sticky="w")
+        label(c.body, "File types", font=T.FONT_H2).grid(row=0, column=0,
+                                                         sticky="w")
         kinds = ctk.CTkFrame(c.body, fg_color="transparent")
         kinds.grid(row=1, column=0, sticky="w", pady=(4, 10))
         self.v_kind: dict[str, ctk.BooleanVar] = {}
@@ -728,19 +772,21 @@ class ActionPanel:
                      ).grid(row=i // 3, column=i % 3, sticky="w",
                             padx=(0, 18), pady=2)
 
-        label(c.body, "(B)  Time period", font=T.FONT_H2).grid(row=2, column=0,
-                                                               sticky="w")
-        periods = ctk.CTkFrame(c.body, fg_color="transparent")
-        periods.grid(row=3, column=0, sticky="w", pady=(4, 10))
+        label(c.body, "Time period", font=T.FONT_H2).grid(row=2, column=0,
+                                                          sticky="w")
+        periods_frame = ctk.CTkFrame(c.body, fg_color="transparent")
+        periods_frame.grid(row=3, column=0, sticky="w", pady=(4, 10))
         self.v_period = ctk.StringVar(value="")
-        for i, (text, value) in enumerate(PERIODS):
-            ctk.CTkRadioButton(periods, text=text, value=value,
+        for i, (text, value) in enumerate(periods):
+            ctk.CTkRadioButton(periods_frame, text=text, value=value,
                                variable=self.v_period, font=T.FONT_BODY,
                                text_color=T.TEXT, fg_color=T.ACCENT,
                                hover_color=T.ACCENT_HOVER,
                                border_color=T.FIELD_BORDER,
                                command=page._update_previews
-                               ).grid(row=0, column=i, padx=(0, 18))
+                               ).grid(row=i // self.PERIODS_PER_LINE,
+                                      column=i % self.PERIODS_PER_LINE,
+                                      sticky="w", padx=(0, 18), pady=2)
 
         self.note = ctk.CTkLabel(c.body, text="", font=T.FONT_SMALL,
                                  text_color=T.TEXT_MUTED, anchor="w",
@@ -760,6 +806,11 @@ class ActionPanel:
         choice = PF.choose(inv, self.kinds(), self.period(), picked,
                            destructive=self is getattr(self.page, "clean", None))
         bits = []
+        # What a worked-out period decided, before it is acted on: "this
+        # flight" landing on the wrong hour must be visible here rather than
+        # afterwards, when the files are already gone.
+        if choice.window_note:
+            bits.append(choice.window_note.capitalize() + ".")
         if choice.files:
             bits.append(f"Will use {len(choice.files):,} file(s), {_gib(choice.size)}"
                         f" — {choice.breakdown()}")

@@ -20,7 +20,8 @@ from pathlib import Path
 
 from . import binlog, discovery, mcap_extract
 from .config import AppConfig
-from .survey import SurveyPlan, local_midnight_epoch
+from .survey import SurveyPlan
+from .survey import plan_windows as _plan_windows
 from .telemetry import TelemetryStore
 
 ProgressCB = Callable[[float, str], None]
@@ -110,11 +111,11 @@ def ensure_telemetry(
     return TelemetryStore.load(ex.telemetry_csv), warnings + list(ex.warnings)
 
 
-def plan_windows(plan: SurveyPlan) -> list[tuple[str, float, float]]:
-    """(name, epoch_start, epoch_end) for every transect in a plan."""
-    out: list[tuple[str, float, float]] = []
-    for site in plan.sites:
-        midnight = local_midnight_epoch(site.date_obj(), plan.timezone)
-        for t in site.transects:
-            out.append((t.name, midnight + t.start_s(), midnight + t.end_s()))
-    return out
+def plan_windows(plan: SurveyPlan, *, exclude_pauses: bool = False
+                 ) -> list[tuple[str, float, float]]:
+    """(name, epoch_start, epoch_end) for every transect in a plan.
+
+    Re-exported from `survey` so the two programs turn a plan into windows
+    with one piece of code rather than two that can drift.
+    """
+    return _plan_windows(plan, exclude_pauses=exclude_pauses)

@@ -10,9 +10,30 @@ REM  You need Python 3.10 or newer installed. Nothing else.
 REM
 REM  This program has its own environment, separate from UTC's and from ROV
 REM  Imagery Processing's, so updating one can never break another.
+REM
+REM  Switches:
+REM    --repair    reinstall into the existing environment, whatever state
+REM                it is in
+REM    --silent    do not pause, and do not re-run on failure -- just return
+REM                the exit code. This is how launch_rov_flight_ops.vbs runs
+REM                it for the desktop shortcut, with the output captured to a
+REM                log; pausing there would wait forever on a window nobody
+REM                can see.
+REM    --console   run with the console Python and leave the window open, so
+REM                anything the program prints on its way down can be read.
+REM                This is the debugging way in.
 REM ---------------------------------------------------------------------------
 setlocal EnableExtensions
 cd /d "%~dp0"
+
+set "SILENT="
+set "CONSOLE="
+set "REPAIR="
+for %%A in (%*) do (
+  if /i "%%~A"=="--silent" set "SILENT=1"
+  if /i "%%~A"=="--console" set "CONSOLE=1"
+  if /i "%%~A"=="--repair" set "REPAIR=1"
+)
 
 REM Outside the repo on purpose: a virtualenv inside a Dropbox folder is
 REM thousands of files for the sync client to chew through forever.
@@ -28,7 +49,7 @@ REM
 REM The check covers the transect extractor too. It is imported only when the
 REM Analyze transects tab runs, so an environment missing it would otherwise
 REM pass this check forever and never get the install that fixes it.
-if /i "%~1"=="--repair" goto setup
+if defined REPAIR goto setup
 if exist "%VPY%" (
   "%VPY%" -c "import rov_flight_ops.gui.app" >nul 2>&1
   if not errorlevel 1 (
@@ -62,7 +83,7 @@ if not defined SYS_PY (
   echo   [x] Add python.exe to PATH
   echo then run this file again.
   echo.
-  pause
+  if not defined SILENT pause
   exit /b 1
 )
 
@@ -103,19 +124,40 @@ echo Setup complete.
 echo.
 
 REM ---- 4. run -------------------------------------------------------------
+REM  pythonw has no console, which is what keeps a command prompt off the
+REM  taskbar for the whole survey day. It also has nowhere to print to, so
+REM  anything that goes wrong before the window exists would vanish -- which
+REM  is why diagnostics.setup() runs first inside the program, and why a
+REM  failure here is re-run visibly rather than swallowed.
 :run
+if defined CONSOLE goto runconsole
 "%VPYW%" -m rov_flight_ops
-if errorlevel 1 (
+if not errorlevel 1 goto done
+if defined SILENT (
   echo.
-  echo ROV Flight Operations exited with an error. Running again with the
-  echo console visible:
-  echo.
-  "%VPY%" -m rov_flight_ops
+  echo ROV Flight Operations exited with an error. Run
+  echo   run_rov_flight_ops.bat --console
+  echo to see what it printed, and look in the diagnostics folder:
+  echo   %%LOCALAPPDATA%%\CCR_ROV\rov_flight_ops\diagnostics
+  exit /b 1
+)
+echo.
+echo ROV Flight Operations exited with an error. Running again with the
+echo console visible:
+echo.
+
+:runconsole
+"%VPY%" -m rov_flight_ops
+set "CODE=%ERRORLEVEL%"
+if not defined SILENT (
   echo.
   pause
 )
+endlocal & exit /b %CODE%
+
+:done
 endlocal
-exit /b
+exit /b 0
 
 :probe
 if defined SYS_PY exit /b
@@ -133,5 +175,5 @@ echo.
 echo A common cause is no network access the first time this is run --
 echo the packages have to be downloaded once.
 echo.
-pause
+if not defined SILENT pause
 exit /b 1

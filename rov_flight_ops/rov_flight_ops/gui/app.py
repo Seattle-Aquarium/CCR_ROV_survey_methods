@@ -67,6 +67,39 @@ class App(Shell):
     def save_settings(self) -> None:
         settings.save(self.settings)
 
+    # ------------------------------------------------------------------
+    #  what the banner's lamps and versions read
+    # ------------------------------------------------------------------
+
+    def version_host(self) -> str | None:
+        """The vehicle the banner asks for its software versions.
+
+        The committed address, not whatever is half-typed in the box, and
+        read straight out of the settings rather than through
+        `vehicle_host()`: this runs once a second, and that one commits the
+        box as a side effect. A poll must not be able to change anything.
+        """
+        return self.settings.get("vehicle_host", "") or "192.168.2.2"
+
+    def vehicle_status(self) -> tuple[bool, str]:
+        """(is the vehicle answering, what the logging lamp shows).
+
+        "Logging" covers both halves of what the recorder does, because they
+        are not the same thing and the difference is worth seeing: it watches
+        for the ROV to arm ("waiting"), and it writes rows once it has ("on").
+        Between two transects the first is true and the second is not, which
+        is exactly the state an operator glancing at the banner wants to be
+        able to tell from a recorder that has stopped.
+        """
+        rec = self.recorder
+        if rec is None:
+            return False, "off"
+        st = rec.status
+        connected = bool(st.reachable)
+        if st.state in ("starting", "recording", "closing"):
+            return connected, "on"
+        return connected, "waiting" if rec.watching else "off"
+
     def vehicle_host(self) -> str | None:
         """The committed vehicle address, or None to search for the vehicle.
 

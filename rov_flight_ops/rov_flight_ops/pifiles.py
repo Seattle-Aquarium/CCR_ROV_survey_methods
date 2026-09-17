@@ -118,12 +118,23 @@ class Category:
     dest: str
 
 
+#: In the order a survey day reaches for them. mcap and BIN come down after
+#: every flight without anyone thinking about it; C3 imagery and video are the
+#: next most likely; tlog is last because the BlueOS releases we fly no longer
+#: write one at all -- it is kept for anyone running this against an older
+#: vehicle.
+#:
+#: The video's label is just "video". It is the same file that is also
+#: embedded in the mcap, but on this page it is a file type to tick, and
+#: "mcap video" read as though it were part of the mcap row above it. Its
+#: folder on disk keeps the name it has always had, so flight folders already
+#: filed do not have to move.
 CATEGORIES: tuple[Category, ...] = (
     Category("mcap", "mcap", "logs/mcap"),
-    Category("video", "mcap video", "logs/mcap_video"),
     Category("bin", "BIN", "logs/BIN"),
-    Category("tlog", "tlog", "logs/tlog"),
     Category("c3", "C3 imagery", "photos/C3"),
+    Category("video", "video", "logs/mcap_video"),
+    Category("tlog", "tlog", "logs/tlog"),
 )
 BY_KEY = {c.key: c for c in CATEGORIES}
 _ORDER = [c.key for c in CATEGORIES]
@@ -773,6 +784,114 @@ def contained(f: PiFile, inv: Inventory) -> bool:
 PERIOD_ALL = "all"
 PERIOD_TRANSECTS = "transects"
 PERIOD_MANUAL = "manual"
+PERIOD_THIS_FLIGHT = "this_flight"
+PERIOD_TODAY = "today"
+PERIOD_PREVIOUS_DAY = "previous_day"
+
+#: Two recordings further apart than this belong to different flights.
+#:
+#: Within one flight the vehicle may disarm, be re-armed, crash Cockpit, be
+#: rebooted, or be power-cycled outright, and each of those starts a new mcap
+#: and a new BIN. None of them takes five minutes: the longest is a full power
+#: cycle, which is back on the surface and answering in well under two. Five
+#: minutes of nothing is the deck -- swapping a battery, moving the boat,
+#: writing up the last transect -- and the next recording after it is the next
+#: flight.
+FLIGHT_GAP_S = 300.0
+
+
+def flight_spans(files: Iterable[PiFile],
+                 gap_s: float = FLIGHT_GAP_S) -> list[tuple[float, float]]:
+    """The vehicle's recordings grouped into flights, oldest last.
+
+    Grouped from the logs -- mcap, BIN, tlog -- and not from the imagery: a
+    photo has no span, only a moment, and a folder of them cannot say where
+    one flight ended. Recordings whose time could not be read are left out
+    rather than guessed at.
+    """
+    spans = sorted((f.start, f.end) for f in files
+                   if f.category in ("mcap", "bin", "tlog") and f.span_known)
+    out: list[tuple[float, float]] = []
+    for lo, hi in spans:
+        if out and lo <= out[-1][1] + gap_s:
+            out[-1] = (out[-1][0], max(out[-1][1], hi))
+        else:
+            out.append((lo, hi))
+    return out
+
+
+def latest_flight(files: Iterable[PiFile],
+                  gap_s: float = FLIGHT_GAP_S) -> tuple[float, float] | None:
+    """When the vehicle last flew, on its own clock. None if it cannot tell."""
+    spans = flight_spans(files, gap_s)
+    return spans[-1] if spans else None
+
+
+def _to_vehicle(epoch: float, skew: float | None) -> float:
+    """A moment on this laptop's clock, as the vehicle's clock would read it.
+
+    Every time on a listed file comes off the Pi, and the Pi has no
+    battery-backed clock. Asking "was this today?" against the laptop's
+    midnight without this is asking two different clocks the same question.
+    """
+    return epoch + (skew or 0.0)
+
+
+def day_bounds(day_offset: int = 0, skew: float | None = None,
+               now: float | None = None) -> tuple[float, float]:
+    """Local midnight to midnight, on the vehicle's clock.
+
+    ``day_offset`` counts back from today: 0 is today, -1 is yesterday.
+    """
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+
+    here = _dt.fromtimestamp(now if now is not None else time.time())
+    start = (here.replace(hour=0, minute=0, second=0, microsecond=0)
+             + _td(days=day_offset))
+    return (_to_vehicle(start.timestamp(), skew),
+            _to_vehicle((start + _td(days=1)).timestamp(), skew))
+
+
+def flying_days(files: Iterable[PiFile], skew: float | None = None) -> list:
+    """The local dates the listed files were recorded on, oldest first.
+
+    Read from the files rather than from the calendar, because survey days are
+    not consecutive: "the previous day" after a fortnight ashore is a
+    fortnight ago, and offering to delete yesterday -- when nothing was flown
+    yesterday -- would pick nothing and look broken.
+    """
+    from datetime import datetime as _dt
+
+    days = set()
+    for f in files:
+        when = f.end or f.start or f.modified
+        if when:
+            days.add(_dt.fromtimestamp(when - (skew or 0.0)).date())
+    return sorted(days)
+
+
+def previous_flying_day(files: Iterable[PiFile], skew: float | None = None,
+                        now: float | None = None) -> tuple[float, float] | None:
+    """Midnight to midnight over the last day before today that has files."""
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+
+    today = _dt.fromtimestamp(now if now is not None else time.time()).date()
+    earlier = [d for d in flying_days(files, skew) if d < today]
+    if not earlier:
+        return None
+    start = _dt.combine(earlier[-1], _dt.min.time())
+    return (_to_vehicle(start.timestamp(), skew),
+            _to_vehicle((start + _td(days=1)).timestamp(), skew))
+
+
+def _overlaps(f: PiFile, window: tuple[float, float],
+              margin_s: float = 0.0) -> bool:
+    lo, hi = window
+    if f.span_known:
+        return f.start <= hi + margin_s and f.end >= lo - margin_s
+    return f.modified is not None and lo - margin_s <= f.modified <= hi + margin_s
 
 
 @dataclass
@@ -788,6 +907,11 @@ class Choice:
     #: an estimate.
     estimated: int = 0
     note: str = ""
+    #: The stretch of vehicle clock a dated period resolved to, and how to
+    #: say it. The operator has to be able to see what "this flight" decided
+    #: before acting on it.
+    window: tuple[float, float] | None = None
+    window_note: str = ""
 
     @property
     def size(self) -> int:
@@ -801,44 +925,65 @@ class Choice:
                          in sorted(counts.items(), key=lambda kv: _ORDER.index(kv[0])))
 
 
+#: Periods that sweep files in by rule, as opposed to taking what was clicked.
+BY_RULE_PERIODS = (PERIOD_ALL, PERIOD_TRANSECTS, PERIOD_THIS_FLIGHT,
+                   PERIOD_TODAY, PERIOD_PREVIOUS_DAY)
+
+
 def choose(inv: Inventory | None, kinds: Iterable[str], period: str,
-           picked: Iterable[PiFile] = (), *, destructive: bool = False) -> Choice:
-    """File type (A) crossed with time period (B), plus what was clicked.
+           picked: Iterable[PiFile] = (), *, destructive: bool = False,
+           now: float | None = None) -> Choice:
+    """File types crossed with a time period, plus what was clicked.
 
     * no period, or "manual selection" -> only the files clicked above
     * "all files"       -> every file of the chosen types, plus those clicked
     * "transects only"  -> files of the chosen types whose recorded span
-                           overlaps a transect, plus those clicked
+                           overlaps a transect
+    * "this flight"     -> files whose span falls in the last stretch of
+                           recording on the vehicle, where a gap of
+                           `FLIGHT_GAP_S` separates one flight from the next
+    * "today"           -> files recorded since local midnight
+    * "previous day"    -> files recorded on the last day before today that
+                           has any on the vehicle at all
 
     Files whose recording time could not be worked out are never swept in by
-    "transects only". For a destructive action, neither are files whose end
-    time is only an estimate. Both are counted so the page can say so.
+    any of the dated periods. For a destructive action, neither are files
+    whose end time is only an estimate, under "transects only". Both are
+    counted so the page can say so.
     """
     kinds = [k for k in _ORDER if k in set(kinds)]
     out = Choice()
     chosen: dict[str, PiFile] = {}
     hand = {f.path: f for f in picked}
 
-    if period in (PERIOD_ALL, PERIOD_TRANSECTS) and kinds:
-        for kind in kinds:
-            if inv is None or kind not in inv.files:
-                out.not_listed.append(kind)
-                continue
-            for f in inv.files[kind]:
-                if period == PERIOD_TRANSECTS:
-                    if not f.span_known:
-                        out.no_time += 1
-                        continue
-                    if destructive and f.end_estimated:
-                        out.estimated += 1
-                        continue
-                    if not f.covers:
-                        continue
-                chosen[f.path] = f
+    if period in BY_RULE_PERIODS and kinds:
+        window = _window_for(inv, period, out, now)
+        if period in (PERIOD_ALL, PERIOD_TRANSECTS) or window is not None:
+            for kind in kinds:
+                if inv is None or kind not in inv.files:
+                    out.not_listed.append(kind)
+                    continue
+                for f in inv.files[kind]:
+                    if period == PERIOD_TRANSECTS:
+                        if not f.span_known:
+                            out.no_time += 1
+                            continue
+                        if destructive and f.end_estimated:
+                            out.estimated += 1
+                            continue
+                        if not f.covers:
+                            continue
+                    elif window is not None:
+                        if not f.span_known and f.modified is None:
+                            out.no_time += 1
+                            continue
+                        if not _overlaps(f, window, MARGIN_S):
+                            continue
+                    chosen[f.path] = f
         out.by_rule = len(chosen)
     elif kinds and not period:
         out.note = "choose a time period to use the file types"
-    elif period in (PERIOD_ALL, PERIOD_TRANSECTS) and not kinds:
+    elif period in BY_RULE_PERIODS and not kinds:
         out.note = "choose at least one file type"
 
     for path, f in hand.items():
@@ -848,6 +993,57 @@ def choose(inv: Inventory | None, kinds: Iterable[str], period: str,
     out.files = sorted(chosen.values(),
                        key=lambda f: (_ORDER.index(f.category), f.rel))
     return out
+
+
+def _window_for(inv: Inventory | None, period: str, out: Choice,
+                now: float | None) -> tuple[float, float] | None:
+    """The stretch of vehicle clock a dated period resolves to.
+
+    Also fills in `out.window` and `out.window_note`, because a period worked
+    out from the files themselves has to be able to show its working -- "this
+    flight" picking the wrong hour would otherwise only become visible after
+    the files were gone.
+    """
+    if period not in (PERIOD_THIS_FLIGHT, PERIOD_TODAY, PERIOD_PREVIOUS_DAY):
+        return None
+    if inv is None:
+        return None
+    files = inv.all_files()
+    if period == PERIOD_THIS_FLIGHT:
+        window = latest_flight(files)
+        if window is None:
+            out.note = ("no recording on the vehicle has a readable time, so "
+                        "the last flight cannot be worked out. Search for "
+                        "mcap or BIN files first")
+            return None
+        spans = flight_spans(files)
+        out.window_note = (
+            f"this flight: {_span_text(window)}"
+            + (f" — the last of {len(spans)} on the vehicle" if len(spans) > 1
+               else " — the only one on the vehicle"))
+    elif period == PERIOD_TODAY:
+        window = day_bounds(0, inv.skew, now)
+        out.window_note = f"today: {_span_text(window)}"
+    else:
+        window = previous_flying_day(files, inv.skew, now)
+        if window is None:
+            out.note = ("nothing on the vehicle was recorded before today, so "
+                        "there is no previous day to clear")
+            return None
+        out.window_note = f"previous flying day: {_span_text(window)}"
+    if inv.skew is not None and abs(inv.skew) > blueos.SKEW_NOTE_S:
+        out.window_note += (f" (the vehicle's clock is {inv.skew:+.0f} s "
+                            f"against this laptop, and has been allowed for)")
+    out.window = window
+    return window
+
+
+def _span_text(window: tuple[float, float]) -> str:
+    lo, hi = window
+    same_day = datetime.fromtimestamp(lo).date() == datetime.fromtimestamp(hi).date()
+    fmt = "%H:%M" if same_day else "%m-%d %H:%M"
+    return (f"{datetime.fromtimestamp(lo):%m-%d %H:%M} to "
+            f"{datetime.fromtimestamp(hi):{fmt}}")
 
 
 # --------------------------------------------------------------------------
@@ -882,7 +1078,10 @@ def copy_state(f: PiFile, flight_dir: Path | None,
       SHA-256 was recorded, and the file there is still that size
     * ``same size`` -- a file of the same size, with no such record (copied
       by hand, say). Probably the same; not known to be.
-    * ``differs``   -- a file of a different size
+    * ``growing``   -- downloaded whole, and the vehicle's copy has grown
+      since. The autopilot's open log does that for as long as the ROV has
+      power, which is the whole time the download is happening.
+    * ``differs``   -- a file of a different size, and not that
     * ``""``        -- nothing there
     """
     if not flight_dir:
@@ -894,9 +1093,16 @@ def copy_state(f: PiFile, flight_dir: Path | None,
         local = p.stat().st_size
     except OSError:
         return ""
-    if local != f.size:
-        return "differs"
     entry = (manifest if manifest is not None else load_manifest(flight_dir)).get(f.path)
+    if local != f.size:
+        # A file still being written is not a mismatch: what came down is a
+        # good copy of it as it stood, and the vehicle has simply kept
+        # writing. Only a copy this program made and recorded can be told
+        # apart from a genuinely different file this way.
+        if (entry and entry.get("sha256") and entry.get("size") == local
+                and entry.get("was_growing") and f.size > local):
+            return "growing"
+        return "differs"
     if (entry and entry.get("sha256") and entry.get("size") == f.size
             and _same_time(entry.get("modified"), f.modified)):
         return "verified"
@@ -958,16 +1164,58 @@ class TransferReport:
         return "\n".join(out)
 
 
+def _accept_growth(host: str, token: str, f: PiFile, arrived: int) -> bool:
+    """Is `arrived` bytes a whole copy of a file the vehicle is still writing?
+
+    Only when the vehicle says so. The folder is listed again: a file that now
+    holds at least what arrived, and is no older than when it was first
+    listed, was being appended to while it came down, which is what the
+    autopilot's open log does for as long as the ROV has power. Anything else
+    -- fewer bytes than the listing promised, a file that has shrunk, a
+    vehicle that will not answer -- is not accepted, because those are how a
+    truncated download looks.
+    """
+    if arrived < f.size:
+        return False                      # short: a truncated copy, not growth
+    items, _why = list_dir(host, token, str(PurePosixPath(f.path).parent))
+    if items is None:
+        return False
+    for i in items:
+        if i["path"] != f.path or i["is_dir"]:
+            continue
+        if i["size"] < arrived:
+            return False                  # it shrank: rotated or replaced
+        if (i["modified"] is not None and f.modified is not None
+                and i["modified"] + SAME_TIME_S < f.modified):
+            return False                  # it went backwards in time
+        return True
+    return False                          # gone from the vehicle entirely
+
+
 def download(files: Sequence[PiFile], flight_dir: Path, host: str, token: str, *,
              progress: ProgressCB | None = None, cancel=None,
              chunk: int = 1 << 20, vehicle: str = "") -> TransferReport:
     """Copy files into the flight folder, each into its type's own folder.
 
-    Written to ``.part`` and renamed once the size matches, so an interrupted
-    copy never looks finished. The file keeps the vehicle's modification time,
-    which is the one clock an autopilot log carries. Every completed copy is
-    recorded in the flight folder's download manifest with the SHA-256 of the
-    bytes that arrived, which is what makes it "verified" afterwards.
+    Written to ``.part`` and renamed once the size is accounted for, so an
+    interrupted copy never looks finished. The file keeps the vehicle's
+    modification time, which is the one clock an autopilot log carries. Every
+    completed copy is recorded in the flight folder's download manifest with
+    the SHA-256 of the bytes that arrived, which is what makes it "verified"
+    afterwards.
+
+    **A file that is still being written.** The autopilot appends to its
+    dataflash log for as long as the ROV has power -- and the ROV has to have
+    power for any of this to work at all -- so a BIN is bigger by the time it
+    has finished coming down than the listing said it would be. Insisting the
+    two match refused every BIN outright (seen in the field on 16 September
+    2026: "58,484,320 bytes arrived, the vehicle reported 58,479,625", twice
+    in a row with the second number larger than the first). Arriving *long* is
+    therefore checked against the vehicle rather than rejected: the file is
+    listed again, and a copy that ends inside what the vehicle now holds is
+    kept, recorded at the size that actually arrived and marked as having
+    grown. Arriving *short* is still a failure -- that is a truncated
+    download, which is the thing the check exists to catch.
     """
     rep = TransferReport()
     manifest = load_manifest(flight_dir)
@@ -1011,9 +1259,18 @@ def download(files: Sequence[PiFile], flight_dir: Path, host: str, token: str, *
                                  f"{f.rel}  {got / 2 ** 20:,.0f} of "
                                  f"{f.size / 2 ** 20:,.0f} MiB")
                 _sync(fh)
-            if f.size and part.stat().st_size != f.size:
-                raise OSError(f"{part.stat().st_size:,} bytes arrived, the vehicle "
-                              f"reported {f.size:,}")
+            arrived = part.stat().st_size
+            grew = False
+            if f.size and arrived != f.size:
+                grew = _accept_growth(host, token, f, arrived)
+                if not grew:
+                    raise OSError(f"{arrived:,} bytes arrived, the vehicle "
+                                  f"reported {f.size:,}")
+                rep.warnings.append(
+                    f"{f.rel} grew while it was copied: {f.size:,} bytes when "
+                    f"it was listed, {arrived:,} arrived. The vehicle is still "
+                    f"writing it, so the copy is everything it held up to "
+                    f"then.")
             if f.category == "mcap":
                 with open(part, "rb") as fh:
                     if fh.read(len(blueos.MCAP_MAGIC)) != blueos.MCAP_MAGIC:
@@ -1023,7 +1280,9 @@ def download(files: Sequence[PiFile], flight_dir: Path, host: str, token: str, *
                 os.utime(dest, (f.modified, f.modified))
             rep.done.append(f)
             entry = {"pi_path": f.path, "local": str(dest.relative_to(flight_dir)),
-                     "category": f.category, "size": f.size, "modified": f.modified,
+                     "category": f.category, "size": arrived,
+                     "listed_size": f.size, "was_growing": grew,
+                     "modified": f.modified,
                      "sha256": digest.hexdigest(), "host": host, "vehicle": vehicle,
                      "downloaded": datetime.now().astimezone().isoformat(
                          timespec="seconds")}

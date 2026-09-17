@@ -28,6 +28,7 @@ not going to be looking at this.
 
 from __future__ import annotations
 
+import bisect
 import time
 import tkinter
 from pathlib import Path
@@ -37,7 +38,16 @@ import customtkinter as ctk
 
 from .. import brand, flightlog, laptop, netdiag, nettrace
 from . import theme as T
-from .widgets import Card, button, entry, fit_wrap, label, output_box, say
+from .widgets import (
+    Card,
+    Repaint,
+    button,
+    entry,
+    fit_wrap,
+    label,
+    output_box,
+    say,
+)
 
 #: How far back the charts look. A survey transect is a few minutes, so the
 #: default shows one whole transect and its approach.
@@ -52,6 +62,11 @@ NAME_W = 210
 VALUE_W = 110
 #: Kept clear on the right for the range the strip is scaled to.
 RANGE_W = 96
+
+#: How much coarser the lines are drawn while the window is being resized.
+#: The shape is what these charts are for and the shape survives it; the
+#: accurate line is drawn as soon as the edge is let go.
+DRAG_DECIMATION = 3
 
 #: How often each reading actually changes, where that is not the 1 Hz row.
 #: The row is written once a second, but some of what goes into it is read on a
@@ -133,6 +148,12 @@ class MonitorPage(ctk.CTkFrame):
         self._group = next(iter(laptop.GROUPS))
         self._window = DEFAULT_WINDOW
         self._ticking = False
+        #: column -> (history version, the series as drawn). The rows change
+        #: once a second; the width changes as fast as a window edge moves,
+        #: and rebuilding seven series of nine hundred samples for a width
+        #: change is the same answer at a real cost.
+        self._series_cache: dict[str, tuple[int, list]] = {}
+        self._series_from = None
 
         if parents is None:
             body = ctk.CTkScrollableFrame(self, fg_color=T.BG)
@@ -352,7 +373,12 @@ class MonitorPage(ctk.CTkFrame):
             background=self._apply_appearance_mode(T.FIELD_BG),
             highlightbackground=self._apply_appearance_mode(T.BORDER))
         self.canvas.grid(row=2, column=0, sticky="ew")
-        self.canvas.bind("<Configure>", lambda _e: self._redraw())
+        # Seven strips is a few hundred canvas items. Rebuilding them on every
+        # <Configure> a window drag delivers is the single most expensive
+        # thing on this tab; once a frame is as often as a screen can show it.
+        self._repaint = Repaint(self, self._redraw)
+        self._canvas_at: tuple[int, int] | None = None
+        self.canvas.bind("<Configure>", self._canvas_configured)
 
     # ------------------------------------------------------------------
     #  wiring
@@ -559,6 +585,34 @@ class MonitorPage(ctk.CTkFrame):
     #  drawing
     # ------------------------------------------------------------------
 
+    def _canvas_configured(self, event) -> None:
+        """Redraw only when the strip's own size actually changed."""
+        size = (int(event.width), int(event.height))
+        if size == self._canvas_at:
+            return
+        self._canvas_at = size
+        self._repaint.ask()
+
+    def _series(self, rec, column: str) -> list[tuple[float, float]]:
+        """One reading's samples, rebuilt only when the recorder has written.
+
+        `History.series` walks every row and converts every value. Seven of
+        those is most of a redraw, and a redraw happens for every pixel a
+        window edge moves -- where the rows have not changed at all.
+        """
+        history = rec.history
+        if self._series_from is not history:
+            self._series_from = history
+            self._series_cache.clear()
+        version = getattr(history, "version", None)
+        hit = self._series_cache.get(column)
+        if hit is not None and version is not None and hit[0] == version:
+            return hit[1]
+        series = history.series(column)
+        if version is not None:
+            self._series_cache[column] = (version, series)
+        return series
+
     def _redraw(self) -> None:
         # Not `_draw`: CTkFrame has one of its own, with a different signature,
         # and overriding it stops the frame being constructed at all.
@@ -602,8 +656,11 @@ class MonitorPage(ctk.CTkFrame):
                            text=f"{unit}  ·  {rate}" if unit else rate,
                            fill=muted, font=T.FONT_SMALL)
 
-            series = [(t, v) for t, v in rec.history.series(column)
-                      if t >= now - span]
+            # Sliced rather than filtered: the samples are in time order, so
+            # the window's first index is a bisection rather than a walk.
+            whole = self._series(rec, column)
+            cut = bisect.bisect_left(whole, (now - span,))
+            series = whole[cut:]
             value = latest.get(column)
             cv.create_text(NAME_W + VALUE_W - 14, top + ROW_H / 2, anchor="e",
                            text=_pretty(value), fill=colour,
@@ -634,7 +691,14 @@ class MonitorPage(ctk.CTkFrame):
         # Decimate to the pixel width. An hour of samples through a 600-pixel
         # strip is 3,600 points for 600 columns; drawing them all costs six
         # times as much and looks identical.
+        #
+        # Coarser still while the window is being dragged: a line at a third
+        # of the resolution is indistinguishable at a size that is about to
+        # change again, and the accurate one is drawn the moment the edge is
+        # let go -- which is the pass that has to be right.
         pixels = max(1, int(x1 - x0))
+        if self._repaint.busy:
+            pixels = max(1, pixels // DRAG_DECIMATION)
         step = max(1, len(series) // pixels)
         points: list[float] = []
         for t, v in series[::step]:
