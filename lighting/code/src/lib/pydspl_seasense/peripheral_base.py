@@ -28,6 +28,7 @@ class PeripheralBase:
 
     # Magic strings for commands supports by all DSPL devices
     DSPL_VERB_INFO = "info"
+    DSPL_VERB_STAT = "stat"
     DSPL_VERB_TEMPERATURE = "temp"
     DSPL_VERB_HUMIDITY = "rhum"
 
@@ -69,6 +70,7 @@ class PeripheralBase:
         * "temp" -- temperature
         * "rhum" -- relative humidity
         * "info" -- information string
+        * "stat" -- status string
         """
 
         # Drain any stale data from the RX buffer
@@ -76,6 +78,12 @@ class PeripheralBase:
             fp.read(fp.any())
 
         fp.write(seasense.build_packet(self.address, command, "?").encode("ascii"))
+        fp.flush()
+
+        return self.readline(fp)
+
+    def readline(self,fp):
+
         if self._local_echo:
             result = fp.read_until()
 
@@ -138,6 +146,20 @@ class PeripheralBase:
         \todo{}:  Parse info string to extract meaning?  Only if we need to...
         """
         return self.do_query(fp, self.DSPL_VERB_INFO)
+
+    def read_stat(self, fp):
+        """Read the status string (STAT) from the device.
+
+        Currently returns the unparsed text string from the device.
+        See the DSPL protocol manual for further details on the contents
+
+        n.b. this is the only command that returns more than one line of text
+
+        \todo{}:  Parse info string to extract meaning?  Only if we need to...
+        """
+        result = ( self.do_query(fp, self.DSPL_VERB_STAT),  self.readline(fp))
+
+        return result
 
     def read_temperature(self, fp):
         """Read the temperature (TEMP) from the device in degrees C
