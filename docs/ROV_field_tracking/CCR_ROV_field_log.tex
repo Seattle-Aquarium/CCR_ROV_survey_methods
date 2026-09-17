@@ -84,6 +84,9 @@
 % One pre-flight / post-flight checklist item
 \newcommand{\pdi}[1]{{\fontsize{7.8}{9.2}\selectfont #1}}
 
+% Bold item number prefix, e.g. \inum{3} -> "3. "
+\newcommand{\inum}[1]{\textbf{#1.}~}
+
 % A checklist section: a coloured-frame box with a rail label (#2, in frame
 % colour #1) beside an item grid (#3). PRE-FLIGHT and POST-FLIGHT are the
 % same shape and differ only in frame colour, label, and items.
@@ -165,22 +168,33 @@
 \vspace{6pt}
 
 %======================================================================
+%  SOFTWARE VERSIONS
+%======================================================================
+\begin{tabularx}{\textwidth}{@{}lX@{\hspace{16pt}}lX@{\hspace{16pt}}lX@{}}
+  \lbl{ArduSub} & \hrulefill &
+  \lbl{BlueOS} & \hrulefill &
+  \lbl{Cockpit} & \hrulefill \\
+\end{tabularx}
+
+\vspace{6pt}
+
+%======================================================================
 %  PRE-FLIGHT GATE
 %======================================================================
 \checklist{Algae}{PRE-FLIGHT}{%
   \begin{tabularx}{\linewidth}{@{}X@{\hspace{8pt}}X@{\hspace{8pt}}X@{\hspace{8pt}}X@{}}
-    \pdi{Clean GoPros\hfill\cb} &
-    \pdi{Sync GoPros\hfill\cb} &
-    \pdi{TC25 open\hfill\cb} &
-    \pdi{Create flight folder\hfill\cb} \\[4pt]
-    \pdi{Open software\hfill\cb} &
-    \pdi{Point to flight folder\hfill\cb} &
-    \pdi{Clean the Pi\hfill\cb} &
-    \pdi{Feed GPS to DVL\hfill\cb} \\[4pt]
-    \pdi{Power DVL\hfill\cb} &
-    \pdi{Arm ROV\hfill\cb} &
-    \pdi{Confirm monitoring\hfill\cb} &
-    \pdi{Cameras recording\hfill\cb} \\
+    \pdi{\inum{1}Clean GoPros\hfill\cb} &
+    \pdi{\inum{2}Sync GoPros\hfill\cb} &
+    \pdi{\inum{3}TC25 open\hfill\cb} &
+    \pdi{\inum{4}Create flight folder\hfill\cb} \\[4pt]
+    \pdi{\inum{5}Open software\hfill\cb} &
+    \pdi{\inum{6}Point to flight folder\hfill\cb} &
+    \pdi{\inum{7}Clean the Pi\hfill\cb} &
+    \pdi{\inum{8}Feed GPS to DVL\hfill\cb} \\[4pt]
+    \pdi{\inum{9}Power DVL\hfill\cb} &
+    \pdi{\inum{10}Arm ROV\hfill\cb} &
+    \pdi{\inum{11}Confirm monitoring\hfill\cb} &
+    \pdi{\inum{12}Cameras recording\hfill\cb} \\
   \end{tabularx}}
 
 \vspace{6pt}
@@ -190,13 +204,13 @@
 %======================================================================
 \checklist{Coral}{POST-FLIGHT}{%
   \begin{tabularx}{\linewidth}{@{}X@{\hspace{8pt}}X@{\hspace{8pt}}X@{\hspace{8pt}}X@{}}
-    \pdi{Turn off cameras\hfill\cb} &
-    \pdi{Disarm ROV\hfill\cb} &
-    \pdi{Stop monitoring\hfill\cb} &
-    \pdi{Close Cockpit\hfill\cb} \\[4pt]
-    \pdi{Disable DVL\hfill\cb} &
-    \pdi{Logs to flights folder\hfill\cb} &
-    \pdi{Flight folder to SSD\hfill\cb} & \\
+    \pdi{\inum{1}Turn off cameras\hfill\cb} &
+    \pdi{\inum{2}Disarm ROV\hfill\cb} &
+    \pdi{\inum{3}Stop monitoring\hfill\cb} &
+    \pdi{\inum{4}Close Cockpit\hfill\cb} \\[4pt]
+    \pdi{\inum{5}Disable DVL\hfill\cb} &
+    \pdi{\inum{6}Logs to flights folder\hfill\cb} &
+    \pdi{\inum{7}Flight folder to SSD\hfill\cb} & \\
   \end{tabularx}}
 
 \vspace{6pt}
@@ -231,13 +245,5 @@
 \end{tabular}
 
 \vfill
-
-%======================================================================
-%  FOOTER
-%======================================================================
-\begin{flushright}
-  {\fontsize{6.8}{8.2}\selectfont\color{Stone}%
-   Sheet \rule[-1pt]{22pt}{0.5pt} of \rule[-1pt]{22pt}{0.5pt}}
-\end{flushright}
 
 \end{document}
