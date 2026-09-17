@@ -233,9 +233,15 @@ def compose_transect(
 
     for i, seg in enumerate(resolved.segments):
         part = scratch / f"part{i:02d}.mp4"
-        # overlays are indexed from the start of the transect, so a later
-        # segment must start reading partway into the sequence
+        # Overlays are indexed from the start of the *output*, so a later
+        # segment starts reading that far into the sequence -- the durations
+        # before it, whatever gaps in wall clock sit between them.
         offset = sum(s.dur_s for s in resolved.segments[:i])
+        # The ROV inset, on the other hand, is cut from the moment this
+        # segment was actually recorded. Those two are the same number only
+        # for a transect with no pause and no gap between chapters; adding the
+        # durations up for both is what used to put the inset and the
+        # telemetry ahead of the picture by the length of every earlier gap.
 
         def seg_progress(f: float, msg: str, _o=done, _d=seg.dur_s) -> None:
             if progress:
@@ -243,7 +249,7 @@ def compose_transect(
 
         compose_segment(
             segment=seg, seq=seq, rov=rov,
-            epoch_start=resolved.epoch_start + offset,
+            epoch_start=resolved.segment_epoch(i),
             out_path=part, app=app, rendition=rendition,
             overlay_offset_s=offset, scratch=scratch,
             progress=seg_progress if progress else None,

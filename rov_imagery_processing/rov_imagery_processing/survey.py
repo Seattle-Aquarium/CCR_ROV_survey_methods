@@ -163,10 +163,32 @@ def local_midnight_epoch(on: _date, tz_name: str = "America/Los_Angeles") -> flo
 
 
 @dataclass
+class Pause:
+    """A stretch inside a transect during which nothing was being surveyed.
+
+    The vehicle is still down, the recordings are still running and the
+    telemetry is still being written -- what has happened is that Cockpit
+    disarmed, or the video glitched, or a minute went on getting the ROV back
+    where it was. None of the GoPro imagery from that minute is survey
+    imagery, so nothing downstream should treat it as such.
+
+    Times are TC-25, on exactly the same clock as the transect's own, and are
+    read in the transect's frame: a pause typed as 00:03:10 inside a transect
+    that started at 23:58:00 is after midnight, not twenty-four hours early.
+    """
+
+    start_tc: str
+    end_tc: str
+
+
+@dataclass
 class Transect:
     name: str                     # "T1", "T2", ...
     start_tc: str                 # hh:mm:ss, TC-25 local
     end_tc: str
+    #: Stretches inside this transect that were not surveying. A transect
+    #: with none behaves exactly as it always did.
+    pauses: list[Pause] = field(default_factory=list)
 
     def start_s(self) -> float:
         return parse_hhmmss(self.start_tc)
@@ -178,6 +200,75 @@ class Transect:
 
     def duration_s(self) -> float:
         return self.end_s() - self.start_s()
+
+    # ---- pauses --------------------------------------------------------
+
+    def _in_frame(self, tc: str) -> float:
+        """A time-of-day put on this transect's clock rather than the day's."""
+        s = parse_hhmmss(self.start_tc)
+        v = parse_hhmmss(tc)
+        return v + SECONDS_PER_DAY if v < s else v
+
+    def pause_spans(self) -> list[tuple[float, float]]:
+        """Each pause as (start, end) seconds, in order, merged and clipped.
+
+        Clipped to the transect because a pause reaching outside it describes
+        time this transect does not own; merged because two pauses that touch
+        are one stretch, and every consumer downstream wants stretches rather
+        than entries. Anything unparseable is left out here and reported by
+        `validate` -- half-typed times must not make the whole transect vanish
+        while somebody is still typing.
+        """
+        try:
+            s, e = self.start_s(), self.end_s()
+        except SurveyError:
+            return []
+        spans: list[tuple[float, float]] = []
+        for p in self.pauses:
+            try:
+                a, b = self._in_frame(p.start_tc), self._in_frame(p.end_tc)
+            except SurveyError:
+                continue
+            if b < a:                         # a pause running past midnight
+                b += SECONDS_PER_DAY
+            a, b = max(a, s), min(b, e)
+            if b > a:
+                spans.append((a, b))
+        spans.sort()
+        merged: list[tuple[float, float]] = []
+        for a, b in spans:
+            if merged and a <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+            else:
+                merged.append((a, b))
+        return merged
+
+    def active_spans(self) -> list[tuple[float, float]]:
+        """The transect with its pauses taken out: what was surveyed.
+
+        One span, the whole transect, when there are no pauses -- so a caller
+        written against this needs no special case for the ordinary transect.
+        """
+        try:
+            s, e = self.start_s(), self.end_s()
+        except SurveyError:
+            return []
+        out: list[tuple[float, float]] = []
+        cursor = s
+        for a, b in self.pause_spans():
+            if a > cursor:
+                out.append((cursor, a))
+            cursor = max(cursor, b)
+        if e > cursor:
+            out.append((cursor, e))
+        return out
+
+    def paused_s(self) -> float:
+        return sum(b - a for a, b in self.pause_spans())
+
+    def active_s(self) -> float:
+        """Seconds actually surveyed -- the duration minus the pauses."""
+        return self.duration_s() - self.paused_s()
 
     def validate(self) -> list[str]:
         errs: list[str] = []
@@ -194,8 +285,53 @@ class Transect:
         d = e - s
         if d <= 0:
             errs.append(f"{self.name}: end is not after start")
-        elif d > 4 * 3600:
+            return errs
+        if d > 4 * 3600:
             errs.append(f"{self.name}: {d/3600:.1f} h long -- check the times")
+        errs += self._validate_pauses(s, e)
+        return errs
+
+    def _validate_pauses(self, s: float, e: float) -> list[str]:
+        """Each pause parses, runs forwards, and sits inside the transect.
+
+        A pause outside its transect is almost always a time typed against the
+        wrong row, and silently clipping it to nothing would hide that -- the
+        operator would see the imagery they meant to drop arrive anyway.
+        """
+        errs: list[str] = []
+        ranges: list[tuple[float, float, int]] = []
+        for i, p in enumerate(self.pauses, start=1):
+            where = f"{self.name} pause {i}"
+            if not str(p.start_tc).strip() and not str(p.end_tc).strip():
+                errs.append(f"{where}: no times -- fill it in or remove it")
+                continue
+            try:
+                a = self._in_frame(p.start_tc)
+            except SurveyError as ex:
+                errs.append(f"{where} start: {ex}")
+                continue
+            try:
+                b = self._in_frame(p.end_tc)
+            except SurveyError as ex:
+                errs.append(f"{where} end: {ex}")
+                continue
+            if b < a:
+                b += SECONDS_PER_DAY
+            if b <= a:
+                errs.append(f"{where}: end is not after start")
+                continue
+            if a < s or b > e:
+                errs.append(
+                    f"{where} ({p.start_tc}-{p.end_tc}) is not inside "
+                    f"{self.name} ({self.start_tc}-{self.end_tc})")
+                continue
+            ranges.append((a, b, i))
+        ranges.sort()
+        for (_a1, b1, i1), (a2, _b2, i2) in zip(ranges, ranges[1:], strict=False):
+            if a2 < b1:
+                errs.append(f"{self.name}: pauses {i1} and {i2} overlap")
+        if ranges and not errs and self.active_s() <= 0:
+            errs.append(f"{self.name}: the pauses cover the whole transect")
         return errs
 
 
@@ -250,6 +386,24 @@ def _safe(fn) -> float:
         return 0.0
 
 
+def _transect_from(raw: dict) -> Transect:
+    """One transect out of a saved plan, pauses and all.
+
+    Written by hand rather than with ``Transect(**raw)`` for two reasons: a
+    plan saved before pauses existed has no ``pauses`` key at all, and one
+    saved after has a list of dictionaries that would otherwise be handed
+    straight through as dictionaries. Unknown keys are ignored, so a file
+    written by a newer version still opens here.
+    """
+    pauses = [Pause(start_tc=str(p.get("start_tc", "")),
+                    end_tc=str(p.get("end_tc", "")))
+              for p in (raw.get("pauses") or []) if isinstance(p, dict)]
+    return Transect(name=raw.get("name", "T?"),
+                    start_tc=raw.get("start_tc", ""),
+                    end_tc=raw.get("end_tc", ""),
+                    pauses=pauses)
+
+
 @dataclass
 class SurveyPlan:
     sites: list[Site] = field(default_factory=list)
@@ -296,7 +450,7 @@ class SurveyPlan:
         sites = [
             Site(
                 name=s["name"], project=s["project"], date=s["date"],
-                transects=[Transect(**t) for t in s.get("transects", [])],
+                transects=[_transect_from(t) for t in s.get("transects", [])],
             )
             for s in raw.get("sites", [])
         ]
@@ -339,11 +493,21 @@ class Chapter:
 
 @dataclass
 class Segment:
-    """A slice of one chapter contributing to a transect."""
+    """A slice of one chapter contributing to a transect.
+
+    `epoch` is when this slice's first frame happened, on the telemetry clock.
+    It is carried rather than worked out from the segment's position in the
+    list because the segments of one transect are not always shoulder to
+    shoulder in time: a pause is cut out between them, and so is a gap between
+    two GoPro chapters. Adding up the durations before it -- which is what the
+    compositor used to do -- puts the telemetry ahead of the picture by the
+    length of every gap that came earlier.
+    """
 
     chapter: Chapter
     in_s: float            # offset into the chapter
     dur_s: float
+    epoch: float | None = None
 
     @property
     def out_s(self) -> float:
@@ -368,6 +532,88 @@ class ResolvedTransect:
     @property
     def complete(self) -> bool:
         return self.coverage > 0.999
+
+    # ---- placing the segments on the telemetry clock --------------------
+
+    def segment_epoch(self, index: int) -> float:
+        """When segment `index` starts, on the telemetry clock.
+
+        Falls back to laying the segments end to end from the transect's own
+        start, which is what a segment carrying no epoch of its own means.
+        """
+        seg = self.segments[index]
+        if seg.epoch is not None:
+            return seg.epoch
+        return self.epoch_start + sum(s.dur_s for s in self.segments[:index])
+
+    def shift(self, seconds: float) -> None:
+        """Move the whole transect along the telemetry clock.
+
+        Used when the GoPro is measured against the vehicle's own turns and
+        found to be running early or late. Every segment moves with it, or the
+        later ones would keep the offset the measurement just removed.
+        """
+        self.epoch_start += seconds
+        self.epoch_end += seconds
+        for seg in self.segments:
+            if seg.epoch is not None:
+                seg.epoch += seconds
+
+    def runs(self) -> list[tuple[int, int]]:
+        """Segment index ranges that are continuous in time, as [start, stop).
+
+        A transect with no pauses and no chapter gaps is one run. Anything
+        that needs a single unbroken stretch of wall clock -- measuring the
+        picture against the yaw rate, for one -- asks for these rather than
+        assuming the transect is one.
+        """
+        out: list[tuple[int, int]] = []
+        start = 0
+        for i in range(1, len(self.segments)):
+            expected = self.segment_epoch(i - 1) + self.segments[i - 1].dur_s
+            if abs(self.segment_epoch(i) - expected) > 0.25:
+                out.append((start, i))
+                start = i
+        if self.segments:
+            out.append((start, len(self.segments)))
+        return out
+
+    def longest_run(self) -> tuple[list[Segment], float]:
+        """The longest unbroken stretch of this transect, and when it starts."""
+        best: tuple[int, int] | None = None
+        best_s = -1.0
+        for lo, hi in self.runs():
+            span = sum(s.dur_s for s in self.segments[lo:hi])
+            if span > best_s:
+                best, best_s = (lo, hi), span
+        if best is None:
+            return [], self.epoch_start
+        lo, hi = best
+        return self.segments[lo:hi], self.segment_epoch(lo)
+
+    def paused_epochs(self) -> list[tuple[float, float]]:
+        """This transect's pauses, on the telemetry clock.
+
+        Derived from `epoch_start` rather than from the date, so a transect
+        moved by the motion check carries its pauses along with it.
+        """
+        base = self.epoch_start - _safe(self.transect.start_s)
+        return [(base + lo, base + hi)
+                for lo, hi in self.transect.pause_spans()]
+
+    def is_paused(self, epoch: float) -> bool:
+        return any(lo <= epoch < hi for lo, hi in self.paused_epochs())
+
+    @property
+    def spans(self) -> list[tuple[float, float]]:
+        """(epoch, duration) for each run, for anything drawn per second.
+
+        The overlay sequence is one frame per second of *output*, so it walks
+        these rather than a single start and duration.
+        """
+        return [(self.segment_epoch(lo),
+                 sum(s.dur_s for s in self.segments[lo:hi]))
+                for lo, hi in self.runs()]
 
     def output_stem(self, resolution: str) -> str:
         """YYYY-MM-DD_project_site_transect_resolution."""
@@ -394,10 +640,18 @@ def resolve_transect(
     *,
     timezone: str = "America/Los_Angeles",
 ) -> ResolvedTransect:
-    """Map one transect onto the available video and the mcap clock."""
+    """Map one transect onto the available video and the mcap clock.
+
+    Only the stretches that were surveying are resolved: a pause is never
+    given a segment, so the footage inside it is neither trimmed out of the
+    original nor composited. A transect with no pauses resolves to exactly
+    what it always did.
+    """
     start_s, end_s = transect.start_s(), transect.end_s()
-    requested = end_s - start_s
+    wanted = transect.active_spans()
+    requested = sum(hi - lo for lo, hi in wanted)
     warnings: list[str] = []
+    midnight = local_midnight_epoch(site.date_obj(), timezone)
 
     usable = [c for c in chapters if c.tc_start_s is not None]
     if not usable and chapters:
@@ -406,14 +660,20 @@ def resolve_transect(
             "with GoPro Labs precision time, so transect times cannot be located"
         )
 
-    segments: list[Segment] = []
-    for ch in sorted(usable, key=lambda c: c.tc_start_s or 0.0):
+    # Every (chapter, surveying span) overlap, in time order. Sorted by when
+    # they happened rather than by chapter, so a transect cut into pieces by a
+    # pause still comes out in the order it was flown.
+    cuts: list[tuple[float, Segment]] = []
+    for ch in usable:
         assert ch.tc_start_s is not None
-        # intersect [start_s, end_s) with this chapter's timecode span
-        lo = max(start_s, ch.tc_start_s)
-        hi = min(end_s, ch.tc_start_s + ch.duration)
-        if hi - lo > 0.05:
-            segments.append(Segment(ch, lo - ch.tc_start_s, hi - lo))
+        for want_lo, want_hi in wanted:
+            lo = max(want_lo, ch.tc_start_s)
+            hi = min(want_hi, ch.tc_start_s + ch.duration)
+            if hi - lo > 0.05:
+                cuts.append((lo, Segment(ch, lo - ch.tc_start_s, hi - lo,
+                                         epoch=midnight + lo)))
+    cuts.sort(key=lambda c: c[0])
+    segments = [seg for _lo, seg in cuts]
 
     covered = sum(s.dur_s for s in segments)
     if segments and covered < requested - 0.5:
@@ -429,10 +689,15 @@ def resolve_transect(
             f"the recorded video, which spans {format_hhmmss(span[0])}-"
             f"{format_hhmmss(span[1])}"
         )
-    if len(segments) > 1:
-        warnings.append(f"spans {len(segments)} GoPro chapters; they will be joined")
+    paused = transect.paused_s()
+    if paused > 0:
+        warnings.append(
+            f"{len(transect.pause_spans())} pause(s) totalling {paused:.0f}s are "
+            f"cut out; {requested:.0f}s of surveying remains")
+    chapters_used = len({id(s.chapter) for s in segments})
+    if chapters_used > 1:
+        warnings.append(f"spans {chapters_used} GoPro chapters; they will be joined")
 
-    midnight = local_midnight_epoch(site.date_obj(), timezone)
     return ResolvedTransect(
         site=site,
         transect=transect,
@@ -453,14 +718,20 @@ def resolve_from_trims(
     """Resolve a plan against per-transect trims instead of GoPro chapters.
 
     A trim already *is* one transect, so there is nothing to search for: it
-    contributes a single segment. That matters because a trim cannot be placed
+    contributes its own footage. That matters because a trim cannot be placed
     on the TC-25 clock by its timecode track -- a stream copy keeps the source
     chapter's timecode, so every trim from one recording reports the same
     start.
 
-    The segment starts `heads[name]` seconds in: a stream copy begins on the
+    The footage starts `heads[name]` seconds in: a stream copy begins on the
     keyframe before the transect, and that footage precedes the transect's
     start (see `videoclip`). Without a head it starts at the first frame.
+
+    A transect with pauses was trimmed with the paused footage already cut
+    out, so the trim's own seconds run continuously while the clock they
+    belong to does not. The trim is therefore laid back over the transect's
+    surveying spans in order, which puts each part of it back on the telemetry
+    clock where it was actually recorded.
 
     The pairing is by transect name, which is how the trim folders are laid
     out. A transect with no trim resolves to nothing and is reported, exactly
@@ -471,7 +742,7 @@ def resolve_from_trims(
     for site in plan.sites:
         midnight = local_midnight_epoch(site.date_obj(), plan.timezone)
         for t in site.transects:
-            want = t.duration_s()
+            want = t.active_s()
             ch = trims.get(t.name)
             warnings: list[str] = []
             segments: list[Segment] = []
@@ -486,7 +757,7 @@ def resolve_from_trims(
                 if not ch.duration:
                     head = 0.0
                 dur = min(have, want) if have else want
-                segments = [Segment(chapter=ch, in_s=head, dur_s=dur)]
+                segments = _lay_over_spans(ch, head, dur, t, midnight)
                 covered = dur
                 # A trim shorter than its transect means the trim was cut from
                 # footage that ran out, not that the times are wrong.
@@ -494,13 +765,41 @@ def resolve_from_trims(
                     warnings.append(
                         f"the trim is {have:.0f}s but {t.name} is {want:.0f}s; "
                         f"only the footage that exists will be composited")
+                if t.pauses:
+                    warnings.append(
+                        f"{t.name} has {len(t.pause_spans())} pause(s); the trim "
+                        f"is taken to have been cut with them already removed. "
+                        f"Re-cut it if the pause times have changed since.")
             out.append(ResolvedTransect(
                 site=site, transect=t, segments=segments,
                 epoch_start=midnight + t.start_s(),
-                epoch_end=midnight + t.start_s() + want,
+                epoch_end=midnight + t.end_s(),
                 covered_s=covered, requested_s=want, warnings=warnings,
             ))
     return out
+
+
+def _lay_over_spans(ch: Chapter, head: float, dur: float, transect: Transect,
+                    midnight: float) -> list[Segment]:
+    """`dur` seconds of `ch`, starting `head` in, placed on a transect's spans.
+
+    One segment per surveying span, each carrying the epoch it belongs to. A
+    transect with no pauses has one span, so this returns the single segment
+    it always did.
+    """
+    segments: list[Segment] = []
+    at = head
+    left = dur
+    for lo, hi in transect.active_spans():
+        if left <= 0:
+            break
+        take = min(hi - lo, left)
+        if take > 0.05:
+            segments.append(Segment(chapter=ch, in_s=at, dur_s=take,
+                                    epoch=midnight + lo))
+        at += take
+        left -= take
+    return segments
 
 
 def resolve_plan(
@@ -510,4 +809,33 @@ def resolve_plan(
     for site in plan.sites:
         for t in site.transects:
             out.append(resolve_transect(site, t, chapters, timezone=plan.timezone))
+    return out
+
+
+def plan_windows(plan: SurveyPlan, *, exclude_pauses: bool = False
+                 ) -> list[tuple[str, float, float]]:
+    """(name, epoch_start, epoch_end) for every transect in a plan.
+
+    Both programs turn a plan into windows, and both now have to be able to
+    ask for it two ways, so the one implementation lives here.
+
+    ``exclude_pauses`` splits a paused transect into one window per surveying
+    stretch, every one of them under the transect's own name. That is what
+    imagery is filed by: a frame taken during a pause then falls inside no
+    window at all and is handled as off-transect, which is the whole reason
+    for typing the pause in the first place.
+
+    Everything that is about *when the flight happened* rather than about what
+    was surveyed -- which recordings to read, which files on the Pi cover a
+    transect, where the dive profile's bands go -- wants the whole span, and
+    leaves this alone.
+    """
+    out: list[tuple[str, float, float]] = []
+    for site in plan.sites:
+        midnight = local_midnight_epoch(site.date_obj(), plan.timezone)
+        for t in site.transects:
+            spans = (t.active_spans() if exclude_pauses
+                     else [(t.start_s(), t.end_s())])
+            for lo, hi in spans:
+                out.append((t.name, midnight + lo, midnight + hi))
     return out

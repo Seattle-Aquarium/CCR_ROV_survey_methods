@@ -51,6 +51,7 @@ from .survey import (
     resolve_plan,
     utc_offset_hours,
 )
+from .survey import plan_windows as _plan_windows
 from .telemetry import TelemetryStore
 
 ProgressCB = Callable[[float, str], None]
@@ -239,20 +240,20 @@ def ensure_telemetry(
     return TelemetryStore.load(ex.telemetry_csv), warnings + list(ex.warnings)
 
 
-def plan_windows(plan: SurveyPlan) -> list[tuple[str, float, float]]:
+def plan_windows(plan: SurveyPlan, *, exclude_pauses: bool = False
+                 ) -> list[tuple[str, float, float]]:
     """(name, epoch_start, epoch_end) for every transect in a plan.
 
     Derived from the plan alone, so imagery can be sorted before -- or without
     -- any video being processed. The composite path resolves its own windows
     against the GoPro chapters instead, because it also has to know which file
     each second lives in.
+
+    Re-exported from `survey` so the two programs turn a plan into windows
+    with one piece of code rather than two that can drift. Pass
+    ``exclude_pauses=True`` wherever imagery is being filed by transect.
     """
-    out: list[tuple[str, float, float]] = []
-    for site in plan.sites:
-        midnight = local_midnight_epoch(site.date_obj(), plan.timezone)
-        for t in site.transects:
-            out.append((t.name, midnight + t.start_s(), midnight + t.end_s()))
-    return out
+    return _plan_windows(plan, exclude_pauses=exclude_pauses)
 
 
 def describe_chapters(paths: Sequence[Path], ffmpeg: str | None = None) -> list[Chapter]:
@@ -490,9 +491,14 @@ def _run(
             # from the plan rather than the resolved transects: sorting does not
             # need the video, and a transect whose footage is missing should
             # still get its stills.
+            #
+            # Pauses are cut out of the windows. A frame taken during one then
+            # matches no transect and is handled as off-transect, which is what
+            # recording the pause was for.
             try:
                 rep = sorting.sort_flight(
-                    req.flight_dir, plan_windows(req.plan),
+                    req.flight_dir,
+                    plan_windows(req.plan, exclude_pauses=True),
                     store=store, options=req.sort_options,
                     progress=st.sub("photos"), cancel=cancel,
                 )
@@ -563,11 +569,18 @@ def _align_with_motion(
     the ROV inset and the 1 Hz CSV's transect marks all follow the picture.
     The GoPro footage itself -- which seconds of video make the transect --
     is unchanged. Anything short of confident is reported and left alone.
+
+    The measurement is made over the transect's longest *unbroken* stretch.
+    Correlating the picture's rotation against the yaw rate assumes the two
+    run on one clock, and they do not across a pause or a gap between
+    chapters: the footage skips it and the telemetry does not. One continuous
+    run is a shorter measurement and a true one.
     """
     cfg = app.sync
     n = len(renderable)
     for i, r in enumerate(renderable):
         name = f"{r.site.name}/{r.transect.name}"
+        run_segments, run_epoch = r.longest_run()
 
         def sub(f: float, m: str = "", _i=i) -> None:
             if progress:
@@ -575,7 +588,7 @@ def _align_with_motion(
 
         try:
             ms = motion_sync.check_transect(
-                r.segments, store, r.epoch_start, cache / "motion",
+                run_segments, store, run_epoch, cache / "motion",
                 search_s=cfg.motion_search_s, min_r=cfg.motion_min_r,
                 min_peak_ratio=cfg.motion_min_peak_ratio,
                 ffmpeg=ffmpeg, progress=sub, cancel=cancel)
@@ -595,8 +608,10 @@ def _align_with_motion(
                 f"telemetry ({ms.message}); the timecode is being trusted as-is")
         elif abs(ms.offset_s) >= cfg.motion_min_shift_s:
             off = ms.offset_s
-            r.epoch_start += off
-            r.epoch_end += off
+            # Every segment moves with the transect. Moving only the two ends
+            # would leave each later piece carrying the offset just measured
+            # away, which is the bug this method exists to prevent.
+            r.shift(off)
             behind = "behind" if off > 0 else "ahead of"
             res.warnings.append(
                 f"{name}: the GoPro's timecode is {abs(off):.2f}s {behind} the "
@@ -635,6 +650,9 @@ def _render_one(
         footer_text=footer if app.layout.show_footer else None,
         progress=op, cancel=cancel,
         workers=app.overlay_workers,
+        # The clip's frames run continuously; the clock behind them does not
+        # if a pause was cut out, so the overlay walks the spans.
+        spans=r.spans,
     )
 
     def cp(f: float, m: str = "") -> None:

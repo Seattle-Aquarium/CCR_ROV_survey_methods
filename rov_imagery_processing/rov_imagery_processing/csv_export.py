@@ -33,7 +33,14 @@ ProgressCB = Callable[[float, str], None]
 
 BASE_COLUMNS = (
     "utc_iso", "epoch_s", "tc25_local", "date", "project", "site", "transect",
+    # transect / pause / off_transect. A paused second keeps its transect
+    # name -- it happened inside that transect -- and says here that nothing
+    # was being surveyed in it. Matches Survey_state in the per-transect CSVs
+    # the extractor writes.
+    "survey_state",
 )
+
+SURVEYING, PAUSED, OFF_TRANSECT = "transect", "pause", "off_transect"
 
 DERIVED_COLUMNS = ("power_W",)
 
@@ -49,9 +56,11 @@ class ExportResult:
 
 
 def _label_for(epoch: float, resolved: Sequence[ResolvedTransect]):
+    """(project, site, transect, survey state) for one second, or None."""
     for r in resolved:
         if r.epoch_start <= epoch < r.epoch_end:
-            return r.site.project, r.site.name, r.transect.name
+            return (r.site.project, r.site.name, r.transect.name,
+                    PAUSED if r.is_paused(epoch) else SURVEYING)
     return None
 
 
@@ -115,11 +124,11 @@ def export_1hz(
 
             hit = _label_for(epoch, resolved)
             if hit:
-                project, site, transect = hit
+                project, site, transect, state = hit
                 transect_rows += 1
             else:
                 project, site = lone if lone else ("", "")
-                transect = "off_transect"
+                transect, state = OFF_TRANSECT, OFF_TRANSECT
 
             utc = datetime.fromtimestamp(epoch, timezone.utc)
             local = utc + timedelta(hours=utc_offset_hours)
@@ -129,7 +138,7 @@ def export_1hz(
                 f"{epoch:.0f}",
                 local.strftime("%H:%M:%S"),
                 local.strftime("%Y-%m-%d"),
-                project, site, transect,
+                project, site, transect, state,
             ]
 
             # derived power, from the same BATTERY_STATUS message

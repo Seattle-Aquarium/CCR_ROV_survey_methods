@@ -46,9 +46,10 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from .. import diagnostics
+from . import ctk_tuning
 from . import gradients as G
 from . import theme as T
-from .widgets import Grip, button, one_line_height
+from .widgets import Grip, OutputBox, Repaint, button, one_line_height
 
 log = logging.getLogger(__name__)
 #: The shared output pane, copied into the diagnostics log.
@@ -138,6 +139,73 @@ def _font_kw(font: tuple) -> dict:
 ATTRIBUTION_LINES = ("Conservation Programs and Partnerships",
                      "Coastal Climate Resilience")
 
+#: What is shown for a version nobody has been able to read yet.
+UNKNOWN_VERSION = "—"
+
+#: The three versions the banner carries, and what to call each. They are
+#: what a question six months from now turns on -- "why does August look
+#: different?" is a lookup rather than an argument only if the answer was on
+#: screen at the time.
+VERSION_KEYS = ("blueos", "ardusub", "cockpit")
+VERSION_LABELS = {"blueos": "BlueOS", "ardusub": "ArduSub",
+                  "cockpit": "Cockpit"}
+
+#: Gradient rules kept as Tk images, by width. One drag across a screen passes
+#: through a few dozen widths and comes back through the same ones; past that
+#: the oldest goes.
+RULE_CACHE_MAX = 48
+
+#: How often the vehicle is asked for them. They change when somebody updates
+#: the vehicle, which is not during a dive, so a minute is plenty -- and this
+#: runs for a whole survey day.
+VERSION_POLL_S = 60.0
+#: And how often the lamps are refreshed. Fast enough that losing the tether
+#: shows up as quickly as the recorder itself notices.
+STATUS_POLL_MS = 1000
+
+
+class Lamp(ctk.CTkFrame):
+    """A small indicator: a dot, and the word for what it is watching.
+
+    Three states rather than two, because there genuinely are three and
+    flattening them would be a lie at exactly the moment it mattered. The
+    recorder watches for the ROV to arm and only writes rows once it has, so
+    between two transects the monitoring is up and the logging is not. A ring
+    says "on and waiting", a filled dot says "happening now", and grey says
+    neither -- which reads at a glance and survives being colour-blind, a
+    laptop in daylight, and a screenshot in a report.
+    """
+
+    #: dot, colour attribute on the theme.
+    OFF = ("○", "TEXT_MUTED")
+    WAITING = ("○", "ACCENT")
+    ON = ("●", "OK")
+
+    def __init__(self, master, text: str, **kw):
+        super().__init__(master, fg_color="transparent", **kw)
+        self._state = self.OFF
+        self.dot = ctk.CTkLabel(self, text=self.OFF[0], width=14,
+                                font=("Segoe UI Symbol", 14),
+                                text_color=T.TEXT_MUTED)
+        self.dot.grid(row=0, column=0, padx=(0, 4))
+        self.caption = ctk.CTkLabel(self, text=text, font=T.FONT_SMALL,
+                                    text_color=T.TEXT_MUTED, anchor="w")
+        self.caption.grid(row=0, column=1, sticky="w")
+
+    def set_state(self, state: tuple[str, str]) -> None:
+        self._state = state
+        self.refresh_theme()
+
+    def refresh_theme(self) -> None:
+        glyph, colour = self._state
+        try:
+            self.dot.configure(text=glyph, text_color=getattr(T, colour))
+            self.caption.configure(
+                text_color=T.TEXT if self._state is not self.OFF
+                else T.TEXT_MUTED)
+        except Exception:
+            pass                       # the window is closing
+
 #: The log pane may be dragged open to at most this share of the window.
 LOG_MAX_SHARE = 0.6
 
@@ -148,6 +216,18 @@ class TabStrip(ctk.CTkFrame):
     Keeps the small navigation API the pages already use -- ``select``,
     ``sections``, ``current``, ``set_enabled`` and ``set_locked`` -- so a page
     written against UTC's rail works unchanged on a tab.
+
+    **Only the open tab is laid out.** The five pages share one grid cell, and
+    the first version simply stacked them and raised the open one. They were
+    all still *managed*, so every one of them was measured and re-laid-out
+    every time the window changed width -- five tabs' worth of work to show
+    one. Measured on the station this was written on, that was 120 ms per
+    resize step where laying out the open tab alone is 45: it is where most of
+    the stutter came from when a window edge was dragged. The four that are
+    not being looked at are now taken out of the grid entirely and put back
+    when they are chosen, which costs one layout pass on a tab change -- an
+    action that happens a handful of times a day, against a resize that
+    happens sixty times a second.
     """
 
     def __init__(self, master, holder, on_select: Callable[[str], None]):
@@ -157,6 +237,9 @@ class TabStrip(ctk.CTkFrame):
         self._buttons: dict[str, ctk.CTkButton] = {}
         self._pages: dict[str, ctk.CTkFrame] = {}
         self._current: str | None = None
+        #: The tab to come back to when the start-up warm-up has been round
+        #: them all; None when it is not running.
+        self._warm_home: str | None = None
 
     def add(self, name: str) -> ctk.CTkFrame:
         n = len(self._buttons) + 1
@@ -172,7 +255,9 @@ class TabStrip(ctk.CTkFrame):
         page.grid(row=0, column=0, sticky="nsew")
         page.grid_columnconfigure(0, weight=1)
         page.grid_rowconfigure(0, weight=1)
-        page.lower()
+        # Gridded and then removed, which keeps the options for when it is
+        # chosen. Until then Tk has nothing to lay out for it.
+        page.grid_remove()
         self._pages[name] = page
         if self._current is None:
             self.select(name, notify=False)
@@ -181,8 +266,13 @@ class TabStrip(ctk.CTkFrame):
     def select(self, name: str, notify: bool = True) -> None:
         if name not in self._pages:
             return
+        previous = self._current
         self._current = name
-        self._pages[name].lift()
+        if previous is not None and previous != name:
+            page = self._pages.get(previous)
+            if page is not None:
+                page.grid_remove()
+        self._pages[name].grid()
         for n, btn in self._buttons.items():
             on = n == name
             btn.configure(text_color=T.HEADING if on else T.TEXT_MUTED,
@@ -219,6 +309,50 @@ class TabStrip(ctk.CTkFrame):
         if self._current:
             self.select(self._current, notify=False)
 
+    #: How long each tab is left open while it is warmed.
+    WARM_HOLD_MS = 55
+
+    def warm(self, index: int = 0) -> None:
+        """Open every tab once, at start-up, so no first click has to wait.
+
+        Keeping only the open tab in the grid is what makes resizing cheap,
+        and the price is that a tab's first appearance pays for its whole
+        layout in one go. Measured here: 242 ms the first time each tab was
+        opened, against 43 ms before -- a hitch right when somebody has just
+        clicked. Doing the work up front, while the window is idle and nobody
+        is waiting on it, puts it where it cannot be felt.
+
+        **It warms by opening each tab, exactly as a click does, one per turn
+        of the event loop.** The obvious version -- grid a page, lay it out,
+        take it back out again, without ever showing it -- does not work, and
+        does not fail loudly either: the page is laid out but never finishes
+        *mapping*, and every widget inside a canvas-embedded frame (which is
+        every card on every tab, because each tab scrolls) is then left
+        believing it was never shown. The tab opens, its geometry is right to
+        the pixel, and it draws nothing at all. Going through the same path a
+        click goes through cannot drift away from what a click does, which
+        after that is the property worth having. The cost is that the tabs
+        flick past once while the window is starting.
+
+        `notify=False`: this is not somebody choosing a tab, and the pages'
+        `refresh` hooks should not be run as though it were.
+        """
+        names = list(self._pages)
+        if index == 0:
+            if self._warm_home is not None:
+                return                    # one is already going round
+            self._warm_home = self._current
+        if index >= len(names):
+            if self._warm_home is not None:
+                self.select(self._warm_home, notify=False)
+            self._warm_home = None
+            return
+        try:
+            self.select(names[index], notify=False)
+            self.after(self.WARM_HOLD_MS, lambda: self.warm(index + 1))
+        except Exception:
+            self._warm_home = None        # the window is closing
+
 
 class Shell(ctk.CTk):
     """Banner, tabs, shared output. Subclasses add the tabs."""
@@ -231,6 +365,9 @@ class Shell(ctk.CTk):
     SLUG = "rov_program"
 
     def __init__(self) -> None:
+        # Before any widget exists: it reaches into CustomTkinter's scrollbar,
+        # and a scrollbar already built would keep the method it was made with.
+        ctk_tuning.apply()
         super().__init__()
         self.title(self.APP_NAME)
         self.geometry("1320x900")
@@ -267,6 +404,8 @@ class Shell(ctk.CTk):
         self.build_tabs()
         if self.nav.sections:
             self.nav.select(self.nav.sections[0])
+            # Once the window is up and before anyone has clicked anything.
+            self.after(400, self.nav.warm)
         self.after(DRAIN_EVERY_MS, self._drain)
         # The watchdog starts counting from here: building the window is
         # start-up, however long it takes, not a stall.
@@ -303,10 +442,33 @@ class Shell(ctk.CTk):
             self, highlightthickness=0, borderwidth=0, height=104,
             background=self._apply_appearance_mode(T.HEADER_BG))
         self.header.grid(row=0, column=0, sticky="ew")
-        self.header.bind("<Configure>", lambda _e: self._paint_header())
+        # At most one repaint a frame while the window is being dragged, and
+        # one more when it settles -- the banner is a full canvas rebuild
+        # including a gradient, and a window manager delivers <Configure>
+        # faster than that can be done or seen.
+        self._header_paint = Repaint(self, self._paint_header)
+        self.header.bind("<Configure>", self._header_configured)
+        self._header_at: tuple[int, int] | None = None
 
         self.controls = ctk.CTkFrame(self.header, fg_color=T.HEADER_BG,
                                      corner_radius=0)
+        # Folded away, everything sits in one row reading left to right:
+        # versions, lamps, then the three controls. Open, the versions move
+        # up beside the title and the lamps drop under the two controls --
+        # see `_lay_out_controls`.
+        self.versions_row = ctk.CTkFrame(self.controls, fg_color="transparent")
+        self.version_labels: dict[str, ctk.CTkLabel] = {}
+        for i, key in enumerate(VERSION_KEYS):
+            lab = ctk.CTkLabel(self.versions_row, text="", font=T.FONT_SMALL,
+                               text_color=T.TEXT_MUTED, anchor="w")
+            lab.grid(row=0, column=i, padx=(0, 12), sticky="w")
+            self.version_labels[key] = lab
+
+        self.lamps = {
+            "vehicle": Lamp(self.controls, "Vehicle connected"),
+            "logging": Lamp(self.controls, "Logging"),
+        }
+
         # Where the diagnostics log is, one click away for whoever is asked
         # to send it after a problem.
         self.diag_btn = ctk.CTkButton(
@@ -314,26 +476,93 @@ class Shell(ctk.CTk):
             corner_radius=6, font=T.FONT_SMALL, fg_color="transparent",
             hover_color=T.SURFACE_ALT, text_color=T.TEXT_MUTED, border_width=0,
             bg_color=T.HEADER_BG, command=self.open_diagnostics)
-        self.diag_btn.grid(row=0, column=0, padx=(0, 10))
         self.theme_switch = ctk.CTkSwitch(
             self.controls, text="Dark mode", command=self._toggle_theme,
             font=T.FONT_SMALL, text_color=T.TEXT,
             progress_color=T.ACCENT, button_color=T.SURFACE_ALT,
             bg_color=T.HEADER_BG)
         self.theme_switch.select()
-        self.theme_switch.grid(row=0, column=1, padx=(0, 10))
         self.fold_btn = ctk.CTkButton(
             self.controls, text="▲", width=34, height=28, corner_radius=6,
             font=("Segoe UI Symbol", 14), fg_color="transparent",
             hover_color=T.SURFACE_ALT,
             text_color=T.TEXT, border_width=1, border_color=T.BORDER,
             bg_color=T.HEADER_BG, command=self.toggle_banner)
-        self.fold_btn.grid(row=0, column=2)
         self._fold_tip = "Hide the title banner"
+        self._lay_out_controls()
 
         self._rule_photo = None
+        self._rule_photos: dict[tuple, object] = {}
         self._logo_photo = None
+        #: What the last full repaint was drawn for, and the items it left
+        #: behind that a width change moves rather than redraws.
+        self._painted: tuple | None = None
+        self._ground_id = None
+        self._rule_id = None
+        self._controls_id = None
+        #: Tk fonts, by (tuple, display scale). Building one asks the font
+        #: system to resolve a family, which is not free and is the same
+        #: answer every time the banner is painted.
+        self._fonts: dict[tuple, object] = {}
         self._load_logo()
+        self._versions: dict[str, str] = dict.fromkeys(VERSION_KEYS, "")
+        self._versions_read_at = 0.0
+        self._versions_reading = False
+        self.after(1200, self._tick_status)
+
+    # ---- the row (or block) of controls ---------------------------------
+
+    def _lay_out_controls(self) -> None:
+        """Arrange the controls for the banner's current state.
+
+        Open, the two lamps sit directly under the two controls they line up
+        with, and the fold button stands beside both rows. Folded, everything
+        is one row: versions, lamps, Diagnostics, appearance, fold -- so the
+        fold button is in the same place either way, which is the one thing
+        about this banner that has always been deliberate.
+        """
+        for w in (self.versions_row, *self.lamps.values(), self.diag_btn,
+                  self.theme_switch, self.fold_btn):
+            w.grid_forget()
+        if self.banner_open:
+            self.diag_btn.grid(row=0, column=0, padx=(0, 10), sticky="w")
+            self.theme_switch.grid(row=0, column=1, padx=(0, 10), sticky="w")
+            self.fold_btn.grid(row=0, column=2, rowspan=2)
+            self.lamps["vehicle"].grid(row=1, column=0, padx=(0, 10),
+                                       pady=(6, 0), sticky="w")
+            self.lamps["logging"].grid(row=1, column=1, padx=(0, 10),
+                                       pady=(6, 0), sticky="w")
+        else:
+            self.versions_row.grid(row=0, column=0, padx=(0, 16), sticky="w")
+            self.lamps["vehicle"].grid(row=0, column=1, padx=(0, 12))
+            self.lamps["logging"].grid(row=0, column=2, padx=(0, 16))
+            self.diag_btn.grid(row=0, column=3, padx=(0, 10))
+            self.theme_switch.grid(row=0, column=4, padx=(0, 10))
+            self.fold_btn.grid(row=0, column=5)
+
+    def _font(self, font: tuple, scale: float):
+        """A Tk font for a theme tuple at this display's scale, made once."""
+        from tkinter import font as tkfont
+
+        key = (tuple(font), round(scale, 3))
+        got = self._fonts.get(key)
+        if got is None:
+            got = tkfont.Font(**_font_kw(T.scale_font(font, scale)))
+            self._fonts[key] = got
+        return got
+
+    def _header_configured(self, event) -> None:
+        """Repaint only when the banner's own size actually changed.
+
+        Tk sends <Configure> for a good deal more than a resize -- a child
+        being re-gridded, a scrollbar appearing, the window being raised --
+        and repainting the banner for any of those is work nobody can see.
+        """
+        size = (int(event.width), int(event.height))
+        if size == self._header_at:
+            return
+        self._header_at = size
+        self._header_paint.ask()
 
     def _load_logo(self) -> None:
         self._logo_pil = None
@@ -362,7 +591,107 @@ class Shell(ctk.CTk):
         """Fold the banner away, or bring it back."""
         self.banner_open = not self.banner_open
         self.fold_btn.configure(text="▲" if self.banner_open else "▼")
+        self._lay_out_controls()
         self._paint_header()
+
+    # ------------------------------------------------------------------
+    #  versions and lamps
+    # ------------------------------------------------------------------
+
+    def vehicle_status(self) -> tuple[bool, str]:
+        """(is the vehicle answering, what the logging lamp should show).
+
+        A subclass that has a recorder overrides this. The shell itself has
+        no vehicle, so the lamps stay grey -- which is the truth for the
+        imagery program, where there is nothing plugged in at all.
+        """
+        return False, "off"
+
+    def _tick_status(self) -> None:
+        """Lamps every second; versions every `VERSION_POLL_S` when connected."""
+        if self._closing:
+            return
+        try:
+            connected, logging_state = self.vehicle_status()
+            self.lamps["vehicle"].set_state(
+                Lamp.ON if connected else Lamp.OFF)
+            self.lamps["logging"].set_state(
+                {"on": Lamp.ON, "waiting": Lamp.WAITING}.get(
+                    logging_state, Lamp.OFF))
+            self._maybe_read_versions(connected)
+        except Exception:
+            diagnostics.log_exception("banner status", *sys.exc_info(),
+                                      level=logging.WARNING)
+        try:
+            self.after(STATUS_POLL_MS, self._tick_status)
+        except tkinter.TclError:
+            pass
+
+    def _maybe_read_versions(self, connected: bool) -> None:
+        """Ask the vehicle what it is running, off the window's thread.
+
+        Not through `submit`: that is the one worker, and it belongs to
+        whatever the operator pressed. A banner poll must never be the reason
+        a download will not start.
+        """
+        host = self.version_host()
+        if not host or self._versions_reading:
+            return
+        due = time.monotonic() - self._versions_read_at
+        if not connected and self._versions_read_at:
+            return                       # nothing to ask; keep what we have
+        if due < VERSION_POLL_S and self._versions_read_at:
+            return
+        self._versions_reading = True
+        self._versions_read_at = time.monotonic()
+
+        def read():
+            from .. import blueos, laptop
+            found = blueos.read_versions_brief(host)
+            if not found.get("cockpit"):
+                # Cockpit is normally flown from this laptop rather than
+                # served off the vehicle, and the vehicle cannot see that.
+                found["cockpit"] = laptop.cockpit_version()
+                found["cockpit_from"] = "this laptop" if found["cockpit"] else ""
+            return found
+
+        def shown(found) -> None:
+            self._versions_reading = False
+            self.merge_versions(found)
+
+        self.background("banner-versions", read, shown)
+
+    def merge_versions(self, found) -> None:
+        """Take what a read came back with, and show it.
+
+        A blank answer does not erase a version already read. The tether comes
+        and goes all day and the vehicle has not changed underneath it, so a
+        banner that blanked itself every time a request timed out would be
+        noise rather than information.
+        """
+        if not isinstance(found, dict):
+            return                       # an exception, or nothing at all
+        for key in VERSION_KEYS:
+            if found.get(key):
+                self._versions[key] = str(found[key])
+        self._show_versions()
+
+    def version_host(self) -> str | None:
+        """The vehicle to ask. None in a program that has no vehicle."""
+        return None
+
+    def version_lines(self) -> list[str]:
+        return [f"{VERSION_LABELS[k]} {self._versions.get(k) or UNKNOWN_VERSION}"
+                for k in VERSION_KEYS]
+
+    def _show_versions(self) -> None:
+        for key, text in zip(VERSION_KEYS, self.version_lines(), strict=True):
+            try:
+                self.version_labels[key].configure(text=text)
+            except Exception:
+                return
+        if self.banner_open:
+            self._paint_header()         # they are drawn beside the title
 
     def _paint_header(self) -> None:
         """Logo, title and attribution, then the rule and the two controls.
@@ -370,9 +699,15 @@ class Shell(ctk.CTk):
         Folded, only the last three are drawn: the canvas shrinks to the
         height of the controls, and the rule and controls sit at the top of
         the window where the banner used to be.
-        """
-        from tkinter import font as tkfont
 
+        Widening the window changes three of these and none of the rest: the
+        ground behind everything, the gradient rule along the foot, and where
+        the controls sit. The logo, the title, the attribution and the version
+        column are all pinned to the left edge and do not move at all. So a
+        width-only change moves those three and leaves the rest of the canvas
+        alone, rather than tearing the banner down and drawing it again --
+        which was nine milliseconds of every frame of a drag.
+        """
         from PIL import ImageTk
 
         c = self.header
@@ -386,22 +721,37 @@ class Shell(ctk.CTk):
         ctl_h = max(self.controls.winfo_reqheight(), int(28 * s))
 
         if self.banner_open:
-            f_title = tkfont.Font(**_font_kw(T.scale_font(T.title_font(), s)))
-            f_sub = tkfont.Font(**_font_kw(T.scale_font(T.FONT_BANNER_SUB, s)))
+            f_title = self._font(T.title_font(), s)
+            f_sub = self._font(T.FONT_BANNER_SUB, s)
             title_h = f_title.metrics("linespace")
             sub_h = f_sub.metrics("linespace")
             gap_title = int(10 * s)
             block_h = title_h + gap_title + sub_h * 2 + int(4 * s)
-            h = pad + block_h + pad + rule_h
+            # The controls are two rows tall now -- the lamps sit under
+            # Diagnostics and the appearance switch -- so the banner has to
+            # be at least as tall as they are, or they are clipped by the
+            # gradient rule.
+            h = max(block_h, ctl_h) + 2 * pad + rule_h
         else:
             block_h = 0
             h = int(6 * s) + ctl_h + int(6 * s) + rule_h
+
+        # Everything a full repaint depends on except the width. The version
+        # column is in here because it is drawn, so a version arriving has to
+        # be able to redraw it.
+        shape = (h, rule_h, pad, self.banner_open, self.mode, round(s, 3),
+                 self.DISPLAY_TITLE, tuple(self.version_lines()))
+        if shape == self._painted and self._ground_id is not None:
+            self._restretch(w, h, rule_h, pad)
+            return
+        self._painted = shape
 
         if int(c.cget("height")) != h:
             c.configure(height=h)
         c.delete("all")
         c.configure(background=ground)
-        c.create_rectangle(0, 0, w, h, fill=ground, outline="")
+        self._ground_id = c.create_rectangle(0, 0, w, h, fill=ground,
+                                             outline="")
 
         if self.banner_open:
             heading = self._apply_appearance_mode(T.HEADING)
@@ -426,19 +776,70 @@ class Shell(ctk.CTk):
                               font=T.scale_font(T.FONT_BANNER_SUB, s), fill=muted)
                 y += sub_h + int(2 * s)
 
-        # The one gradient in the application: a single object, no type on it.
-        rule = G.render((w, rule_h), T.RULE_GRADIENT, angle=0.0)
-        self._rule_photo = ImageTk.PhotoImage(rule)
-        c.create_image(0, h - rule_h, image=self._rule_photo, anchor="nw")
+            # What the vehicle is running, in a column beside the title, at
+            # the attribution's weight -- present without competing with it.
+            # Drawn as canvas text rather than as the widget that carries the
+            # same words when the banner is folded, for the same reason the
+            # title is: this half of the banner is one drawn block.
+            vx = x1 + f_title.measure(self.DISPLAY_TITLE) + int(40 * s)
+            if vx < w - pad - int(320 * s):
+                vy = pad + int(2 * s)
+                for line in self.version_lines():
+                    c.create_text(vx, vy, anchor="nw", text=line,
+                                  font=T.scale_font(T.FONT_BANNER_SUB, s),
+                                  fill=muted)
+                    vy += sub_h + int(4 * s)
 
-        c.create_window(w - pad, (h - rule_h) // 2, window=self.controls,
-                        anchor="e")
+        # The one gradient in the application: a single object, no type on it.
+        self._rule_id = c.create_image(0, h - rule_h, image=self._rule(w, rule_h),
+                                       anchor="nw")
+        self._controls_id = c.create_window(w - pad, (h - rule_h) // 2,
+                                            window=self.controls, anchor="e")
+
+    def _rule(self, w: int, rule_h: int):
+        """The gradient along the banner's foot, as a Tk image.
+
+        The bitmap is cached by size inside `gradients`; the Tk image made
+        from it is cached here as well, because building one allocates and
+        copies every pixel and a drag comes back through the same widths over
+        and over. Kept small: the widths seen during one drag, no more.
+        """
+        from PIL import ImageTk
+
+        key = (w, rule_h, self.mode)
+        photo = self._rule_photos.get(key)
+        if photo is None:
+            photo = ImageTk.PhotoImage(
+                G.render((w, rule_h), T.RULE_GRADIENT, angle=0.0))
+            if len(self._rule_photos) >= RULE_CACHE_MAX:
+                self._rule_photos.pop(next(iter(self._rule_photos)))
+            self._rule_photos[key] = photo
+        # Tk keeps no reference of its own to an image, so one the canvas is
+        # showing must be held here or it is collected and the rule vanishes.
+        self._rule_photo = photo
+        return photo
+
+    def _restretch(self, w: int, h: int, rule_h: int, pad: int) -> None:
+        """The three things a width change moves, without redrawing the rest."""
+        c = self.header
+        try:
+            c.coords(self._ground_id, 0, 0, w, h)
+            c.itemconfigure(self._rule_id, image=self._rule(w, rule_h))
+            c.coords(self._rule_id, 0, h - rule_h)
+            c.coords(self._controls_id, w - pad, (h - rule_h) // 2)
+        except tkinter.TclError:
+            # An item went away under us -- draw the whole thing next time.
+            self._painted = None
 
     def _toggle_theme(self) -> None:
         self.mode = "dark" if self.theme_switch.get() else "light"
         T.apply(ctk, self.mode)
         self.theme_switch.configure(text="Dark mode" if self.mode == "dark"
                                     else "Light mode")
+        for lamp in self.lamps.values():
+            lamp.refresh_theme()
+        for lab in self.version_labels.values():
+            lab.configure(text_color=T.TEXT_MUTED)
         self._load_logo()
         self._paint_header()
         self.nav.refresh_theme()
@@ -512,11 +913,11 @@ class Shell(ctk.CTk):
         f.grid_columnconfigure(0, weight=1)
         self.footer = f
 
-        self.log = ctk.CTkTextbox(f, height=one_line_height("word"),
-                                  font=T.FONT_MONO, fg_color=T.FIELD_BG,
-                                  text_color=T.TEXT, border_width=1,
-                                  border_color=T.BORDER, corner_radius=6,
-                                  wrap="word")
+        self.log = OutputBox(f, height=one_line_height("word"),
+                             font=T.FONT_MONO, fg_color=T.FIELD_BG,
+                             text_color=T.TEXT, border_width=1,
+                             border_color=T.BORDER, corner_radius=6,
+                             wrap="word")
         self.log_grip = Grip(
             f, lambda: float(self.log.cget("height")),
             lambda h: self.log.configure(height=h),

@@ -180,6 +180,13 @@ class ImportPage(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _windows(self):
+        """(plan, the windows imagery is filed by).
+
+        Pauses are cut out of these: a frame taken during one falls inside no
+        window and is handled as off-transect, which is what typing the pause
+        was for. Reading telemetry is a separate question and uses the whole
+        span -- see `_read_windows`.
+        """
         from ..pipeline import plan_windows
         plan = self.app._plan()
         errs = plan.validate()
@@ -188,7 +195,18 @@ class ImportPage(ctk.CTkFrame):
                                  "Fix the transects first:\n\n• "
                                  + "\n• ".join(errs[:8]))
             return None, None
-        return plan, plan_windows(plan)
+        return plan, plan_windows(plan, exclude_pauses=True)
+
+    @staticmethod
+    def _read_windows(plan):
+        """The spans to read telemetry over: whole transects, pauses included.
+
+        Which recordings to open is a question about when the flight happened,
+        not about what was surveyed, and a banner drawn for a frame either
+        side of a pause still needs the telemetry that spans it.
+        """
+        from ..pipeline import plan_windows
+        return [(a, b) for _n, a, b in plan_windows(plan)]
 
     def _scan(self) -> None:
         src = self.source
@@ -275,12 +293,14 @@ class ImportPage(ctk.CTkFrame):
         flight, cfg, scan = self.app.flight_dir, self.app.cfg, self.scan
         style = None
 
+        read_windows = self._read_windows(plan)
+
         def work(progress, cancel):
             store = None
             if opts.banner_previews and opts.copy_jpg:
                 progress(0.0, "reading telemetry…")
                 store, _w = ensure_telemetry(
-                    flight, cfg, windows=[(a, b) for _n, a, b in windows],
+                    flight, cfg, windows=read_windows,
                     progress=lambda f, m="": progress(f * 0.2, m), cancel=cancel)
             sub = lambda f, m="": progress(0.2 + f * 0.8, m)
             if moving:

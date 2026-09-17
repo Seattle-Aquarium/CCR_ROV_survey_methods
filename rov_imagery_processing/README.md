@@ -68,6 +68,27 @@ imagery, especially before a card is wiped.
 Recordings are found in `logs/mcap` (where ROV Flight Operations downloads them)
 or loose in `logs` (older flights).
 
+#### Pauses inside a transect
+
+A transect can carry **pauses** — stretches where the vehicle was down and
+recording but nothing was being surveyed, because Cockpit disarmed or the
+video glitched or a minute went on getting the ROV back where it was. They are
+typed in ROV Flight Operations and arrive here in `surveys.json`. Nothing has
+to be done with them on this side; what they change is:
+
+| | |
+| --- | --- |
+| **stills** | a frame taken during a pause matches no transect, so it is handled as off-transect — into `off_transect/` or left behind, by the policy on *Import photos* |
+| **trimmed 4K** | the paused footage is cut out and the clip joined across it |
+| **composites** | the same, and the telemetry, gauges and ROV inset skip with it, so the overlay stays on the frame it belongs to |
+| **1 Hz CSV** | every second is kept, with a `survey_state` column reading `transect`, `pause` or `off_transect` |
+| **motion check** | measured over the transect's longest *unbroken* stretch. Correlating the picture's rotation against the yaw rate assumes the two run on one clock, and they do not across a pause |
+
+A transect with no pauses behaves exactly as it always did. The same is true of
+a clip that spans two GoPro chapters with a gap between them: each segment now
+carries the moment it was recorded, rather than being assumed to follow the one
+before it — which is a latent bug this fixed on the way past.
+
 ### 2  Import photos
 
 A GoPro card, or the flight's own `photos/GPR` and `photos/JPG`, sorted into
