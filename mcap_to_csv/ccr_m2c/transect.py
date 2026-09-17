@@ -5,6 +5,15 @@ One CSV per transect, named for its Transect ID. A transect may cover several
 time windows -- a run that was paused and resumed belongs to one transect, not
 two -- and its windows are concatenated in time order.
 
+A transect may also carry *pauses*: stretches inside its windows during which
+nothing was being surveyed, because Cockpit disarmed or the video glitched or a
+minute went on getting the vehicle back. Their rows are kept and marked in
+``Survey_state`` rather than dropped. Dropping them would leave a hole in the
+middle of a transect's telemetry indistinguishable from a recording that
+failed, and telling those two apart is most of what these files get read for.
+The imagery from a pause is a different matter and is thrown away -- see
+``rov_imagery_processing``.
+
 The DVL track is dead reckoning: per-second North/East steps accumulated from
 the transect's first fix. Only the steps are trusted, never the absolute
 coordinate, so the track is rebuilt geodesically from a single seed position
@@ -32,6 +41,14 @@ from geopy.distance import geodesic
 from .fsutil import publish
 
 log = logging.getLogger(__name__)
+
+#: Marks each row as surveying or not. A transect may be paused part way --
+#: Cockpit disarms, the video glitches, a minute goes on getting the vehicle
+#: back where it was -- and the imagery from that minute is thrown away. The
+#: telemetry is not: the rows stay, so a check on the recording still has the
+#: whole thing, and this column is what lets an analysis leave them out.
+SURVEY_STATE_COLUMN = "Survey_state"
+SURVEYING, PAUSED = "transect", "pause"
 
 DVL_SCALE = 1.0       # DVLx/DVLy are metres
 MIN_STEP_M = 0.02     # ignore jitter below 2 cm
@@ -93,6 +110,12 @@ OUTPUT_COLUMNS = [
     # raw inputs behind Depth, kept for checking rather than analysis, and a
     # per-second message count that shows where the recording thinned out
     "Relative_alt_m", "VFR_alt", "NEDz", "Pressure_abs_hPa", "Messages",
+
+    # Whether this second was actually being surveyed. Deliberately last:
+    # every column above keeps the position it has always had, so a reader
+    # that does index by number -- the R scripts take their columns by name,
+    # but not everything downstream is ours -- sees no change at all.
+    SURVEY_STATE_COLUMN,
 ]
 
 _FILENAME_INVALID_CHARS = re.compile(r'[<>:"/\\|?*]')
@@ -124,6 +147,8 @@ class TransectResult:
     windows: list[tuple[str, str]]
     path: Path | None = None
     rows: int = 0
+    #: Of those rows, how many fell inside a pause.
+    paused_rows: int = 0
     distance_m: float = 0.0
     mean_step_m: float = 0.0
     jumps: int = 0
@@ -257,6 +282,7 @@ def export_transect(
     *,
     dvl_source: str = "",
     site_frame: bool = False,
+    pauses: Sequence[tuple[str, str]] = (),
 ) -> TransectResult:
     """Filter to the transect's window(s), build the track, write one CSV.
 
@@ -264,6 +290,13 @@ def export_transect(
     across the whole dive, so this transect keeps its true position relative to
     the others rather than being re-seeded at the dive's one surface fix. See
     ``pipeline.run`` for why that matters.
+
+    ``pauses`` are stretches inside the windows during which nothing was being
+    surveyed. Their rows are kept and marked in ``Survey_state`` rather than
+    dropped -- a gap in the middle of a transect's telemetry would look
+    exactly like a recording that failed, and the check that tells those apart
+    needs the rows to still be there. Distance is accumulated over the
+    surveying rows only, because it is survey effort that it stands for.
     """
     result = TransectResult(transect_id=transect_id, transect_number=transect_num,
                             windows=list(windows))
@@ -308,6 +341,12 @@ def export_transect(
     df_tran["Transect_ID"] = transect_id
     df_tran["DVL_source"] = dvl_source
 
+    paused_mask = (build_transect_mask(df_tran, pauses) if pauses
+                   else pd.Series(False, index=df_tran.index))
+    df_tran[SURVEY_STATE_COLUMN] = np.where(paused_mask, PAUSED, SURVEYING)
+    result.paused_rows = int(paused_mask.sum())
+    surveying = step_dist.to_numpy()[~paused_mask.to_numpy()]
+
     for c in OUTPUT_COLUMNS:
         if c not in df_tran.columns:
             df_tran[c] = np.nan
@@ -322,14 +361,18 @@ def export_transect(
 
     result.path = out_path
     result.rows = len(df_tran)
-    result.distance_m = float(np.nansum(step_dist.to_numpy()))
-    result.mean_step_m = float(np.nanmean(step_dist.to_numpy())) if len(step_dist) else 0.0
+    result.distance_m = float(np.nansum(surveying))
+    result.mean_step_m = float(np.nanmean(surveying)) if len(surveying) else 0.0
     result.jumps = int((step_dist > JUMP_THRESH).sum())
     result.message = (
         f"Transect {transect_num} ({transect_id}, {result.window_desc}): "
         f"{result.rows} rows, {result.distance_m:.1f} m travelled, "
         f"mean step {result.mean_step_m:.2f} m, jumps > {JUMP_THRESH:.0f} m: {result.jumps}"
     )
+    if result.paused_rows:
+        result.message += (
+            f"\n   {result.paused_rows} of those rows are marked "
+            f"{SURVEY_STATE_COLUMN}={PAUSED} and are left out of the distance")
     if seed_warning:
         result.message += f"  [WARNING: {seed_warning}]"
     return result

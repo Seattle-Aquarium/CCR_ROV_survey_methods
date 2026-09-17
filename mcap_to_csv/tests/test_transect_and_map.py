@@ -43,6 +43,7 @@ EXPECTED_COLUMNS = {
     "Distance", "NEDz", "VFR_alt", "Roll", "Pitch", "Water_temp_C",
     "Pressure_abs_hPa", "DVL_confidence", "DVL_source", "Lights_pct",
     "Cam_tilt", "GPS_fix_type", "GPS_satellites", "Relative_alt_m", "Messages",
+    "Survey_state",
 }
 
 
@@ -98,6 +99,51 @@ def test_a_transect_spans_several_windows(dive, tmp_path):
     times = set(written["Time"])
     assert "10:00:07" in times and "10:00:33" in times
     assert "10:00:20" not in times                  # the gap really is a gap
+
+
+def test_a_transect_without_pauses_is_all_surveying(dive, tmp_path):
+    df, _ = dive
+    r = export_transect(df, [("10:00:05", "10:00:20")], 1, "T1", "Site", tmp_path)
+    written = pd.read_csv(r.path)
+    assert written["Survey_state"].eq("transect").all()
+    assert r.paused_rows == 0
+
+
+def test_a_pause_marks_its_rows_and_keeps_them(dive, tmp_path):
+    """The rows stay -- a hole in a transect's telemetry looks exactly like a
+    recording that failed, and telling those apart is the point of the file."""
+    df, _ = dive
+    r = export_transect(df, [("10:00:05", "10:00:24")], 1, "T1", "Site",
+                        tmp_path, pauses=[("10:00:10", "10:00:14")])
+    written = pd.read_csv(r.path)
+
+    assert len(written) == 20                       # nothing was dropped
+    assert r.paused_rows == 5                       # :10 to :14 inclusive
+    paused = written.loc[written["Survey_state"] == "pause", "Time"]
+    assert set(paused) == {f"10:00:{s:02d}" for s in range(10, 15)}
+    assert written["Survey_state"].isin({"transect", "pause"}).all()
+
+
+def test_distance_leaves_the_paused_rows_out(dive, tmp_path):
+    """Distance stands for survey effort, so a pause must not add to it."""
+    df, _ = dive
+    window = [("10:00:05", "10:00:24")]
+    whole = export_transect(df, window, 1, "Ta", "Site", tmp_path)
+    part = export_transect(df, window, 2, "Tb", "Site", tmp_path,
+                           pauses=[("10:00:10", "10:00:14")])
+    assert part.distance_m < whole.distance_m
+    assert "Survey_state=pause" in part.message
+
+
+def test_a_pause_reaches_the_extractor_through_the_spec(dive, tmp_path):
+    """TransectSpec carries pauses, so the GUI does not have to reach past it."""
+    spec = TransectSpec("T1", [("10:00:05", "10:00:24")],
+                        pauses=[("10:00:10", "10:00:12")])
+    assert spec.pauses == [("10:00:10", "10:00:12")]
+    df, _ = dive
+    r = export_transect(df, spec.windows, 1, spec.transect_id, "Site",
+                        tmp_path, pauses=spec.pauses)
+    assert r.paused_rows == 3
 
 
 def test_windows_outside_the_log_produce_no_file(dive, tmp_path):

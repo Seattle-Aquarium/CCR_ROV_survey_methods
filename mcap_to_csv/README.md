@@ -32,6 +32,16 @@ is for extracting CSVs on their own.
 3. Add a **transect** for each one you ran. The Transect ID becomes the CSV
    filename. A transect that was paused and resumed gets two time windows, not
    two transects. Times are local (Pacific), matching the span shown at the top.
+
+   A survey plan may also carry **pauses** inside a transect — stretches where
+   the vehicle was down and recording but nothing was being surveyed. Those
+   rows are **kept** and marked in the `Survey_state` column (`transect` /
+   `pause`) rather than dropped: a hole in the middle of a transect's
+   telemetry looks exactly like a recording that failed, and telling those two
+   apart is most of what these files get read for. `Distance` counts only the
+   surveying rows, because it stands for survey effort. The GoPro imagery from
+   a pause is a different matter and is discarded — see
+   `rov_imagery_processing`.
 4. **Run.** CSVs land in `<save location>/transects/`, with
    `transect_map.html` beside them.
 

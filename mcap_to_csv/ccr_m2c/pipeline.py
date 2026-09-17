@@ -38,6 +38,11 @@ LogCB = Callable[[str], None]
 class TransectSpec:
     transect_id: str
     windows: list[tuple[str, str]]
+    #: Stretches inside the windows during which nothing was being surveyed --
+    #: a disarm, a glitch, a minute spent getting the vehicle back. The rows
+    #: are kept; they are marked, so an analysis can filter them out and a
+    #: check on the recording still has the whole thing to look at.
+    pauses: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -180,6 +185,7 @@ def run(
         r = export_transect(
             df_all, spec.windows, i, spec.transect_id, site_name,
             transects_folder, dvl_source=read.dvl_source, site_frame=site_frame,
+            pauses=spec.pauses,
         )
         say(r.message)
         for w in r.warnings:

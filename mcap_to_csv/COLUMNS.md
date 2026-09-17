@@ -119,6 +119,12 @@ unaffected; only a consumer reading by column number would care.
 | `Pressure_abs_hPa` | Absolute water pressure. Independent of the EKF, which makes it a useful cross-check on depth. | `SCALED_PRESSURE2.press_abs` (external Bar30) | Direct | mean |
 | `Messages` | How many MAVLink messages went into this second. A thin row is a dropout. | counted while reading | Computed | count |
 
+### Survey state
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Survey_state` | `transect` for a second that was being surveyed, `pause` for one inside a pause the operator recorded — a disarm, a video glitch, a minute spent getting the vehicle back. Every row of the transect is here either way; `Distance` counts only the `transect` rows, and the GoPro imagery from a `pause` is discarded rather than filed. | the transect's pause times | Computed | per row |
+
 ## Rules that apply to every column
 
 The recording arrives at many different rates; the CSV is one row per second.
