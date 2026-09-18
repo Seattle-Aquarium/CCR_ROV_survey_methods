@@ -20,12 +20,11 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -171,6 +170,8 @@ class TransectResult:
     jumps: int = 0
     message: str = ""
     warnings: list[str] = field(default_factory=list)
+    #: What the transect looked like, for the summary table: see transect_stats.
+    stats: dict[str, float | None] = field(default_factory=dict)
 
     @property
     def window_desc(self) -> str:
@@ -202,6 +203,76 @@ def dvl_steps(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
     dx = dx.where(step >= MIN_STEP_M, 0.0)
     dy = dy.where(step >= MIN_STEP_M, 0.0)
     return dx, dy, np.sqrt(dx ** 2 + dy ** 2)
+
+
+def path_length_m(lat: pd.Series, lon: pd.Series) -> float | None:
+    """Metres travelled along a lat/lon track, jitter-suppressed like the DVL.
+
+    Equirectangular per step: at transect scale the error against a true
+    geodesic is microns. Steps under MIN_STEP_M are dropped for the same reason
+    they are in dvl_steps -- a stationary vehicle must not walk up distance out
+    of a noisy fix. This is exactly what makes the GPS figure interesting: a
+    surface fix jitters by metres, and the excess over the DVL's figure is a
+    direct measure of that noise.
+    """
+    la = pd.to_numeric(lat, errors="coerce").to_numpy(dtype=float)
+    lo = pd.to_numeric(lon, errors="coerce").to_numpy(dtype=float)
+    ok = np.isfinite(la) & np.isfinite(lo) & (la != 0) & (lo != 0)
+    la, lo = la[ok], lo[ok]
+    if len(la) < 2:
+        return None
+    m_per_deg = 111_320.0
+    dn = np.diff(la) * m_per_deg
+    de = np.diff(lo) * m_per_deg * np.cos(np.radians(la[:-1]))
+    step = np.hypot(dn, de)
+    return float(step[step >= MIN_STEP_M].sum())
+
+
+def transect_stats(df: pd.DataFrame, dvl_distance_m: float) -> dict[str, float | None]:
+    """The figures a survey lead wants at a glance, per transect.
+
+    Depths are reported as positive metres below the surface, which is how
+    people say them, even though the column is negative-down.
+    """
+    def col(name: str) -> pd.Series:
+        return pd.to_numeric(df.get(name), errors="coerce").dropna()             if name in df.columns else pd.Series(dtype=float)
+
+    depth, alt = col("Depth"), col("Altitude")
+    return {
+        "duration_s": float(len(df)),
+        "depth_shallow_m": -float(depth.max()) if len(depth) else None,
+        "depth_deep_m": -float(depth.min()) if len(depth) else None,
+        "alt_min_m": float(alt.min()) if len(alt) else None,
+        "alt_max_m": float(alt.max()) if len(alt) else None,
+        "alt_mean_m": float(alt.mean()) if len(alt) else None,
+        "dist_dvl_m": dvl_distance_m,
+        "dist_ekf_m": path_length_m(df.get("EKFlat"), df.get("EKFlon"))
+                      if "EKFlat" in df.columns else None,
+        "dist_gps_m": path_length_m(df.get("Latitude"), df.get("Longitude"))
+                      if "Latitude" in df.columns else None,
+    }
+
+
+def format_stats_table(results: Sequence[TransectResult]) -> list[str]:
+    """One aligned row per transect, for the run log and the GUI."""
+    done = [r for r in results if r.path and r.stats]
+    if not done:
+        return []
+    f = lambda v, d=1, w=6: (f"{v:{w}.{d}f}" if v is not None else f"{'--':>{w}}")
+    head = (f"   {'transect':<14}{'time':>7}  {'depth m':>13}  {'altitude m':>20}  "
+            f"{'distance m  DVL':>17}{'EKF':>8}{'GPS':>8}")
+    sub = (f"   {'':<14}{'min':>7}  {'shallow   deep':>13}  {'min    max   mean':>20}  "
+           f"{'':>17}{'':>8}{'':>8}")
+    L = [head, sub]
+    for r in done:
+        st = r.stats
+        L.append(
+            f"   {r.transect_id[:14]:<14}{st['duration_s']/60:7.1f}  "
+            f"{f(st['depth_shallow_m'])}  {f(st['depth_deep_m'])}  "
+            f"{f(st['alt_min_m'], 2)} {f(st['alt_max_m'], 2)} {f(st['alt_mean_m'], 2)}  "
+            f"{f(st['dist_dvl_m'], 1, 17)}{f(st['dist_ekf_m'], 1, 8)}{f(st['dist_gps_m'], 1, 8)}"
+        )
+    return L
 
 
 #: How far the surface fix must move across a dive before it counts as
@@ -242,11 +313,20 @@ def has_live_fix(df: pd.DataFrame, min_span_m: float = LIVE_FIX_SPAN_M) -> bool:
     return span > min_span_m
 
 
-def georeference_dvl(df_tran: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, str | None]:
+def georeference_dvl(
+    df_tran: pd.DataFrame,
+    origin: tuple[float, float] | None = None,
+) -> tuple[pd.DataFrame, pd.Series, str | None]:
     """Turn relative DVL North/East metres into a geodesic lat/lon track.
 
     Returns the frame with ``DVLlat``/``DVLlon`` filled, the per-step distance,
     and a warning if there was no fix to seed from.
+
+    ``origin`` is a (lat, lon) to seed from instead of the recording's own fix.
+    Without a USBL the vehicle's position has to be typed into the DVL page in
+    BlueOS before arming, and a dive flown after forgetting that has a perfectly
+    good DVL track with nothing to hang it on. The origin is the vessel's
+    position at the time, entered after the fact.
     """
     df_tran = df_tran.copy()
     for c in ("DVLlat", "DVLlon"):
@@ -258,24 +338,34 @@ def georeference_dvl(df_tran: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, st
         df_tran["DVLx"] = df_tran["DVLx"] - float(df_tran["DVLx"].iloc[0])
         df_tran["DVLy"] = df_tran["DVLy"] - float(df_tran["DVLy"].iloc[0])
 
-    # Seed at the first valid surface fix, falling back to the EKF.
-    seed_idx, use_ekf = None, False
-    gps_mask = df_tran["Latitude"].map(_finite_nz) & df_tran["Longitude"].map(_finite_nz)
-    if gps_mask.any():
-        seed_idx = gps_mask.idxmax()
-    else:
-        ekf_mask = df_tran["EKFlat"].map(_finite_nz) & df_tran["EKFlon"].map(_finite_nz)
-        if ekf_mask.any():
-            seed_idx, use_ekf = ekf_mask.idxmax(), True
-
     seed_warning = None
-    if seed_idx is not None:
-        lat0 = df_tran.at[seed_idx, "EKFlat" if use_ekf else "Latitude"]
-        lon0 = df_tran.at[seed_idx, "EKFlon" if use_ekf else "Longitude"]
-        df_tran.loc[:seed_idx, ["DVLlat", "DVLlon"]] = [lat0, lon0]
+    if origin is not None:
+        # A typed origin anchors the very first row; everything else is walked
+        # from there. It beats whatever the recording carries, because the only
+        # reason to type one is that the recording's own is missing or wrong.
+        df_tran.loc[df_tran.index[0], ["DVLlat", "DVLlon"]] = [origin[0], origin[1]]
         df_tran[["DVLlat", "DVLlon"]] = df_tran[["DVLlat", "DVLlon"]].ffill()
     else:
-        seed_warning = "no GPS or EKF fix to seed lat/lon"
+        # Seed at the first valid surface fix, falling back to the EKF.
+        seed_idx, use_ekf = None, False
+        gps_mask = (df_tran["Latitude"].map(_finite_nz)
+                    & df_tran["Longitude"].map(_finite_nz))
+        if gps_mask.any():
+            seed_idx = gps_mask.idxmax()
+        else:
+            ekf_mask = (df_tran["EKFlat"].map(_finite_nz)
+                        & df_tran["EKFlon"].map(_finite_nz))
+            if ekf_mask.any():
+                seed_idx, use_ekf = ekf_mask.idxmax(), True
+
+        if seed_idx is not None:
+            lat0 = df_tran.at[seed_idx, "EKFlat" if use_ekf else "Latitude"]
+            lon0 = df_tran.at[seed_idx, "EKFlon" if use_ekf else "Longitude"]
+            df_tran.loc[:seed_idx, ["DVLlat", "DVLlon"]] = [lat0, lon0]
+            df_tran[["DVLlat", "DVLlon"]] = df_tran[["DVLlat", "DVLlon"]].ffill()
+        else:
+            seed_warning = ("no GPS or EKF fix to seed lat/lon -- give the "
+                            "vessel's position as the origin to anchor the track")
 
     dx, dy, step_dist = dvl_steps(df_tran)
 
@@ -394,6 +484,7 @@ def export_transect(
     result.path = out_path
     result.rows = len(df_tran)
     result.distance_m = float(np.nansum(step_dist.to_numpy()))
+    result.stats = transect_stats(df_tran, result.distance_m)
     result.mean_step_m = float(np.nanmean(step_dist.to_numpy())) if len(step_dist) else 0.0
     result.jumps = int((step_dist > JUMP_THRESH).sum())
     result.message = (

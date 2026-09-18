@@ -12,9 +12,9 @@ is reported as partial, and the transects are still written.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Sequence
 
 import pandas as pd
 
@@ -22,7 +22,11 @@ from . import mapping
 from .mcap_read import ReadResult, read_mcaps
 from .tide import add_empty_tide, fetch_tide_dataframe, merge_tide
 from .transect import (
-    TransectResult, export_transect, georeference_dvl, has_live_fix,
+    TransectResult,
+    export_transect,
+    format_stats_table,
+    georeference_dvl,
+    has_live_fix,
     whole_log_window,
 )
 
@@ -67,6 +71,9 @@ class RunResult:
                 lines.append(f"{r.transect_id} ({r.window_desc}) -> {r.path.name}")
             else:
                 lines.append(f"{r.transect_id} ({r.window_desc}): SKIPPED (no data)")
+        table = format_stats_table(self.results)
+        if table:
+            lines += [""] + table
         if self.map_path:
             lines += ["", f"Map: {self.map_path.name}"]
         if not self.tide_ok:
@@ -88,10 +95,18 @@ def run(
     save_location: Path | str,
     transects: Sequence[TransectSpec],
     make_map: bool = True,
+    origin: tuple[float, float] | None = None,
     progress: ProgressCB | None = None,
     on_log: LogCB | None = None,
 ) -> RunResult:
-    """Read the recordings, cut them into transects, write CSVs and a map."""
+    """Read the recordings, cut them into transects, write CSVs and a map.
+
+    ``origin`` is the vessel's (lat, lon) at arming, for a dive flown without
+    a USBL and without the origin having been typed into BlueOS first. It
+    anchors the DVL track after the fact. Ignored when the recording's own fix
+    was tracking, since a USBL knows where the vehicle was and a typed origin
+    does not.
+    """
     def say(msg: str) -> None:
         log.info(msg)
         if on_log:
@@ -160,18 +175,28 @@ def run(
         say("Surface fix is tracking; each transect is anchored to its own. "
             "The DVL's drift is then bounded by the transect rather than "
             "accumulating across the dive.")
+        if origin is not None:
+            note = ("an origin was given but the recording's own fix was "
+                    "tracking, so the origin was not used")
+            say(f"  ! {note}")
+            result.warnings.append(note)
     else:
         try:
-            df_all, _steps, seed_warning = georeference_dvl(df_all)
+            df_all, _steps, seed_warning = georeference_dvl(df_all, origin=origin)
             if seed_warning:
                 say(f"  ! {seed_warning}")
                 result.warnings.append(seed_warning)
             else:
                 site_frame = True
-                say("Surface fix never moved, so it cannot anchor a transect. "
-                    "The dive is propagated as one DVL track instead, which "
-                    "keeps the transects' separation but not their absolute "
-                    "position.")
+                if origin is not None:
+                    say(f"Track anchored at the origin given: "
+                        f"{origin[0]:.6f}, {origin[1]:.6f}. The dive is "
+                        "propagated as one DVL track from there.")
+                else:
+                    say("Surface fix never moved, so it cannot anchor a "
+                        "transect. The dive is propagated as one DVL track "
+                        "instead, which keeps the transects' separation but "
+                        "not their absolute position.")
         except Exception as ex:
             result.warnings.append(f"dive-wide track failed ({ex}); "
                                    "each transect will be seeded on its own")

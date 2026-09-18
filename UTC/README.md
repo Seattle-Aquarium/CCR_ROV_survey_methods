@@ -34,6 +34,37 @@ tlog produces exactly the same 44 columns. A dive that spans the upgrade can eve
 mix them; they are merged on one timeline. Only compositing still needs an
 `.mcap`, because a tlog carries no video.
 
+### If the origin was never set in BlueOS
+
+Without a USBL, the vehicle's position has to be typed into the DVL page in
+BlueOS before arming; that is what pins the DVL's dead reckoning to the earth.
+Forget, and the dive comes back with a perfectly good track and no coordinates.
+
+The **Origin (lat, lon)** fields on the Transects page fix that after the fact.
+Enter the vessel's position at arming, in decimal degrees, and the track is
+anchored there. Leave them blank for any dive where BlueOS had the origin or the
+USBL was locked — a typed origin is ignored, with a note in the log, whenever the
+recording's own fix was tracking, because a USBL knows where the vehicle was and
+a typed origin does not.
+
+What the track's accuracy then rests on, in order of how much it usually
+matters: the **compass** (a yaw error rotates the whole set about the origin —
+12° moves the far end of a 100 m transect 21 m sideways), **DVL drift** (a few
+metres over a ten-minute transect), and the **origin** itself (shifts everything
+rigidly). Sensor health reports the compass figures for exactly this reason.
+
+### What each transect looked like
+
+After an extraction the Extract card shows one row per transect: duration,
+shallowest and deepest point, altitude above the seabed (min, max, mean), and
+the distance travelled **three ways** — from the DVL track, the EKF track and
+the GPS track.
+
+The three distances are meant to disagree. The GPS figure sums every jitter of
+the surface fix and comes out several times the DVL's — on the 2025-08-14 Pocket
+Beach dive, 361 m of GPS path for 68 m of transect. That gap is a direct measure
+of how noisy the fix was; the DVL figure is the length of the transect.
+
 **Transect IDs.** Give the survey code once in *Transect ID prefix* — `EBM_W25` —
 and each transect becomes `EBM_W25_T1`, `EBM_W25_T2`, in both the `Transect_ID`
 column and the filename. Left blank, the site name is used. Naming them by hand

@@ -326,32 +326,59 @@ locked, which gives an independent fix to compare against.
 
 ---
 
-## Where the transects sit relative to each other
+## Where the transects sit on the map
 
-The DVL track is dead reckoning, so it has to be pinned to a real coordinate
-somewhere. The obvious place is each transect's first surface fix — which is
-what the tlog workflow did, and what this tool did at first.
+The DVL track is dead reckoning: a chain of measured steps with no coordinate of
+its own. Something has to pin it to the earth, and what that is decides both
+how accurate the track is and how it is built.
 
-It is wrong whenever the USBL has not locked. A Water Linked unit with no fix
-reports **one static position for the whole dive**, so every transect gets
-seeded at the identical coordinate and they stack on top of one another. Their
-real separation is lost — even though the DVL measured it. The autopilot's local
-frame runs continuously *between* transects as well as during them, so the
-distance from the end of one to the start of the next is known.
+**With a USBL that locked**, the surface fix tracks the vehicle. Each transect is
+anchored to its own first fix, so the DVL's drift is bounded by that transect —
+a few metres across ten minutes — rather than accumulating across the whole dive.
+On the 2025-08-14 Pocket Beach dive, anchoring the later transects to the dive's
+first fix instead put them **100 m** from their GPS; anchored to their own, they
+start on it and drift 4–18 m by the end.
 
-So the track is propagated once across the whole dive from a single seed, and
-each transect keeps its slice. On the 2026-08-26 Centennial Park dive that is
-the difference between three transects piled on one point and T2 starting where
-T1 ended, with T3 about 80 m east.
+**Without a USBL**, the DVL page in BlueOS needs the vessel's position typed in
+before arming. The extension then injects that one coordinate for the whole
+dive. It cannot anchor a transect, so the dive is propagated as a single track
+from it and each transect keeps its slice — which preserves the transects'
+separation (the autopilot's local frame runs continuously *between* them, so
+that distance was measured) but not their absolute position.
 
-`DVLx`/`DVLy` are still re-zeroed to each transect's start afterwards, so those
-columns mean exactly what they did in the tlog workflow, and `Distance` still
-measures only the transect itself. Only `DVLlat`/`DVLlon` change.
+**If the origin was never typed in**, the recording has a good DVL track and no
+coordinates at all. Give it the vessel's position afterwards:
 
-What this does **not** fix is absolute accuracy: with a static surface fix the
-whole set can still be offset from the true position, and the shape rotates with
-any compass error. It is the geometry between transects that becomes
-trustworthy, not the position on the earth.
+```bash
+python -m ccr_m2c logs/*.mcap --plan utc_plan.json --origin 47.6176,-122.3610
+```
+
+or the **Origin** fields on UTC's Transects page. A typed origin beats a static
+fix — the only reason to type one is that the recording's own is missing or
+wrong — and is ignored, with a note, when the fix was tracking, since a USBL
+knows where the vehicle was and a typed origin does not.
+
+The run log says which of the three applied.
+
+### What the accuracy then depends on
+
+Only the USBL case measures position. The other two are dead reckoning from one
+point, and three things set how far the track ends up from the truth:
+
+| | Effect on the track | Measured on this vehicle |
+|---|---|---|
+| **The origin** | shifts the whole set, rigidly | whatever the vessel's GPS was good to |
+| **The compass** | rotates the whole set about the origin | EKF vs DCM yaw disagree by 12° median, 16–38° at p95 |
+| **DVL drift** | grows along the track with time | ~2 mm/s of velocity bias; ~6 m over a 37-minute dive on the one axis that can be checked |
+
+The compass is the one to worry about. A 12° yaw error moves the far end of a
+100 m transect **21 m** sideways, and no amount of good DVL data corrects it —
+the steps are right, the direction they are laid down in is not. `--health`
+reports `compass_variance` and the EKF-vs-DCM yaw gap for exactly this reason.
+
+`DVLx`/`DVLy` are re-zeroed to each transect's start in every case, so those
+columns and `Distance` mean what they did in the tlog workflow. Only
+`DVLlat`/`DVLlon` depend on which anchoring applied.
 
 ---
 

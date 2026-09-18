@@ -481,3 +481,97 @@ def test_without_a_tracking_fix_the_transects_keep_their_separation(builder, tmp
     b = pd.read_csv(tmp_path / "transects" / "T2.csv")["DVLlat"].dropna()
     apart_m = abs(b.iloc[0] - a.iloc[0]) * 111_320
     assert apart_m > 20, f"the transects were stacked ({apart_m:.1f} m apart)"
+
+
+# ---- a typed origin, for a dive flown without one --------------------------
+
+def test_a_typed_origin_anchors_a_dive_with_no_fix(builder, tmp_path):
+    """Forgot to set the origin in BlueOS: the DVL track is intact but has no
+    coordinates. The vessel's position, entered afterwards, gives it some."""
+    b = builder("nofix.mcap")
+    for i in range(30):
+        t = BASE_EPOCH + i
+        b.add(t, "ATTITUDE", {"roll": 0.0, "pitch": 0.0, "yaw": 0.0})
+        b.add(t, "VISION_POSITION_DELTA",
+              {"time_delta_usec": 1000000, "position_delta": [0.5, 0.0, 0.0],
+               "confidence": 99.0}, sysid=255, compid=0)
+        b.add(t, "GLOBAL_POSITION_INT", {"lat": 0, "lon": 0, "relative_alt": -2000})
+    path = b.close()
+
+    result = run([path], site_name="S", survey_date="20260826", station_id=None,
+                 save_location=tmp_path, make_map=False, origin=(47.60, -122.35),
+                 transects=[TransectSpec("T1", [("10:00:05", "10:00:25")])])
+
+    w = pd.read_csv(tmp_path / "transects" / "T1.csv")
+    assert w["DVLlat"].notna().all(), "the origin should have anchored every row"
+    assert not any("seed" in x for x in result.warnings)
+    # walked north from the origin: latitude climbs from it, longitude holds
+    assert w["DVLlat"].iloc[0] == pytest.approx(47.60 + 5 * 0.5 / 111_320, abs=2e-5)
+    assert w["DVLlon"].std() == pytest.approx(0.0, abs=1e-9)
+
+
+def test_a_typed_origin_beats_a_static_fix(builder, tmp_path):
+    """The only reason to type one is that the recording's own is missing or
+    wrong, so a typed origin wins over a fix that never moved."""
+    path = straight_north_dive(builder(), seconds=30).close()     # static fix
+    run([path], site_name="S", survey_date="20260826", station_id=None,
+        save_location=tmp_path, make_map=False, origin=(48.0, -123.0),
+        transects=[TransectSpec("T1", [("10:00:00", "10:00:10")])])
+
+    w = pd.read_csv(tmp_path / "transects" / "T1.csv")
+    assert abs(w["DVLlat"].iloc[0] - 48.0) < 1e-3
+    assert abs(w["Latitude"].iloc[0] - 47.6176249) < 1e-6      # recording's own, untouched
+
+
+def test_a_typed_origin_is_ignored_when_the_fix_was_tracking(builder, tmp_path):
+    """A USBL knows where the vehicle was; a typed origin does not."""
+    path = _moving_gps_dive(builder("m.mcap"), seconds=60)
+    result = run([path], site_name="S", survey_date="20260826", station_id=None,
+                 save_location=tmp_path, make_map=False, origin=(48.0, -123.0),
+                 transects=[TransectSpec("T1", [("10:00:05", "10:00:25")])])
+
+    w = pd.read_csv(tmp_path / "transects" / "T1.csv")
+    assert abs(w["DVLlat"].iloc[0] - 47.6176) < 1e-3          # its own fix, not 48.0
+    assert any("origin was not used" in x for x in result.warnings)
+
+
+# ---- the per-transect summary ---------------------------------------------
+
+def test_path_length_ignores_jitter_and_null_island():
+    from ccr_m2c.transect import path_length_m
+    # 1 m north per step, ten steps
+    lat = pd.Series([47.0 + i / 111_320 for i in range(11)])
+    lon = pd.Series([-122.0] * 11)
+    assert path_length_m(lat, lon) == pytest.approx(10.0, rel=0.01)
+    # sub-2 cm wobble on a stationary vehicle adds nothing
+    lat = pd.Series([47.0 + (i % 2) * 1e-8 for i in range(50)])
+    assert path_length_m(lat, pd.Series([-122.0] * 50)) == pytest.approx(0.0)
+    # zeros are "no fix", never a position off West Africa
+    assert path_length_m(pd.Series([0.0, 0.0]), pd.Series([0.0, 0.0])) is None
+
+
+def test_the_summary_reports_what_a_survey_lead_asks_for(dive, tmp_path):
+    df, res = dive
+    r = export_transect(df, [("10:00:05", "10:00:25")], 1, "T1", "Site", tmp_path,
+                        dvl_source=res.dvl_source)
+    st = r.stats
+
+    assert st["duration_s"] == 21
+    assert st["depth_shallow_m"] == pytest.approx(5.0, abs=0.01)   # positive metres
+    assert st["depth_deep_m"] == pytest.approx(5.0, abs=0.01)
+    assert st["alt_min_m"] == st["alt_max_m"] == st["alt_mean_m"] == pytest.approx(2.0)
+    assert st["dist_dvl_m"] == pytest.approx(r.distance_m)
+    assert st["dist_gps_m"] == pytest.approx(0.0)          # the fix never moved
+    assert st["dist_ekf_m"] is None or st["dist_ekf_m"] == pytest.approx(0.0)
+
+
+def test_the_summary_table_renders_and_survives_gaps(dive, tmp_path):
+    from ccr_m2c.transect import format_stats_table
+    df, res = dive
+    r = export_transect(df, [("10:00:05", "10:00:25")], 1, "T1", "Site", tmp_path)
+    r.stats["dist_ekf_m"] = None                       # a column with nothing in it
+
+    lines = format_stats_table([r])
+    assert len(lines) == 3                             # header, units, one row
+    assert "T1" in lines[2] and "--" in lines[2]       # missing shows as --, not a crash
+    assert format_stats_table([]) == []

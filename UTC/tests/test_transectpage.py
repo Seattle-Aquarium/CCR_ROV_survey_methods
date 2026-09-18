@@ -17,6 +17,10 @@ import pytest
 
 ctk = pytest.importorskip("customtkinter")
 
+# The page hands the extractor its own spec type; the tests build the stub
+# from the same class so a renamed field fails here rather than in the field.
+from ccr_m2c.pipeline import TransectSpec  # noqa: E402
+
 from utc.gui.app import App  # noqa: E402
 from utc.survey import Site, SurveyPlan, Transect  # noqa: E402
 
@@ -214,3 +218,106 @@ def test_an_unfinished_plan_still_gets_the_dive_wide_report(app, monkeypatch, tm
     _pump(app, 40)
 
     assert seen.get("transects") == []      # reported, not crashed
+
+
+# ---- the typed origin -----------------------------------------------------
+
+def test_no_origin_means_none(app):
+    page = app.pages["Transects"]
+    page.origin_lat.delete(0, "end"); page.origin_lon.delete(0, "end")
+    assert page._origin() is None
+
+
+def test_a_valid_origin_is_returned_as_a_pair(app):
+    page = app.pages["Transects"]
+    page.origin_lat.delete(0, "end"); page.origin_lat.insert(0, " 47.6176 ")
+    page.origin_lon.delete(0, "end"); page.origin_lon.insert(0, "-122.3610")
+    assert page._origin() == pytest.approx((47.6176, -122.3610))
+
+
+def test_half_an_origin_is_refused_not_guessed(app):
+    """A swapped or missing half would put the transect somewhere plausible and
+    wrong, so the page refuses rather than filling in a default."""
+    page = app.pages["Transects"]
+    page.origin_lat.delete(0, "end"); page.origin_lat.insert(0, "47.6")
+    page.origin_lon.delete(0, "end")
+    with pytest.raises(ValueError, match="both"):
+        page._origin()
+
+
+def test_an_out_of_range_origin_is_refused(app):
+    page = app.pages["Transects"]
+    page.origin_lat.delete(0, "end"); page.origin_lat.insert(0, "-122.36")   # swapped
+    page.origin_lon.delete(0, "end"); page.origin_lon.insert(0, "47.61")
+    with pytest.raises(ValueError, match="out of range"):
+        page._origin()
+
+
+def test_the_origin_reaches_the_extractor(app, monkeypatch, tmp_path):
+    seen: dict = {}
+
+    def fake_run(mcaps, **kw):
+        seen.update(kw)
+        return SimpleNamespace(results=[], saved=[], map_path=None, tide_ok=True,
+                               tide_error=None, warnings=[],
+                               read=SimpleNamespace(warnings=[]),
+                               summary_lines=lambda: ["ok"])
+
+    fake_pipeline = SimpleNamespace(run=fake_run, TransectSpec=TransectSpec)
+    fake_tide = SimpleNamespace(STATIONS=[("Elliott Bay (9447130)", "9447130")])
+    monkeypatch.setattr("utc.gui.transectpage._extractor",
+                        lambda: (fake_pipeline, fake_tide))
+
+    page = app.pages["Transects"]
+    app.flight_dir = tmp_path
+    app.discovery = _disc(tmp_path / "a.mcap")
+    app._apply_plan(SurveyPlan([Site(
+        name="S", project="t", date="2026-09-02",
+        transects=[Transect(name="T1", start_tc="10:00:00", end_tc="10:10:00")])]))
+    page.origin_lat.delete(0, "end"); page.origin_lat.insert(0, "47.6")
+    page.origin_lon.delete(0, "end"); page.origin_lon.insert(0, "-122.3")
+
+    page._run()
+    _pump(app, 40)
+
+    assert seen.get("origin") == pytest.approx((47.6, -122.3))
+
+
+# ---- the per-transect summary ---------------------------------------------
+
+def test_the_summary_table_lands_on_the_page(app, monkeypatch, tmp_path):
+    """The figures belong beside the Extract button, not in the footer log
+    that scrolls away under whatever runs next."""
+    r = SimpleNamespace(transect_id="S_T1", path=tmp_path / "S_T1.csv",
+                        message="", warnings=[],
+                        stats={"duration_s": 600.0, "depth_shallow_m": 2.0,
+                               "depth_deep_m": 16.0, "alt_min_m": 0.5,
+                               "alt_max_m": 1.1, "alt_mean_m": 0.8,
+                               "dist_dvl_m": 68.0, "dist_ekf_m": None,
+                               "dist_gps_m": 361.0})
+
+    def fake_run(mcaps, **kw):
+        return SimpleNamespace(results=[r], saved=[r], map_path=None, tide_ok=True,
+                               tide_error=None, warnings=[],
+                               read=SimpleNamespace(warnings=[]),
+                               summary_lines=lambda: ["ok"])
+
+    monkeypatch.setattr("utc.gui.transectpage._extractor",
+                        lambda: (SimpleNamespace(run=fake_run, TransectSpec=TransectSpec),
+                                 SimpleNamespace(STATIONS=[("Elliott Bay (9447130)", "9447130")])))
+    page = app.pages["Transects"]
+    app.flight_dir = tmp_path
+    app.discovery = _disc(tmp_path / "a.mcap")
+    app._apply_plan(SurveyPlan([Site(
+        name="S", project="t", date="2026-09-02",
+        transects=[Transect(name="T1", start_tc="10:00:00", end_tc="10:10:00")])]))
+    page.origin_lat.delete(0, "end"); page.origin_lon.delete(0, "end")
+
+    page._run()
+    _pump(app, 60)
+
+    shown = page.summary_box.get("1.0", "end")
+    assert "S_T1" in shown
+    assert "68.0" in shown and "361.0" in shown       # DVL and GPS distances
+    assert "--" in shown                               # the missing EKF, not a crash
+    assert "10.0" in shown                             # 600 s as minutes

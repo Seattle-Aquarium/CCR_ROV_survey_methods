@@ -109,6 +109,20 @@ class TransectPage(ctk.CTkFrame):
         self.make_map.select()
         self.make_map.grid(row=4, column=1, sticky="w", padx=(12, 0), pady=(8, 4))
 
+        # Without a USBL the vehicle's position has to be typed into the DVL
+        # page in BlueOS before arming. Forget, and the dive has a perfectly
+        # good DVL track with nothing to hang it on. This anchors it afterwards.
+        label(c3.body, "Origin (lat, lon)").grid(row=5, column=0, sticky="w",
+                                                 pady=(10, 4))
+        orow = ctk.CTkFrame(c3.body, fg_color="transparent")
+        orow.grid(row=5, column=1, sticky="w", padx=(12, 0), pady=(10, 4))
+        self.origin_lat = entry(orow, "47.6176", width=130)
+        self.origin_lat.pack(side="left")
+        self.origin_lon = entry(orow, "-122.3610", width=130)
+        self.origin_lon.pack(side="left", padx=(8, 0))
+        label(orow, "vessel position at arming; only if it was not set in BlueOS",
+              muted=True).pack(side="left", padx=(10, 0))
+
         # ---- 4. run ---------------------------------------------------
         c4 = Card(body, "4.  Extract",
                   "One CSV per transect, plus a map of the site. Existing files "
@@ -124,6 +138,17 @@ class TransectPage(ctk.CTkFrame):
                ).pack(side="left", padx=8)
         self.note = label(c4.body, "", muted=True)
         self.note.grid(row=1, column=0, sticky="w", pady=(8, 0))
+
+        # What each transect looked like, once written. Three distances on
+        # purpose: the GPS one is inflated by surface-fix jitter, and the gap
+        # to the DVL's figure is a direct measure of that noise.
+        c4.body.grid_columnconfigure(0, weight=1)
+        self.summary_box = ctk.CTkTextbox(c4.body, height=150, font=T.FONT_MONO,
+                                          fg_color=T.FIELD_BG, text_color=T.TEXT,
+                                          border_width=1, border_color=T.BORDER,
+                                          corner_radius=6, wrap="none")
+        self.summary_box.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        self._set_summary("Nothing extracted yet.")
 
         # ---- 5. sensor health -----------------------------------------
         c5 = Card(body, "5.  Sensor health",
@@ -154,6 +179,33 @@ class TransectPage(ctk.CTkFrame):
         self.refresh()
 
     # ------------------------------------------------------------------
+
+    def _set_summary(self, text: str) -> None:
+        self.summary_box.configure(state="normal")
+        self.summary_box.delete("1.0", "end")
+        self.summary_box.insert("1.0", text)
+        self.summary_box.configure(state="disabled")
+
+    def _origin(self) -> tuple[float, float] | None:
+        """The typed origin, or None if both fields are empty.
+
+        Half an origin, or one out of range, is refused rather than guessed at:
+        a swapped lat/lon would put the transect in the Southern Ocean, and the
+        map would look perfectly plausible while it did.
+        """
+        lat_s = self.origin_lat.get().strip()
+        lon_s = self.origin_lon.get().strip()
+        if not lat_s and not lon_s:
+            return None
+        try:
+            lat, lon = float(lat_s), float(lon_s)
+        except ValueError:
+            raise ValueError("Origin needs both latitude and longitude, in "
+                             "decimal degrees.") from None
+        if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+            raise ValueError(f"Origin {lat}, {lon} is out of range "
+                             "(latitude -90..90, longitude -180..180).")
+        return lat, lon
 
     def _set_health(self, text: str) -> None:
         self.health_box.configure(state="normal")
@@ -307,12 +359,19 @@ class TransectPage(ctk.CTkFrame):
         station_id = dict(tide.STATIONS).get(choice)      # None = skip
         out_root = self._out_dir()
         want_map = bool(self.make_map.get())
+        try:
+            origin = self._origin()
+        except ValueError as ex:
+            messagebox.showerror(APP_NAME, str(ex))
+            return
         # Transect names repeat across sites ("T1" at each), so several sites in
         # one flight need the site in the filename or they overwrite each other.
         id_prefix = self.prefix_entry.get().strip()
         # Several sites in one flight still get their own folder, so two
         # sites sharing a prefix cannot overwrite each other's CSVs.
         per_site_folder = len(sites) > 1
+
+        results_by_site: list = []
 
         def work(progress, cancel):
             reports: list[str] = []
@@ -344,8 +403,10 @@ class TransectPage(ctk.CTkFrame):
                     save_location=out,
                     transects=specs,
                     make_map=want_map,
+                    origin=origin,
                     progress=lambda f, m, b=base, s=span: progress(b + s * f, m),
                 )
+                results_by_site.append((site.name, result))
                 reports.append(f"{site.name}: " + "; ".join(
                     result.summary_lines()[0:1]))
                 for r in result.results:
@@ -358,5 +419,22 @@ class TransectPage(ctk.CTkFrame):
                     reports.append(f"   ! {w}")
             return reports
 
-        if self.app.submit(work, "Extracting transect CSVs"):
+        def done(_reports) -> None:
+            # Back on the main thread. The table lives on this page rather than
+            # in the footer log, which scrolls away under whatever runs next.
+            from ccr_m2c.transect import format_stats_table
+            blocks: list[str] = []
+            for name, result in results_by_site:
+                table = format_stats_table(result.results)
+                if table:
+                    if len(results_by_site) > 1:
+                        blocks.append(name)
+                    blocks.extend(table)
+                    blocks.append("")
+            self._set_summary("\n".join(blocks).strip() or "No transects were written.")
+            n = sum(len(r.saved) for _name, r in results_by_site)
+            self.note.configure(text=f"Wrote {n} transect CSV(s).")
+
+        if self.app.submit(work, "Extracting transect CSVs", on_done=done):
             self.note.configure(text="Running — progress is in the footer.")
+            self._set_summary("Extracting...")

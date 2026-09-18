@@ -21,13 +21,13 @@ import sys
 from pathlib import Path
 
 from .health import read_health
-from .vehicle import read_vehicle
-from .mcap_read import probe_mcaps, read_mcaps
 from .mapping import write_map_from_csvs
+from .mcap_read import probe_mcaps, read_mcaps
 from .pipeline import TransectSpec, run
 from .survey import load_plan
 from .tide import STATIONS
 from .transect import make_transect_id
+from .vehicle import read_vehicle
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +82,21 @@ def _parse_transect(spec: str) -> TransectSpec:
     return TransectSpec(name.strip(), pairs)
 
 
+def _parse_origin(text: str) -> tuple[float, float]:
+    """``47.6176,-122.3610`` -> (lat, lon), with the ranges checked so a swapped
+    pair fails here rather than putting a transect in the Southern Ocean."""
+    try:
+        lat_s, lon_s = text.split(",")
+        lat, lon = float(lat_s), float(lon_s)
+    except ValueError as ex:
+        raise argparse.ArgumentTypeError(
+            f"--origin needs LAT,LON in decimal degrees, got {text!r}") from ex
+    if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+        raise argparse.ArgumentTypeError(
+            f"--origin {text!r} is out of range (lat -90..90, lon -180..180)")
+    return lat, lon
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="ccr_m2c",
@@ -122,6 +137,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--prefix-site", action="store_true",
                    help="with --plan, name the CSVs <site>_<transect> rather than "
                         "<transect>; use when one folder holds several sites")
+    p.add_argument("--origin", type=_parse_origin, metavar="LAT,LON",
+                   help="the vessel's position at arming, for a dive flown "
+                        "without a USBL where the origin was not typed into "
+                        "BlueOS first; anchors the DVL track after the fact")
     p.add_argument("--no-map", action="store_true", help="skip the Leaflet map")
     p.add_argument("--no-tide", action="store_true",
                    help="skip the NOAA lookup; Depth_std is left blank")
@@ -222,11 +241,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.inspect:
         return _inspect(paths)
 
-    # Progress goes to stderr and the log to stdout, so the carriage returns of
-    # the one do not chew through the lines of the other -- and `> run.log`
-    # captures the report without the spinner.
-    spin = lambda f, m: print(f"  {f * 100:5.1f}%  {m:<60}", end="\r", file=sys.stderr)
-
     if args.plan:
         try:
             plan = load_plan(args.plan)
@@ -257,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
                 save_location=out,
                 transects=transects,
                 make_map=not args.no_map,
+                origin=args.origin,
                 progress=_spin,
             )
             print(file=sys.stderr)
@@ -282,6 +297,7 @@ def main(argv: list[str] | None = None) -> int:
             for n, t in enumerate(args.transect, start=1)
         ],
         make_map=not args.no_map,
+        origin=args.origin,
         progress=_spin,
     )
     print(file=sys.stderr)
