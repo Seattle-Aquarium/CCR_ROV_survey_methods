@@ -144,6 +144,31 @@ def test_a_pause_reaches_the_extractor_through_the_spec(dive, tmp_path):
     assert r.paused_rows == 3
 
 
+def test_a_plans_pauses_reach_the_csv_through_the_command_line(builder, tmp_path):
+    """`--plan` is the other door the same file comes in through, and it must
+    give the same CSV as UTC's Transects page does."""
+    import json
+
+    from ccr_m2c.cli import main
+
+    path = straight_north_dive(builder(), seconds=30).close()
+    plan = tmp_path / "utc_plan.json"
+    plan.write_text(json.dumps({
+        "sites": [{"name": "Site", "project": "t", "date": "2026-08-26",
+                   "transects": [{"name": "T1", "start_tc": "10:00:05",
+                                  "end_tc": "10:00:24",
+                                  "pauses": [{"start_tc": "10:00:10",
+                                              "end_tc": "10:00:12"}]}]}],
+        "timezone": "America/Los_Angeles"}), encoding="utf-8")
+
+    assert main([str(path), "--plan", str(plan), "--out", str(tmp_path),
+                 "--no-tide", "--no-map"]) == 0
+    written = pd.read_csv(tmp_path / "transects" / "T1.csv")
+    assert list(written.loc[written["Survey_state"] == "pause", "Time"]) == [
+        "10:00:10", "10:00:11", "10:00:12"]
+    assert len(written) == 20                          # the rows are all there
+
+
 def test_windows_outside_the_log_produce_no_file(dive, tmp_path):
     df, _ = dive
     r = export_transect(df, [("23:00:00", "23:30:00")], 1, "T9", "Site", tmp_path)

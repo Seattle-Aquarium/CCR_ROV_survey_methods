@@ -275,6 +275,37 @@ Multiple sites per flight folder are supported.
 Entries are saved to `utc_plan.json` in the flight folder and reloaded
 automatically next time, so a re-run at a different resolution needs no retyping.
 
+#### Pauses
+
+Sometimes the vehicle is on transect and something goes wrong — Cockpit
+disarms, the video glitches, a minute goes on getting the ROV back where it
+was. That minute is inside the transect but was not surveyed, and its imagery
+must not be filed as though it were.
+
+**+ Add pause**, under each transect's *end* box, adds a start and an end
+beside the transect's own times. Add as many as a transect needs. The row then
+reads, for example, *10.5 min surveying · 1.5 min paused*.
+
+A pause has to be inside its transect, has to run forwards, and cannot overlap
+another; anything else is an error on the row rather than something quietly
+clipped, because a pause typed against the wrong transect is the mistake most
+worth catching. Times run on the transect's own clock, so a transect through
+local midnight carries its pauses with it.
+
+What a pause changes, everywhere the plan is read:
+
+| | |
+| --- | --- |
+| **GoPro stills** | a frame taken during a pause matches no transect, so it is handled as off-transect — kept in `off_transect/`, or left behind, by the policy on the import page |
+| **GoPro video** | the per-transect trim and the composite skip the paused footage and join across it. The telemetry under the picture skips with it, so the overlay stays on the frame it belongs to |
+| **per-transect CSV** | every row is **kept** and marked in the `Survey_state` column (`transect` / `pause`), so an analysis can filter and a check on the recording still sees an unbroken stretch of telemetry. `Distance` and the summary table count only the surveying rows |
+| **1 Hz telemetry CSV** | same, in a `survey_state` column |
+| **the dive profile, sensor health** | not affected: which recordings cover a transect is a question about when the flight happened, not about what was surveyed |
+
+A transect with no pauses behaves in every respect exactly as it always did,
+and a `utc_plan.json` written before pauses existed opens unchanged. The pauses
+are saved in the same file, as a `pauses` list on each transect.
+
 > Transect names must be **unique across the whole plan**, not just within one
 > site, and a reused name is now rejected by validation. Imagery is filed by
 > transect name alone, so two sites that both call a transect `T1` land in one
@@ -460,7 +491,9 @@ VIAME and percent-cover joins.
 
 One row per second across the whole recorded span, so descents, ascents and
 between-transect manoeuvring stay in the record. Rows outside a transect are
-labelled `off_transect`.
+labelled `off_transect`; a `survey_state` column says `transect`, `pause` or
+`off_transect` for every second, so a paused minute keeps its transect name and
+still says nothing was being surveyed in it.
 
 Columns: UTC and TC-25 time, date, project/site/transect, **power (V × A)**,
 voltage, current, depth, altitude, pressure, water temperature, heading, roll,

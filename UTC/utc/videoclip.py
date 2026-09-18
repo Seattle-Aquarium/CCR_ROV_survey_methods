@@ -181,7 +181,11 @@ def trim_flight(
     # covered transect a hair under 1.0, and a warning that fires at 100% is
     # how people learn to stop reading warnings.
     for r in todo:
-        want = r.transect.duration_s()
+        # What was asked for is the surveying time, not the wall-clock span:
+        # a transect with a pause in it is deliberately shorter than the
+        # clock says, and warning that its own pause is "missing footage"
+        # would be a warning that fires every time it works.
+        want = r.transect.active_s()
         missing = want - sum(s.dur_s for s in r.segments)
         if missing > 1.0:
             rep.warnings.append(

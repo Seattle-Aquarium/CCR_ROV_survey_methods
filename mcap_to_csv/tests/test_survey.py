@@ -46,6 +46,26 @@ def test_reads_the_real_plan(tmp_path):
     assert site.transects[0].windows == [("12:19:57", "12:28:42")]
 
 
+def test_pauses_carry_across_from_the_plan(tmp_path):
+    """The same file gives the same CSV whichever door it comes in through:
+    UTC's Transects page and `--plan` both hand the pauses to the extractor."""
+    data = json.loads(json.dumps(PLAN))
+    data["sites"][0]["transects"][0]["pauses"] = [
+        {"start_tc": "12:22:00", "end_tc": "12:23:10"}]
+    site = load_plan(write(tmp_path, data)).sites[0]
+    assert site.transects[0].pauses == [("12:22:00", "12:23:10")]
+    assert site.transects[0].windows == [("12:19:57", "12:28:42")]   # whole
+    assert site.transects[1].pauses == []
+
+
+def test_a_pause_outside_its_transect_is_refused(tmp_path):
+    data = json.loads(json.dumps(PLAN))
+    data["sites"][0]["transects"][0]["pauses"] = [
+        {"start_tc": "12:30:00", "end_tc": "12:31:00"}]
+    with pytest.raises(ValueError, match="not inside"):
+        load_plan(write(tmp_path, data))
+
+
 def test_site_can_prefix_the_transect_names(tmp_path):
     site = load_plan(write(tmp_path, PLAN)).sites[0]
     assert transect_ids(site) == ["T1", "T2", "T3"]

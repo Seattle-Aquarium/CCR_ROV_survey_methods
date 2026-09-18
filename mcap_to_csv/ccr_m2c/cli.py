@@ -260,7 +260,8 @@ def main(argv: list[str] | None = None) -> int:
             # site in front", and still applies when no code is given.
             stem = args.prefix or (site.name if args.prefix_site else "")
             transects = [
-                TransectSpec(make_transect_id(stem, n, t.transect_id), t.windows)
+                TransectSpec(make_transect_id(stem, n, t.transect_id), t.windows,
+                             pauses=t.pauses)
                 for n, t in enumerate(site.transects, start=1)
             ]
             result = run(

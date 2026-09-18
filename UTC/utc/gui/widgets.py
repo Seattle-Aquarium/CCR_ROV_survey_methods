@@ -7,7 +7,7 @@ from datetime import date as _date
 
 import customtkinter as ctk
 
-from ..survey import Site, Transect
+from ..survey import Pause, Site, Transect
 from . import theme as T
 
 
@@ -103,14 +103,60 @@ def button(master, text, command, kind: str = "primary", width: int = 120):
                          border_width=1, border_color=T.BORDER, corner_radius=6)
 
 
+class PauseCell(ctk.CTkFrame):
+    """One pause inside a transect: its own start, end, and a way to drop it.
+
+    Sits to the right of the transect's own times, because it belongs to that
+    transect rather than being a row of its own -- a pause is not a second
+    transect, and laying it out as one invited exactly that reading.
+    """
+
+    def __init__(self, master, index: int, on_remove: Callable[[PauseCell], None],
+                 on_change: Callable[[], None], start: str = "", end: str = ""):
+        super().__init__(master, fg_color=T.SURFACE, corner_radius=6,
+                         border_width=1, border_color=T.BORDER)
+        self._on_remove = on_remove
+        self.index_label = ctk.CTkLabel(self, text=f"pause {index}",
+                                        font=T.FONT_SMALL,
+                                        text_color=T.TEXT_MUTED, anchor="w")
+        self.index_label.grid(row=0, column=0, padx=(8, 6), pady=3)
+        self.start = TimeEntry(self, width=100)
+        self.start.set(start)
+        self.start.grid(row=0, column=1, padx=(0, 4), pady=3)
+        label(self, "to", muted=True).grid(row=0, column=2, padx=(0, 4))
+        self.end = TimeEntry(self, width=100)
+        self.end.set(end)
+        self.end.grid(row=0, column=3, padx=(0, 4), pady=3)
+        ctk.CTkButton(self, text="✕", width=24, height=24, corner_radius=6,
+                      font=T.FONT_SMALL, fg_color="transparent",
+                      hover_color=T.SURFACE_ALT, text_color=T.TEXT_MUTED,
+                      border_width=0, command=lambda: on_remove(self)
+                      ).grid(row=0, column=4, padx=(0, 6))
+        for e in (self.start, self.end):
+            e.set_on_change(on_change)
+
+    def renumber(self, index: int) -> None:
+        self.index_label.configure(text=f"pause {index}")
+
+    def to_pause(self) -> Pause:
+        return Pause(self.start.get().strip(), self.end.get().strip())
+
+
 class TransectRow(ctk.CTkFrame):
-    """One transect: name, TC-25 start, TC-25 end."""
+    """One transect: name, TC-25 start, TC-25 end, and any pauses inside it."""
+
+    #: Pauses laid out per line before wrapping onto the next. Two fit beside
+    #: the transect's own times on a field laptop; a third pushes the status
+    #: text off the edge.
+    PAUSES_PER_LINE = 2
 
     def __init__(self, master, on_remove: Callable[[TransectRow], None],
-                 name: str = "T1", start: str = "", end: str = ""):
+                 name: str = "T1", start: str = "", end: str = "",
+                 pauses: list[Pause] | None = None):
         super().__init__(master, fg_color="transparent")
-        self.grid_columnconfigure(5, weight=1)
+        self.grid_columnconfigure(6, weight=1)
         self._on_remove = on_remove
+        self._pauses: list[PauseCell] = []
 
         self.name = entry(self, "T1", width=70)
         self.name.insert(0, name)
@@ -126,20 +172,71 @@ class TransectRow(ctk.CTkFrame):
         self.end.set(end)
         self.end.grid(row=0, column=4, padx=(0, 10))
 
+        # The pauses live in their own frame beside the times, so adding one
+        # cannot shuffle the columns the operator's eye has already found.
+        # It is taken out of the grid while it is empty: a CustomTkinter frame
+        # with nothing in it keeps its default 200x200, which left a gap the
+        # height of a transect row under every transect that had no pauses.
+        self.pauses_frame = ctk.CTkFrame(self, fg_color="transparent",
+                                         width=0, height=0)
+        self.pauses_frame.grid(row=0, column=5, rowspan=2, sticky="w",
+                               padx=(0, 10))
+        self.pauses_frame.grid_remove()
+
         self.status = ctk.CTkLabel(self, text="", font=T.FONT_SMALL,
-                                   text_color=T.TEXT_MUTED, anchor="w")
-        self.status.grid(row=0, column=5, sticky="ew", padx=(4, 8))
+                                   text_color=T.TEXT_MUTED, anchor="w",
+                                   justify="left")
+        self.status.grid(row=0, column=6, sticky="ew", padx=(4, 8))
 
         button(self, "Remove", lambda: on_remove(self), "danger", width=80
-               ).grid(row=0, column=6)
+               ).grid(row=0, column=7)
+
+        self.add_pause_btn = button(self, "+ Add pause", self.add_pause,
+                                    "ghost", width=110)
+        self.add_pause_btn.grid(row=1, column=3, columnspan=2, sticky="w",
+                                pady=(0, 3))
 
         # Wire the callbacks only now: every widget refresh() touches exists.
         for e in (self.start, self.end):
             e.set_on_change(self.refresh)
+        for p in pauses or []:
+            self.add_pause(p.start_tc, p.end_tc)
+        self.refresh()
+
+    # ---- pauses --------------------------------------------------------
+
+    def add_pause(self, start: str = "", end: str = "") -> None:
+        cell = PauseCell(self.pauses_frame, len(self._pauses) + 1,
+                         self._remove_pause, self.refresh, start, end)
+        self._pauses.append(cell)
+        self._lay_out_pauses()
+        self.refresh()
+
+    def _remove_pause(self, cell: PauseCell) -> None:
+        if cell not in self._pauses:
+            return
+        self._pauses.remove(cell)
+        cell.destroy()
+        self._lay_out_pauses()
+        self.refresh()
+
+    def _lay_out_pauses(self) -> None:
+        for i, cell in enumerate(self._pauses):
+            cell.renumber(i + 1)
+            cell.grid(row=i // self.PAUSES_PER_LINE,
+                      column=i % self.PAUSES_PER_LINE,
+                      padx=(0, 6), pady=2, sticky="w")
+        if self._pauses:
+            self.pauses_frame.grid()
+        else:
+            self.pauses_frame.grid_remove()
+
+    # ---- the transect it stands for --------------------------------------
 
     def to_transect(self) -> Transect:
         return Transect(self.name.get().strip() or "T?",
-                        self.start.get().strip(), self.end.get().strip())
+                        self.start.get().strip(), self.end.get().strip(),
+                        pauses=[c.to_pause() for c in self._pauses])
 
     def refresh(self) -> None:
         t = self.to_transect()
@@ -150,8 +247,15 @@ class TransectRow(ctk.CTkFrame):
         if errs:
             self.status.configure(text=errs[0].split(": ", 1)[-1], text_color=T.WARN)
             return
-        mins = t.duration_s() / 60.0
-        self.status.configure(text=f"{mins:.1f} min", text_color=T.OK)
+        paused = t.paused_s()
+        if paused <= 0:
+            self.status.configure(text=f"{t.duration_s() / 60.0:.1f} min",
+                                  text_color=T.OK)
+            return
+        self.status.configure(
+            text=f"{t.active_s() / 60.0:.1f} min surveying  ·  "
+                 f"{paused / 60.0:.1f} min paused",
+            text_color=T.OK)
 
 
 class SiteFrame(ctk.CTkFrame):
@@ -202,7 +306,7 @@ class SiteFrame(ctk.CTkFrame):
             self.project.insert(0, site.project)
             self.date.insert(0, site.date)
             for t in site.transects:
-                self.add_transect(t.name, t.start_tc, t.end_tc)
+                self.add_transect(t)
         else:
             self.project.insert(0, default_project)
             self.date.insert(0, default_date or _date.today().isoformat())
@@ -210,10 +314,14 @@ class SiteFrame(ctk.CTkFrame):
 
     # ---- transects -----------------------------------------------------
 
-    def add_transect(self, name: str | None = None, start: str = "",
-                     end: str = "") -> None:
-        n = name or f"T{len(self._rows) + 1}"
-        row = TransectRow(self.rows_frame, self._remove_row, n, start, end)
+    def add_transect(self, transect: Transect | None = None) -> None:
+        """Add a row, either blank (the button) or filled from a saved plan."""
+        n = (transect.name if transect else "") or f"T{len(self._rows) + 1}"
+        row = TransectRow(
+            self.rows_frame, self._remove_row, n,
+            transect.start_tc if transect else "",
+            transect.end_tc if transect else "",
+            pauses=list(transect.pauses) if transect else None)
         row.grid(row=len(self._rows), column=0, sticky="ew", pady=1)
         self._rows.append(row)
         row.refresh()

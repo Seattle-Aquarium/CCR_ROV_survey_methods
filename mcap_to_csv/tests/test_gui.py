@@ -170,6 +170,33 @@ def test_duplicate_transect_ids_are_rejected(app, monkeypatch, builder, tmp_path
     assert "used more than once" in shown[-1][1]
 
 
+def test_a_loaded_plans_pauses_reach_the_extractor(app, monkeypatch, builder, tmp_path):
+    """This window has no pause editor, but a plan's pauses must not be lost
+    on the way through it -- the same file has to give the same CSV whichever
+    program opens it."""
+    import json
+
+    plan = tmp_path / "utc_plan.json"
+    plan.write_text(json.dumps({
+        "sites": [{"name": "Centennial", "project": "t", "date": "2026-08-26",
+                   "transects": [
+                       {"name": "T1", "start_tc": "10:00:00", "end_tc": "10:00:04",
+                        "pauses": [{"start_tc": "10:00:01", "end_tc": "10:00:02"}]},
+                       {"name": "T2", "start_tc": "10:00:05", "end_tc": "10:00:09"}]}],
+        "timezone": "America/Los_Angeles"}), encoding="utf-8")
+    monkeypatch.setattr("ccr_m2c.gui.filedialog.askopenfilename", lambda **kw: str(plan))
+    app.load_plan_file()
+    assert "1 pause(s)" in app.status_var.get()
+
+    path = straight_north_dive(builder(), seconds=5).close()
+    app.mcap_paths = [str(path)]
+    app.save_var.set(str(tmp_path))
+    args = app._collect()
+
+    assert [t.pauses for t in args["transects"]] == [[("10:00:01", "10:00:02")], []]
+    assert args["transects"][0].windows == [("10:00:00", "10:00:04")]   # whole
+
+
 def test_a_finished_run_arrives_through_the_queue(app, monkeypatch, builder, tmp_path):
     """The worker's result must reach the window and light up the buttons.
 

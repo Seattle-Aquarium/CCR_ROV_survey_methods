@@ -243,7 +243,8 @@ class TransectPage(ctk.CTkFrame):
                         make_transect_id(
                             self.prefix_entry.get().strip() or site.name,
                             n, t.name),
-                        [(t.start_tc, t.end_tc)])
+                        [(t.start_tc, t.end_tc)],
+                        pauses=[(p.start_tc, p.end_tc) for p in t.pauses])
                     for n, t in enumerate(site.transects, start=1)
                     if t.start_tc and t.end_tc
                 )
@@ -384,12 +385,17 @@ class TransectPage(ctk.CTkFrame):
 
                 # The survey code is typed once and the ordinal filled in, so
                 # every transect in a survey carries the same prefix and a
-                # mistyped one cannot separate two of them.
+                # mistyped one cannot separate two of them. The pauses go
+                # alongside rather than being cut out of the windows: the rows
+                # stay in the CSV and are marked, so an analysis can drop them
+                # and a check on the recording still sees an unbroken stretch
+                # of telemetry.
                 stem = id_prefix or site.name
                 specs = [
                     pipeline.TransectSpec(
                         make_transect_id(stem, n, t.name),
                         [(t.start_tc, t.end_tc)],
+                        pauses=[(p.start_tc, p.end_tc) for p in t.pauses],
                     )
                     for n, t in enumerate(site.transects, start=1)
                 ]

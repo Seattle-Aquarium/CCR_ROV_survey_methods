@@ -278,6 +278,33 @@ def _render_frames(job) -> int:
     return len(frames)
 
 
+class _Clock:
+    """Frame number -> the moment that frame belongs to.
+
+    A clip's frames are consecutive; the clock they were recorded on may not
+    be. Given the clip's spans, this walks them, so frame 600 of a clip whose
+    first span ran out at frame 500 is sampled from the second span's tenth
+    second rather than from ten minutes into the first.
+    """
+
+    def __init__(self, epoch_start: float,
+                 spans: Sequence[tuple[float, float]] | None, fps: float):
+        self.fps = fps or 1.0
+        usable = [(e, d) for e, d in (spans or []) if d > 0]
+        self.spans = usable or [(epoch_start, float("inf"))]
+
+    def at(self, frame: int) -> float:
+        elapsed = frame / self.fps
+        for epoch, seconds in self.spans:
+            if elapsed < seconds:
+                return epoch + elapsed
+            elapsed -= seconds
+        # Past the end: carry on from the last span, so a rounding frame at
+        # the tail still gets a sensible reading rather than none.
+        epoch, seconds = self.spans[-1]
+        return epoch + seconds + elapsed
+
+
 def render_sequence(
     out_dir: Path,
     store,                       # telemetry.TelemetryStore
@@ -289,11 +316,20 @@ def render_sequence(
     progress: ProgressCB | None = None,
     cancel=None,
     workers: int | None = None,
+    spans: Sequence[tuple[float, float]] | None = None,
 ) -> OverlaySequence:
     """Render panel / gauge / footer PNG sequences for one clip.
 
     `epoch_start` is absolute, so the overlay content is driven directly by the
     telemetry clock and never by a position within a video file.
+
+    `spans` -- (epoch, seconds) pairs -- is for a clip whose footage is *not*
+    one continuous stretch of wall clock: a transect with a pause cut out of
+    it, or one that spans two chapters with a gap between them. The frames
+    still run one after another, but the clock they are sampled from jumps at
+    each join, which is what keeps the telemetry under the picture it belongs
+    to. Given none, the clip is `duration` seconds from `epoch_start`, which
+    is the ordinary transect.
 
     Frames are independent, so they are drawn across several processes. This is
     the pipeline's one genuinely serial stretch -- ffmpeg already uses every
@@ -308,6 +344,7 @@ def render_sequence(
     n = max(1, int(math.ceil(duration * cfg.overlay_fps)))
     m = measure_panel(cfg)
     gsize = gauges.gauge_size(cfg) if cfg.show_gauges else None
+    clock = _Clock(epoch_start, spans, cfg.overlay_fps)
 
     # Sized once, from the widest text the footer can ever show, so every frame
     # of the sequence is identical in size -- see measure_footer.
@@ -319,7 +356,7 @@ def render_sequence(
     # Both are cheap next to drawing, and doing them here is what lets the
     # workers take plain data.
     def _frame(k: int):
-        epoch = epoch_start + k / cfg.overlay_fps
+        epoch = clock.at(k)
         ftext = footer_text(epoch) if (fsize is not None and footer_text) else None
         return (k, store.sample(epoch), ftext)
 

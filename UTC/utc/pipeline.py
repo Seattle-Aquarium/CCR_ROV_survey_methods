@@ -36,6 +36,7 @@ from .survey import (
     ResolvedTransect,
     SurveyPlan,
     local_midnight_epoch,
+    plan_windows,
     resolve_plan,
     utc_offset_hours,
 )
@@ -221,22 +222,6 @@ def ensure_telemetry(
     return TelemetryStore.load(ex.telemetry_csv), warnings + list(ex.warnings)
 
 
-def plan_windows(plan: SurveyPlan) -> list[tuple[str, float, float]]:
-    """(name, epoch_start, epoch_end) for every transect in a plan.
-
-    Derived from the plan alone, so imagery can be sorted before -- or without
-    -- any video being processed. The composite path resolves its own windows
-    against the GoPro chapters instead, because it also has to know which file
-    each second lives in.
-    """
-    out: list[tuple[str, float, float]] = []
-    for site in plan.sites:
-        midnight = local_midnight_epoch(site.date_obj(), plan.timezone)
-        for t in site.transects:
-            out.append((t.name, midnight + t.start_s(), midnight + t.end_s()))
-    return out
-
-
 def describe_chapters(paths: Sequence[Path], ffmpeg: str | None = None) -> list[Chapter]:
     """Probe each GoPro file and place it on the TC-25 clock."""
     out: list[Chapter] = []
@@ -403,9 +388,14 @@ def _run(
             # from the plan rather than the resolved transects: sorting does not
             # need the video, and a transect whose footage is missing should
             # still get its stills.
+            #
+            # Pauses are cut out of the windows. A frame taken during one then
+            # matches no transect and is handled as off-transect, which is what
+            # recording the pause was for.
             try:
                 rep = sorting.sort_flight(
-                    req.flight_dir, plan_windows(req.plan),
+                    req.flight_dir,
+                    plan_windows(req.plan, exclude_pauses=True),
                     store=store, options=req.sort_options,
                     progress=st.sub("photos"), cancel=cancel,
                 )
@@ -488,6 +478,9 @@ def _render_one(
         footer_text=footer if app.layout.show_footer else None,
         progress=op, cancel=cancel,
         workers=app.overlay_workers,
+        # The clip's frames run continuously; the clock behind them does not
+        # if a pause was cut out, so the overlay walks the spans.
+        spans=r.spans,
     )
 
     def cp(f: float, m: str = "") -> None:

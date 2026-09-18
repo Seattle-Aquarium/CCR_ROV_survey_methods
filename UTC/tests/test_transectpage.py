@@ -22,7 +22,7 @@ ctk = pytest.importorskip("customtkinter")
 from ccr_m2c.pipeline import TransectSpec  # noqa: E402
 
 from utc.gui.app import App  # noqa: E402
-from utc.survey import Site, SurveyPlan, Transect  # noqa: E402
+from utc.survey import Pause, Site, SurveyPlan, Transect  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -321,3 +321,65 @@ def test_the_summary_table_lands_on_the_page(app, monkeypatch, tmp_path):
     assert "68.0" in shown and "361.0" in shown       # DVL and GPS distances
     assert "--" in shown                               # the missing EKF, not a crash
     assert "10.0" in shown                             # 600 s as minutes
+
+
+# ---- pauses -----------------------------------------------------------------
+
+def test_the_pauses_go_to_the_extractor_alongside_the_windows(app, monkeypatch, tmp_path):
+    """A pause is passed as a pause, not cut out of the window: the rows stay
+    in the CSV and are marked, so an analysis can drop them and a check on the
+    recording still sees an unbroken stretch of telemetry."""
+    seen: dict = {}
+
+    def fake_run(mcaps, **kw):
+        seen.update(kw)
+        return SimpleNamespace(results=[], saved=[], map_path=None, tide_ok=True,
+                               tide_error=None, warnings=[],
+                               read=SimpleNamespace(warnings=[]),
+                               summary_lines=lambda: ["ok"])
+
+    monkeypatch.setattr("utc.gui.transectpage._extractor",
+                        lambda: (SimpleNamespace(run=fake_run, TransectSpec=TransectSpec),
+                                 SimpleNamespace(STATIONS=[("Elliott Bay (9447130)", "9447130")])))
+    page = app.pages["Transects"]
+    app.flight_dir = tmp_path
+    app.discovery = _disc(tmp_path / "a.mcap")
+    app._apply_plan(SurveyPlan([Site(
+        name="S", project="t", date="2026-09-02",
+        transects=[Transect("T1", "10:00:00", "10:10:00",
+                            [Pause("10:03:00", "10:04:00")]),
+                   Transect("T2", "10:20:00", "10:30:00")])]))
+    page.origin_lat.delete(0, "end"); page.origin_lon.delete(0, "end")
+
+    page._run()
+    _pump(app, 40)
+
+    specs = seen["transects"]
+    assert specs[0].windows == [("10:00:00", "10:10:00")]      # whole, not cut
+    assert specs[0].pauses == [("10:03:00", "10:04:00")]
+    assert specs[1].pauses == []
+
+
+def test_the_health_check_carries_the_pauses_too(app, monkeypatch, tmp_path):
+    seen: dict = {}
+
+    def fake_read_health(mcaps, transects=(), progress=None):
+        seen["transects"] = list(transects)
+        return SimpleNamespace(lines=lambda: ["report"], concerns=lambda: [])
+
+    monkeypatch.setitem(sys.modules, "ccr_m2c.health",
+                        SimpleNamespace(read_health=fake_read_health))
+    monkeypatch.setattr("utc.gui.transectpage._extractor",
+                        lambda: (SimpleNamespace(), SimpleNamespace()))
+
+    app.flight_dir = tmp_path
+    app.discovery = _disc(tmp_path / "a.mcap")
+    app._apply_plan(SurveyPlan([Site(
+        name="S", project="t", date="2026-09-02",
+        transects=[Transect("T1", "10:00:00", "10:10:00",
+                            [Pause("10:03:00", "10:04:00")])])]))
+
+    app.pages["Transects"]._check_health()
+    _pump(app, 40)
+
+    assert seen["transects"][0].pauses == [("10:03:00", "10:04:00")]
