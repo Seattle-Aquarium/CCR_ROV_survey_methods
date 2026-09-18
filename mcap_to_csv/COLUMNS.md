@@ -4,7 +4,7 @@ Every column in a transect CSV, what it means, and where the number actually
 came from. Read the **Origin** column before trusting a figure: it is the
 difference between a measurement and an estimate.
 
-44 columns, one row per second, local times in US/Pacific.
+45 columns, one row per second, local times in US/Pacific.
 
 ## Six kinds of number
 
@@ -118,6 +118,12 @@ unaffected; only a consumer reading by column number would care.
 | `NEDz` | Local-frame z, positive down. Blank when the message is not recorded. | `LOCAL_POSITION_NED.z` | Fused | last |
 | `Pressure_abs_hPa` | Absolute water pressure. Independent of the EKF, which makes it a useful cross-check on depth. | `SCALED_PRESSURE2.press_abs` (external Bar30) | Direct | mean |
 | `Messages` | How many MAVLink messages went into this second. A thin row is a dropout. | counted while reading | Computed | count |
+
+### Survey state
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Survey_state` | `transect` for a second that was being surveyed, `pause` for one inside a pause the operator recorded — a disarm, a video glitch, a minute spent getting the vehicle back. Every row of the transect is here either way; `Distance` counts only the `transect` rows, and the GoPro imagery from a `pause` is discarded rather than filed. | the transect's pause times | Computed | per row |
 
 ## Rules that apply to every column
 

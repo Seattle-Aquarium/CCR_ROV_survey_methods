@@ -32,6 +32,16 @@ is for extracting CSVs on their own.
 3. Add a **transect** for each one you ran. The Transect ID becomes the CSV
    filename. A transect that was paused and resumed gets two time windows, not
    two transects. Times are local (Pacific), matching the span shown at the top.
+
+   A survey plan may also carry **pauses** inside a transect — stretches where
+   the vehicle was down and recording but nothing was being surveyed. Those
+   rows are **kept** and marked in the `Survey_state` column (`transect` /
+   `pause`) rather than dropped: a hole in the middle of a transect's
+   telemetry looks exactly like a recording that failed, and telling those two
+   apart is most of what these files get read for. `Distance` counts only the
+   surveying rows, because it stands for survey effort. The GoPro imagery from
+   a pause is a different matter and is discarded — see
+   `rov_imagery_processing`.
 4. **Run.** CSVs land in `<save location>/transects/`, with
    `transect_map.html` beside them.
 
@@ -205,7 +215,7 @@ python -m ccr_m2c logs/*.tlog --site EBM --date 20240924 --out ./out     --prefi
 The two formats meet at the point the MAVLink frames are parsed — a tlog reader
 yields the same `(type, fields, time)` the mcap readers do — so the per-second
 folding, depth precedence, transect cutting, tide standardisation, map and health
-report are all shared. The same 44 columns come out either way, and a dive split
+report are all shared. The same 45 columns come out either way, and a dive split
 across the upgrade can mix both in one run.
 
 Three things need translating on the way in, and are:
@@ -438,20 +448,22 @@ Altitude, Width, Area_m2,
 Water_temp_C,
 Battery_V, Battery_A, Battery_W, Battery_mAh_used, Battery_Wh_used,
 Lights_pct, Cam_tilt,
-Relative_alt_m, VFR_alt, NEDz, Pressure_abs_hPa, Messages
+Relative_alt_m, VFR_alt, NEDz, Pressure_abs_hPa, Messages,
+Survey_state
 ```
 
 The three coordinate pairs sit together, because comparing them is the whole
 point of having all three. `Width` and `Area_m2` sit with `Altitude`, which they
-are computed from. The raw depth inputs go last: they are there for checking a
-suspicious `Depth`, not for analysis.
+are computed from. The raw depth inputs go near the end: they are there for checking a
+suspicious `Depth`, not for analysis. `Survey_state` is last on purpose,
+so every column before it keeps the position it has always had.
 
-> **This order differs from `tlog_to_csv.py`.** The columns are the same 44 and
-> the names are unchanged, so anything selecting by name — the R plotting
+> **This order differs from `tlog_to_csv.py`.** Its 44 columns are all here
+> with their names unchanged, plus `Survey_state`, so anything selecting by name — the R plotting
 > scripts, `pandas` merges, the VIAME join — is unaffected. Only a consumer
 > reading by column *number* would care, and nothing in this repository does.
 
-**[COLUMNS.md](COLUMNS.md) documents all 44** — what each one means, which
+**[COLUMNS.md](COLUMNS.md) documents all 45** — what each one means, which
 MAVLink message it came from, and whether it was read from a sensor, fused by the
 EKF, computed here, or scaled by a camera-calibration constant. The short version:
 

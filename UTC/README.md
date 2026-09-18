@@ -30,7 +30,7 @@ and provenance are in [COLUMNS.md](../mcap_to_csv/COLUMNS.md).
 **Older flights work too.** Dives recorded before BlueOS 1.5 kept their telemetry
 in `.tlog` files, and those are read the same way — the two formats meet at the
 point the MAVLink frames are parsed, so everything after that is shared and a
-tlog produces exactly the same 44 columns. A dive that spans the upgrade can even
+tlog produces exactly the same 45 columns. A dive that spans the upgrade can even
 mix them; they are merged on one timeline. Only compositing still needs an
 `.mcap`, because a tlog carries no video.
 
@@ -476,7 +476,7 @@ leaves blanks rather than a flat line, so a dead sensor cannot look healthy.
 
 ## The transect CSV columns
 
-What the **Transects** step writes: 44 columns, one row per second, local times
+What the **Transects** step writes: 45 columns, one row per second, local times
 in US/Pacific. Grouped by what they are for — what and when, where, how it was
 moving, how deep, what the camera saw, then power, pilot settings, and the raw
 inputs behind the derived columns.
@@ -588,6 +588,12 @@ between a measurement and an estimate:
 | `NEDz` | Local-frame z, positive down. Blank when the message is not recorded. | `LOCAL_POSITION_NED.z` | Fused | last |
 | `Pressure_abs_hPa` | Absolute water pressure. Independent of the EKF, which makes it a useful cross-check on depth. | `SCALED_PRESSURE2.press_abs` (external Bar30) | Direct | mean |
 | `Messages` | How many MAVLink messages went into this second. A thin row is a dropout. | counted while reading | Computed | count |
+
+**Survey state**
+
+| Column | What it is | Where it comes from | Origin | Per second |
+| --- | --- | --- | --- | --- |
+| `Survey_state` | `transect` for a second that was being surveyed, `pause` for one inside a pause the operator recorded — a disarm, a video glitch, a minute spent getting the vehicle back. Every row of the transect is here either way; `Distance` counts only the `transect` rows, and the GoPro imagery from a `pause` is discarded rather than filed. | the transect's pause times | Computed | per row |
 
 <!-- /transect-columns -->
 
