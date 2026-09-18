@@ -17,11 +17,16 @@ a survey lead can act on:
   * vibration and accelerometer clipping, which corrupt attitude first;
   * the warnings the autopilot itself raised.
 
-One judgement is built in rather than left to the reader. Without GPS or a
-locked USBL, ArduSub reports the AHRS bit unhealthy for the whole dive -- it
-means "no absolute position", not "the attitude solution is broken". Reporting
-that as a fault would cry wolf on every survey the team flies, so it is
-annotated instead.
+One judgement is built in rather than left to the reader. ArduSub's AHRS
+health bit is not the EKF's opinion of itself: it is cleared when the EKF is
+unhealthy *or* when the accelerometer calibration does not match the fitted
+IMU (``GCS::update_sensor_status_flags`` requires ``ins.accel_calibrated_ok_all()``,
+which fails when the saved INS_ACC_ID is not the accelerometer the board
+found). The EKF's own status flags are ANDed with its health, so the two can
+be told apart: attitude valid while the bit is unhealthy means the
+calibration check, not the filter. This vehicle has shown exactly that on
+every recording since 2026-08-26, with and without a USBL fix, so the report
+names the calibration rather than the fix.
 """
 
 from __future__ import annotations
@@ -135,10 +140,8 @@ class HealthReport:
         for sensor, pct in sorted(self.unhealthy.items(), key=lambda kv: -kv[1]):
             if pct < 1.0:
                 continue     # a handful of samples, not a fault
-            # The AHRS bit tracks "no absolute position" rather than a broken
-            # attitude solution, so on a no-GPS dive it is always set and saying
-            # so here would cry wolf on every survey the team flies.
-            if _short(sensor) == "AHRS" and not self.had_absolute_position:
+            if _short(sensor) == "AHRS":
+                out.append(self._ahrs_verdict(pct))
                 continue
             out.append(f"{_describe(sensor)} reported unhealthy for "
                        f"{pct:.0f}% of the dive.")
@@ -162,6 +165,51 @@ class HealthReport:
                 "so it is worth a calibration check."
             )
         return out
+
+    # -- the AHRS bit -----------------------------------------------------
+
+    @property
+    def ekf_healthy_pct(self) -> float:
+        """How much of the dive the EKF called itself healthy.
+
+        EKF_STATUS_REPORT's flags are ANDed with the filter's own health, so
+        an attitude flag is a health flag: no unhealthy EKF ever reports one.
+        """
+        return self.ekf_flags.get("EKF_ATTITUDE", 0.0)
+
+    @property
+    def ahrs_bit_is_the_accel_cal(self) -> bool:
+        """The AHRS bit was unhealthy while the EKF said it was fine.
+
+        ArduSub clears the bit for either an unhealthy EKF or an accelerometer
+        calibration that does not match the fitted IMU. When the EKF's own
+        flags were valid for at least as long as the bit was down, the EKF
+        was not the reason, and the calibration check is all that is left.
+        """
+        pct = next((p for s, p in self.unhealthy.items() if _short(s) == "AHRS"), 0.0)
+        return pct >= 1.0 and self.ekf_healthy_pct >= pct - 1.0
+
+    def _ahrs_verdict(self, pct: float) -> str:
+        if self.ahrs_bit_is_the_accel_cal:
+            return (
+                f"AHRS reported unhealthy for {pct:.0f}% of the dive while the EKF "
+                f"reported itself healthy for {self.ekf_healthy_pct:.0f}%. On ArduSub "
+                "that combination is the accelerometer-calibration check, not the "
+                "filter: the calibration ArduSub has saved is not valid for the "
+                "fitted IMU -- none at all, or one whose INS_ACC_ID is not the "
+                "accelerometer the board found -- so it is treated as absent. "
+                "Attitude still works, but redo the 6-position accelerometer "
+                "calibration on this vehicle (BlueOS > Vehicle Setup > Calibration). "
+                "The pre-arm check that would say '3D Accel calibration needed' is "
+                "skipped when ARMING_CHECK leaves INS out, which is how this goes "
+                "unnoticed."
+            )
+        return (
+            f"AHRS reported unhealthy for {pct:.0f}% of the dive, and the EKF "
+            f"reported a valid attitude for only {self.ekf_healthy_pct:.0f}%: the "
+            "filter itself was unhealthy (a fault, or every innovation test "
+            "failing at once). Read the variances above."
+        )
 
     def lines(self) -> list[str]:
         L: list[str] = []
@@ -194,8 +242,9 @@ class HealthReport:
         if self.unhealthy:
             for sensor, pct in sorted(self.unhealthy.items(), key=lambda kv: -kv[1]):
                 note = ""
-                if _short(sensor) == "AHRS" and not self.had_absolute_position:
-                    note = "   (expected with no GPS/USBL: it means no absolute position)"
+                if _short(sensor) == "AHRS" and self.ahrs_bit_is_the_accel_cal:
+                    note = ("   (the EKF was healthy: this is the accelerometer-"
+                            "calibration check -- see the concerns)")
                 if pct < 1.0:
                     continue
                 add(f"   unhealthy {pct:5.1f}% of the dive: {_describe(sensor)}{note}")

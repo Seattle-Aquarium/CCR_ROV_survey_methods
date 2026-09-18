@@ -702,11 +702,16 @@ the data being analysed.
 
 ### One judgement is built in
 
-Without GPS or a locked USBL, ArduSub reports the **AHRS** health bit unhealthy
-for the entire dive. It means *"no absolute position"*, not *"the attitude
-solution is broken"*. Raising that as a fault would fire on every survey the team
-flies and teach everyone to ignore the list, so it is annotated instead — unless
-the dive did have an absolute fix, where it is a real concern.
+ArduSub's **AHRS** health bit is not the EKF's opinion of itself. The autopilot
+clears it for either of two reasons: the EKF is unhealthy, *or* the
+accelerometer calibration does not match the fitted IMU (the saved
+`INS_ACC_ID` is not the accelerometer the board found, so the calibration is
+treated as absent). The EKF's own status flags are ANDed with its health, so
+the report can tell the two apart: an attitude flag valid all dive while the bit
+is unhealthy rules the EKF out, and the concern then says *redo the 6-position
+accelerometer calibration* rather than reporting a fault it cannot see. This
+vehicle has shown exactly that on every recording since 2026-08-26, with and
+without a USBL fix.
 
 From a terminal, the same report:
 

@@ -286,11 +286,18 @@ seconds — a completely different, and actually actionable, picture.
 Given a plan (or `--transect`), the report adds a per-transect breakdown and
 judges the dropout warnings on the transects alone.
 
-One judgement is built in. Without GPS or a locked USBL, ArduSub reports the
-**AHRS** health bit unhealthy for the whole dive: it means "no absolute
-position", not "the attitude solution is broken". Flagging that as a fault would
-cry wolf on every survey the team flies, so it is annotated instead of raised —
-unless the dive *did* have an absolute fix, in which case it is a real concern.
+One judgement is built in. ArduSub's **AHRS** health bit is not the EKF's
+opinion of itself. The autopilot clears it for either of two reasons: the EKF
+is unhealthy, *or* the accelerometer calibration does not match the fitted IMU
+(the saved `INS_ACC_ID` is not the accelerometer the board found, so the
+calibration is treated as absent). The EKF's own status flags are ANDed with
+its health, so the two can be told apart: an attitude flag valid all dive while
+the bit is unhealthy rules the EKF out, and the report says so — *redo the
+6-position accelerometer calibration* — rather than reporting a fault it cannot
+see. This vehicle has shown exactly that on every recording since 2026-08-26,
+with and without a USBL fix. It is not the missing EKF origin: the 2026-09-02
+Jack Block dive had a locked USBL, an absolute position and the same bit down
+for 100% of the dive.
 
 ---
 
