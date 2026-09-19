@@ -1264,7 +1264,7 @@ between a measurement and an estimate:
 | `Longitude` | As above. | `GPS_RAW_INT.lon` ÷ 1e7 | Direct | last |
 | `EKFlat` | Fused global position. **Blank whenever the EKF has no absolute fix**, which is every dive without a locked USBL. | `GLOBAL_POSITION_INT.lat` ÷ 1e7 | Fused | last |
 | `EKFlon` | As above. | `GLOBAL_POSITION_INT.lon` ÷ 1e7 | Fused | last |
-| `DVLlat` | The DVL track as coordinates. Propagated once across the whole dive, so transects keep their true separation. | geodesic walk of the `DVLx`/`DVLy` steps from the dive's first valid fix | Computed | — |
+| `DVLlat` | The DVL track as coordinates. Propagated once across the whole dive, so transects keep their true separation. Seeded from the dive's first GPS or EKF fix; if the dive never has either, seeded instead from `pipeline.run`'s `manual_origin` when the caller supplies one (the vehicle's own ORIGIN_LAT/ORIGIN_LON, say) — blank only when neither exists. | geodesic walk of the `DVLx`/`DVLy` steps from that seed | Computed | — |
 | `DVLlon` | As above. | as above | Computed | — |
 | `GPS_fix_type` | Fix state of the acoustic tracker. `NO_GPS` means the positions are dead reckoning. | `GPS_RAW_INT.fix_type` | Direct | last |
 | `GPS_satellites` | Locator count the tracker reports. | `GPS_RAW_INT.satellites_visible` | Direct | last |

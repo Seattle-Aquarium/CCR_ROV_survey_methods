@@ -95,10 +95,18 @@ def run(
     save_location: Path | str,
     transects: Sequence[TransectSpec],
     make_map: bool = True,
+    manual_origin: tuple[float, float] | None = None,
     progress: ProgressCB | None = None,
     on_log: LogCB | None = None,
 ) -> RunResult:
-    """Read the recordings, cut them into transects, write CSVs and a map."""
+    """Read the recordings, cut them into transects, write CSVs and a map.
+
+    ``manual_origin`` is ``(lat, lon)`` to dead-reckon the whole dive from when
+    it never got a real GPS or EKF fix at all -- typically because ORIGIN_LAT/
+    ORIGIN_LON were set on the vehicle before arming but nothing on board
+    actually turned them into an EKF origin. Ignored the moment any real fix
+    exists anywhere in the dive; see `transect.georeference_dvl`.
+    """
     def say(msg: str) -> None:
         log.info(msg)
         if on_log:
@@ -160,12 +168,17 @@ def run(
     step(0.74, "building the dive track")
     site_frame = False
     try:
-        df_all, _steps, seed_warning = georeference_dvl(df_all)
+        df_all, _steps, seed_warning = georeference_dvl(df_all, manual_origin)
         if seed_warning:
             say(f"  ! {seed_warning}")
             result.warnings.append(seed_warning)
-        else:
-            site_frame = True
+        # A warning from a manual origin is informational, not a failure: the
+        # dive-wide track it produced is still real and still the one worth
+        # keeping continuous across transects. Only "no GPS or EKF fix to seed
+        # lat/lon" -- no manual_origin either -- leaves DVLlat entirely blank,
+        # and that is the one case each transect should fall back to seeding
+        # (and failing) on its own, rather than re-propagate a column of NaN.
+        site_frame = df_all["DVLlat"].notna().any()
     except Exception as ex:
         result.warnings.append(f"dive-wide track failed ({ex}); "
                                "each transect will be seeded on its own")
@@ -185,7 +198,7 @@ def run(
         r = export_transect(
             df_all, spec.windows, i, spec.transect_id, site_name,
             transects_folder, dvl_source=read.dvl_source, site_frame=site_frame,
-            pauses=spec.pauses,
+            pauses=spec.pauses, manual_origin=manual_origin,
         )
         say(r.message)
         for w in r.warnings:

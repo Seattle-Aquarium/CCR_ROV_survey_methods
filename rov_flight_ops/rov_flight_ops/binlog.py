@@ -196,6 +196,90 @@ def align_from_gps(path: Path) -> BinAlignment | None:
                         note=f"from {len(offs)} GPS fixes")
 
 
+# --------------------------------------------------------------------------
+#  the vehicle's own origin, for when the EKF never got one
+# --------------------------------------------------------------------------
+#
+# On 2026-09-17, ORIGIN_LAT/ORIGIN_LON were set correctly before arming at both
+# sites flown -- confirmed here in the PARM stream, matching the site each
+# time -- and the EKF never once logged an ORGN event for either dive. The
+# script that is supposed to turn those two parameters into an actual AHRS/EKF
+# origin (ArduPilot's own applet is `ahrs-set-origin.lua`, though this fleet's
+# parameters are named `ORIGIN_LAT`/`ORIGIN_LON` rather than that applet's
+# `AHRS_ORIG_LAT`/`AHRS_ORIG_LON`, so it is a locally modified copy) produced
+# no GCS text either -- not even its own startup banner -- for the whole of
+# either flight. The most consistent explanation is that the script is not
+# currently present on the vehicle's SD card, not that it ran and failed.
+#
+# Either way, the parameters are real evidence of where the dive started, even
+# though the autopilot never acted on them, and they are the one thing that
+# lets `mcap_to_csv.transect.georeference_dvl` dead-reckon a otherwise-blank
+# dive rather than leave it with no track at all.
+
+
+@dataclass
+class OriginFix:
+    lat: float
+    lon: float
+    #: "ORGN" is the EKF's own record that `ahrs:set_origin()` was actually
+    #: called -- ground truth, if this fleet's missing script ever gets
+    #: reinstalled. "params" is ORIGIN_LAT/ORIGIN_LON as set by the operator,
+    #: present whether or not anything downstream ever used them, which is
+    #: why a caller should say so out loud rather than pass it on silently.
+    source: str
+
+    @property
+    def confirmed(self) -> bool:
+        return self.source == "ORGN"
+
+
+#: Parameter name pairs a "read two params, call ahrs:set_origin()" script has
+#: been seen to use on this fleet: this fleet's own naming first, then
+#: ArduPilot's stock `ahrs-set-origin.lua` applet's naming, in case a vehicle
+#: ends up running that one unmodified instead.
+_ORIGIN_PARAM_NAMES = (("ORIGIN_LAT", "ORIGIN_LON"),
+                       ("AHRS_ORIG_LAT", "AHRS_ORIG_LON"))
+
+
+def read_origin_params(path: Path) -> OriginFix | None:
+    """Wherever this BIN says the dive's origin was, autopilot-confirmed or not.
+
+    Prefers an ``ORGN`` message -- proof the EKF actually adopted an origin,
+    from any source (GPS, an external nav system, or a script) -- over a pair
+    of origin parameters, which only say what the operator entered and
+    nothing about whether the autopilot ever used it.
+    """
+    from pymavlink import mavutil
+
+    conn = mavutil.mavlink_connection(str(path))
+    seen: dict[str, float] = {}
+    while True:
+        msg = conn.recv_match(type=["ORGN", "PARM"])
+        if msg is None:
+            break
+        if msg.get_type() == "ORGN":
+            lat, lon = getattr(msg, "Lat", 0.0), getattr(msg, "Lng", 0.0)
+            if _finite_nz(lat) and _finite_nz(lon):
+                return OriginFix(float(lat), float(lon), "ORGN")
+            continue
+        name = getattr(msg, "Name", "")
+        if any(name in pair for pair in _ORIGIN_PARAM_NAMES):
+            seen[name] = msg.Value
+    for lat_name, lon_name in _ORIGIN_PARAM_NAMES:
+        lat_param, lon_param = seen.get(lat_name), seen.get(lon_name)
+        if _finite_nz(lat_param) and _finite_nz(lon_param):
+            return OriginFix(float(lat_param), float(lon_param), "params")
+    return None
+
+
+def _finite_nz(x) -> bool:
+    try:
+        v = float(x)
+        return not math.isnan(v) and not math.isinf(v) and v != 0.0
+    except (TypeError, ValueError):
+        return False
+
+
 #: MAVLink messages that carry the autopilot's own uptime.
 _BOOT_TOPICS = ("mavlink/1/1/ATTITUDE", "mavlink/1/1/VFR_HUD",
                 "mavlink/1/1/GLOBAL_POSITION_INT")

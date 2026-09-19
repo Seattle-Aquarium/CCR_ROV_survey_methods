@@ -1749,8 +1749,10 @@ def _pick_int(entry: dict, names: tuple[str, ...]):
 #: time to be trying sixteen URLs: each one costs its full timeout, and the
 #: caller is usually the loop that also has to notice the vehicle disarming.
 _NETWORK_PATH_FOUND: dict[str, str] = {}
-_TETHER_FOUND: dict[str, tuple[int, str] | None] = {}
-_TETHER_PROBED_AT: dict[str, float] = {}
+#: Keyed by (host, kind) -- "rate" and "devices" are different routes and must
+#: not share a cached (port, path), even though one extension serves both.
+_TETHER_FOUND: dict[tuple[str, str], tuple[int, str] | None] = {}
+_TETHER_PROBED_AT: dict[tuple[str, str], float] = {}
 
 #: How long before a vehicle that had no tether diagnostics is asked again.
 #: Not never: the extension was started mid-flight once already, and a probe
@@ -1829,62 +1831,98 @@ def tether_interface(interfaces: dict[str, dict]) -> str:
 # say otherwise is the rate the two modems have negotiated with each other,
 # and neither operating system can see it.
 #
-# The `williangalvani.plc-diagnostics` extension reads it from the vehicle
-# side. It is an extension rather than a service, so its port and its routes
-# are whatever that release chose, and the only safe way to read it is to ask
-# what it serves and keep whatever comes back.
+# The `williangalvani.plc-diagnostics` extension (github.com/Williangalvani/
+# plc-extension) reads it from the vehicle side, by shelling out to the
+# open-plc-utils tools (`plcstat`, `plcrate`) against the Fathom-X chipset.
+# Confirmed from that extension's own source on 2026-09-18:
+#
+#   GET /v1.0/rate     -> a bare JSON list, e.g. [163.0, 176.0] -- the numbers
+#                         `plcrate` printed for TX and RX in that order (its
+#                         own README documents TX before RX); `null` when the
+#                         extension has never seen a remote device. NOT a dict
+#                         with named fields -- the previous version of this
+#                         function was written against a guessed shape that
+#                         does not match, which is why it never found anything
+#                         on 2026-09-17 despite the extension being installed.
+#   GET /v1.0/devices  -> a JSON list of {mac, firmware, node, is_local}, one
+#                         entry per PLC node seen on the line. Two entries
+#                         (local + remote) is a live pair; fewer than two means
+#                         no remote device is being heard at all, which is a
+#                         plainer signal than the rate ever going soft.
+#
+# It is a FastAPI app served with `fastapi_versioning`, so `/latest/...` is
+# also live as an alias of the newest version; both are tried. Both routes
+# shell out to `plcrate`/`plcstat` on the Pi, so give them real time rather
+# than the sub-second budget a plain status endpoint would get.
 
-#: Where the tether diagnostics extension has been seen to listen. 1142 is the
-#: port BlueOS' own service scan reported it on during the September flight.
+#: Where the extension listens. 1142 is hardcoded in its own source
+#: (`uvicorn.run(..., port=1142)`); 9992 is kept as a fallback in case a future
+#: release or a different vehicle's install moves it.
 TETHER_PORTS = (1142, 9992)
 
-TETHER_PATHS = (
-    "/status", "/v1.0/status", "/plc", "/stats", "/v1.0/stats",
-    "/diagnostics", "/api/status", "/",
-)
+TETHER_RATE_PATHS = ("/v1.0/rate", "/latest/rate", "/rate")
+TETHER_DEVICE_PATHS = ("/v1.0/devices", "/latest/devices", "/devices")
 
-#: Keys that have carried a negotiated rate, in Mbps. The Qualcomm firmware
-#: reports the two directions separately and either one falling is the signal,
-#: so both are kept.
+#: Kept for a dict-shaped response, in case some other release or vehicle's
+#: extension reports the rate as named fields instead of a bare list.
 _TETHER_KEYS = {
     "rx_mbps": ("rx_rate", "rx_mbps", "rate_rx", "receive_rate", "rx"),
     "tx_mbps": ("tx_rate", "tx_mbps", "rate_tx", "transmit_rate", "tx"),
 }
 
 
-def read_tether(host: str, timeout: float = 1.5) -> dict:
-    """Whatever the tether diagnostics extension will say about the link.
+def _tether_get(host: str, kind: str, paths: tuple[str, ...], *,
+                 timeout: float) -> "Answer | None":
+    """The first JSON answer among `paths`, tried across both known ports.
 
-    Returns {} when the extension is not installed or not running, which is
-    not a failure -- it is a vehicle without that extension. When it does
-    answer, the body is kept verbatim under `raw` beside any rate that could
-    be recognised, because a key this does not know yet is still evidence
-    once a person reads the file.
+    `kind` ("rate" or "devices") keeps the two routes' cached (port, path)
+    separate -- they live on the same extension but are not the same URL.
     """
-    known = _TETHER_FOUND.get(host, "unknown")
+    key = (host, kind)
+    known = _TETHER_FOUND.get(key, "unknown")
     if known is None:
-        # This vehicle has already been walked and had nothing. Ask again
-        # occasionally, in case the extension has since been started, but
-        # never on every poll.
-        if time.time() - _TETHER_PROBED_AT.get(host, 0.0) < TETHER_REPROBE_S:
-            return {}
+        if time.time() - _TETHER_PROBED_AT.get(key, 0.0) < TETHER_REPROBE_S:
+            return None
         known = "unknown"
     candidates = ([known] if isinstance(known, tuple)
-                  else [(port, path) for port in TETHER_PORTS
-                        for path in TETHER_PATHS])
-    _TETHER_PROBED_AT[host] = time.time()
+                  else [(port, path) for port in TETHER_PORTS for path in paths])
+    _TETHER_PROBED_AT[key] = time.time()
     for port, path in candidates:
         a = _get(_base(host, port) + path, timeout=timeout)
         if not a.ok or not a.body.strip() or "json" not in a.kind.lower():
             continue
-        try:
-            body = json.loads(a.body)
-        except Exception:
-            continue
-        flat = body if isinstance(body, dict) else {}
-        if isinstance(body, list) and body and isinstance(body[0], dict):
-            flat = body[0]
-        found: dict = {"port": port, "path": path, "raw": body}
+        _TETHER_FOUND[key] = (port, path)
+        return a
+    _TETHER_FOUND[key] = None
+    return None
+
+
+def read_tether(host: str, timeout: float = 6.0) -> dict:
+    """Whatever the tether diagnostics extension will say about the link rate.
+
+    Returns {} when the extension is not installed or not running, which is
+    not a failure -- it is a vehicle without that extension. When it does
+    answer but has no remote device to test against, `rx_mbps`/`tx_mbps` stay
+    absent while `port`/`path`/`raw` are still filled in, which is the
+    distinction between "no extension" and "extension present, nothing to
+    report yet" that the CSV needs. `values` carries whatever numbers came
+    back, in the order the extension printed them, in case a future release
+    reports more than two.
+
+    `timeout` defaults high because a real answer means the Pi just ran
+    `plcrate` against the powerline chipset, not a status file read.
+    """
+    a = _tether_get(host, "rate", TETHER_RATE_PATHS, timeout=timeout)
+    if a is None:
+        return {}
+    try:
+        body = json.loads(a.body)
+    except Exception:
+        return {}
+    port, path = _TETHER_FOUND[(host, "rate")]
+    found: dict = {"port": port, "path": path, "raw": body}
+    if isinstance(body, list) and body and isinstance(body[0], dict):
+        flat = body[0]
         for label, names in _TETHER_KEYS.items():
             for name in names:
                 if name in flat:
@@ -1893,7 +1931,53 @@ def read_tether(host: str, timeout: float = 1.5) -> dict:
                     except (TypeError, ValueError):
                         pass
                     break
-        _TETHER_FOUND[host] = (port, path)
-        return found
-    _TETHER_FOUND[host] = None
-    return {}
+    elif isinstance(body, list) and body and all(
+            isinstance(v, (int, float)) for v in body):
+        # The real shape: plcrate's TX then RX numbers, unlabelled.
+        found["values"] = list(body)
+        found["tx_mbps"] = float(body[0])
+        if len(body) > 1:
+            found["rx_mbps"] = float(body[1])
+    elif isinstance(body, dict):
+        for label, names in _TETHER_KEYS.items():
+            for name in names:
+                if name in body:
+                    try:
+                        found[label] = float(body[name])
+                    except (TypeError, ValueError):
+                        pass
+                    break
+    # body is None (no remote device known to the extension yet) or some
+    # other shape: found still carries port/path/raw, with no rate -- exactly
+    # the "present but nothing to say" case documented above.
+    return found
+
+
+def read_tether_devices(host: str, timeout: float = 6.0) -> dict:
+    """Which PLC nodes the extension currently hears on the line.
+
+    Returns {} when the extension cannot be reached at all. When it answers,
+    `count` is how many devices it listed (2 for a normal local+remote pair,
+    fewer when the remote has dropped off the powerline network entirely --
+    a plainer, more binary signal than the rate ever needs to give).
+    """
+    a = _tether_get(host, "devices", TETHER_DEVICE_PATHS, timeout=timeout)
+    if a is None:
+        return {}
+    try:
+        body = json.loads(a.body)
+    except Exception:
+        return {}
+    port, path = _TETHER_FOUND[(host, "devices")]
+    devices = body if isinstance(body, list) else []
+    found: dict = {"port": port, "path": path, "raw": body,
+                   "count": len(devices)}
+    for d in devices:
+        if not isinstance(d, dict):
+            continue
+        if d.get("is_local"):
+            found["local_mac"] = d.get("mac")
+        else:
+            found["remote_mac"] = d.get("mac")
+            found["remote_firmware"] = d.get("firmware")
+    return found

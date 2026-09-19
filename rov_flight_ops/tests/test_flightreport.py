@@ -36,12 +36,28 @@ def _iso(offset: float) -> str:
     return (T0 + timedelta(seconds=offset)).isoformat(timespec="milliseconds")
 
 
-def _monitor_csv(path, seconds=300, dead=(), armed=True, rx=22.0):
-    """A topside CSV with outages where asked for them."""
+def _monitor_csv(path, seconds=300, dead=(), armed=True, rx=22.0,
+                  tether_tx=None, tether_rx=None, tether_remote_seen=None):
+    """A topside CSV with outages where asked for them.
+
+    `tether_tx`/`tether_rx`/`tether_remote_seen` are the plc-diagnostics
+    columns: None leaves them blank (extension not installed, the default for
+    every test that isn't specifically about it), a plain value fills every
+    row, and a callable `f(i)` fills row `i` for tests that need the value to
+    move (a widening split, a remote that drops partway through).
+    """
     columns = ["timestamp_utc", "rov_ping_latency_ms", "network_receive_mbps",
                "rov_reachable", "rov_armed", "cpu_usage_pct",
                "ram_available_gb", "network_errors_received",
-               "battery_discharge_w", "pi_soc_temp_c"]
+               "battery_discharge_w", "pi_soc_temp_c",
+               "tether_tx_mbps", "tether_rx_mbps", "tether_remote_seen"]
+
+    def _at(v, i):
+        return v(i) if callable(v) else v
+
+    def _bool_csv(v):
+        return "" if v is None else ("TRUE" if v else "FALSE")
+
     with open(path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns)
         writer.writeheader()
@@ -58,6 +74,13 @@ def _monitor_csv(path, seconds=300, dead=(), armed=True, rx=22.0):
                 "network_errors_received": 0,
                 "battery_discharge_w": 33.0,
                 "pi_soc_temp_c": 62.0,
+                "tether_tx_mbps": _at(tether_tx, i)
+                if tether_tx is not None else "",
+                "tether_rx_mbps": _at(tether_rx, i)
+                if tether_rx is not None else "",
+                "tether_remote_seen": _bool_csv(
+                    _at(tether_remote_seen, i)
+                    if tether_remote_seen is not None else None),
             })
 
 
@@ -225,6 +248,36 @@ def test_flying_on_battery_is_noted(tmp_path):
     day = _day_with(tmp_path, seconds=120)
     report = R.analyse(day)
     assert any("battery" in f.title.lower() for f in report.findings)
+
+
+def test_tether_modem_not_installed_is_a_note_not_silence(tmp_path):
+    day = _day_with(tmp_path, seconds=120)
+    report = R.analyse(day)
+    assert any("not available" in f.title.lower() for f in report.findings)
+
+
+def test_tether_modem_steady_rate_is_good_news(tmp_path):
+    day = _day_with(tmp_path, seconds=120, tether_tx=170.0, tether_rx=176.0,
+                     tether_remote_seen=True)
+    report = R.analyse(day)
+    assert any("held steady" in f.title.lower() for f in report.findings)
+    assert not any("pulled apart" in f.title.lower() for f in report.findings)
+
+
+def test_tether_modem_split_tx_rx_is_flagged(tmp_path):
+    # README: a split over ~20 Mbps points at an impedance mismatch, most
+    # often one wire of the pair not fully connected.
+    day = _day_with(tmp_path, seconds=120, tether_tx=180.0, tether_rx=90.0,
+                     tether_remote_seen=True)
+    report = R.analyse(day)
+    assert any("pulled apart" in f.title.lower() for f in report.findings)
+
+
+def test_tether_modem_losing_its_partner_is_flagged(tmp_path):
+    day = _day_with(tmp_path, seconds=120, tether_tx=170.0, tether_rx=176.0,
+                     tether_remote_seen=lambda i: i < 100)
+    report = R.analyse(day)
+    assert any("lost its partner" in f.title.lower() for f in report.findings)
 
 
 def test_an_empty_folder_reports_rather_than_raises(tmp_path):

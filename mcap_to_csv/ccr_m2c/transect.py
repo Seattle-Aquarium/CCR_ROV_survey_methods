@@ -196,11 +196,23 @@ def dvl_steps(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
     return dx, dy, np.sqrt(dx ** 2 + dy ** 2)
 
 
-def georeference_dvl(df_tran: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, str | None]:
+def georeference_dvl(
+    df_tran: pd.DataFrame,
+    manual_origin: tuple[float, float] | None = None,
+) -> tuple[pd.DataFrame, pd.Series, str | None]:
     """Turn relative DVL North/East metres into a geodesic lat/lon track.
 
     Returns the frame with ``DVLlat``/``DVLlon`` filled, the per-step distance,
     and a warning if there was no fix to seed from.
+
+    ``manual_origin`` is a last resort: ``(lat, lon)`` for the very first row,
+    used only when neither a surface GPS fix nor an EKF fix appears anywhere in
+    the frame. It exists for the case a dive never got either -- the EKF origin
+    was never actually applied even though ORIGIN_LAT/ORIGIN_LON were set on
+    the vehicle beforehand, which is silent and produces exactly this kind of
+    all-blank track. A real fix, wherever one exists, is always preferred: this
+    is the operator's own starting coordinate, not a measurement, so it is
+    never allowed to override or blend with an actual GPS or EKF position.
     """
     df_tran = df_tran.copy()
     for c in ("DVLlat", "DVLlon"):
@@ -228,6 +240,16 @@ def georeference_dvl(df_tran: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, st
         lon0 = df_tran.at[seed_idx, "EKFlon" if use_ekf else "Longitude"]
         df_tran.loc[:seed_idx, ["DVLlat", "DVLlon"]] = [lat0, lon0]
         df_tran[["DVLlat", "DVLlon"]] = df_tran[["DVLlat", "DVLlon"]].ffill()
+    elif manual_origin is not None and all(_finite_nz(v) for v in manual_origin):
+        seed_idx = df_tran.index[0]
+        df_tran.loc[:seed_idx, ["DVLlat", "DVLlon"]] = list(manual_origin)
+        df_tran[["DVLlat", "DVLlon"]] = df_tran[["DVLlat", "DVLlon"]].ffill()
+        seed_warning = (
+            f"no GPS or EKF fix anywhere in this dive; DVL track dead-reckoned "
+            f"from the operator's origin ({manual_origin[0]:.6f}, "
+            f"{manual_origin[1]:.6f}) instead -- position is right relative to "
+            f"itself but the whole track can sit off the true location and "
+            f"rotates with any compass error")
     else:
         seed_warning = "no GPS or EKF fix to seed lat/lon"
 
@@ -283,6 +305,7 @@ def export_transect(
     dvl_source: str = "",
     site_frame: bool = False,
     pauses: Sequence[tuple[str, str]] = (),
+    manual_origin: tuple[float, float] | None = None,
 ) -> TransectResult:
     """Filter to the transect's window(s), build the track, write one CSV.
 
@@ -297,6 +320,11 @@ def export_transect(
     exactly like a recording that failed, and the check that tells those apart
     needs the rows to still be there. Distance is accumulated over the
     surveying rows only, because it is survey effort that it stands for.
+
+    ``manual_origin`` only matters when ``site_frame`` is False: it is passed
+    to `georeference_dvl` as this transect's own last-resort seed, for the
+    (unusual) case the dive-wide pass in `pipeline.run` failed outright and
+    this transect is being seeded on its own.
     """
     result = TransectResult(transect_id=transect_id, transect_number=transect_num,
                             windows=list(windows))
@@ -331,7 +359,7 @@ def export_transect(
             df_tran["DVLy"] = df_tran["DVLy"] - float(df_tran["DVLy"].iloc[0])
         seed_warning = None
     else:
-        df_tran, step_dist, seed_warning = georeference_dvl(df_tran)
+        df_tran, step_dist, seed_warning = georeference_dvl(df_tran, manual_origin)
     if seed_warning:
         result.warnings.append(seed_warning)
 

@@ -111,6 +111,7 @@ def fakes(monkeypatch):
     monkeypatch.setattr(blueos, "read_temperature", lambda *a, **k: (None, None))
     monkeypatch.setattr(blueos, "read_interfaces", lambda *a, **k: {})
     monkeypatch.setattr(blueos, "read_tether", lambda *a, **k: {})
+    monkeypatch.setattr(blueos, "read_tether_devices", lambda *a, **k: {})
     monkeypatch.setattr(flightlog, "ARM_POLL_S", 0.02)
     monkeypatch.setattr(flightlog, "TETHER_POLL_S", 0.05)
     monkeypatch.setattr(flightlog, "WATCH_JOIN_S", 0.5)

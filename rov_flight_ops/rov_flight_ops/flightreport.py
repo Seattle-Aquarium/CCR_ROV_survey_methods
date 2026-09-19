@@ -559,17 +559,48 @@ def _summarise_vehicle(day: S.FlightDay, report: DayReport) -> None:
     out: dict = {}
     temps: list[float] = []
     throttled = False
+    tether_tx: list[float] = []
+    tether_rx: list[float] = []
+    splits: list[float] = []
+    tether_extension_seen = False
+    tether_remote_lost = False
     for session in day.monitors:
         _t, values = session.series("pi_soc_temp_c")
         temps.extend(float(v) for v in values if isinstance(v, (int, float)))
         for value in session.columns.get("pi_throttling") or []:
             if value is True:
                 throttled = True
+        tx_col = session.columns.get("tether_tx_mbps") or []
+        rx_col = session.columns.get("tether_rx_mbps") or []
+        for tx, rx in zip(tx_col, rx_col):
+            tx_ok = isinstance(tx, (int, float))
+            rx_ok = isinstance(rx, (int, float))
+            if tx_ok:
+                tether_tx.append(float(tx))
+                tether_extension_seen = True
+            if rx_ok:
+                tether_rx.append(float(rx))
+                tether_extension_seen = True
+            if tx_ok and rx_ok:
+                splits.append(abs(float(tx) - float(rx)))
+        for value in session.columns.get("tether_remote_seen") or []:
+            if value is False:
+                tether_remote_lost = True
+            if value is not None:
+                tether_extension_seen = True
     if temps:
         temps.sort()
         out["soc_temp_c"] = {"median": temps[len(temps) // 2],
                              "max": temps[-1]}
     out["throttled"] = throttled
+    out["tether_modem_seen"] = tether_extension_seen
+    out["tether_modem_remote_lost"] = tether_remote_lost
+    if tether_tx and tether_rx:
+        out["tether_modem_mbps"] = {
+            "tx_min": min(tether_tx), "tx_max": max(tether_tx),
+            "rx_min": min(tether_rx), "rx_max": max(tether_rx),
+            "max_split": max(splits) if splits else None,
+        }
     out["video_gap_seconds"] = sum(
         s.seconds for r in day.recordings for s in r.video_gaps)
     out["video_gaps"] = sum(len(r.video_gaps) for r in day.recordings)
@@ -857,6 +888,39 @@ def _raise_findings(day: S.FlightDay, report: DayReport) -> None:
         add(Finding(GOOD, "The companion computer stayed cool",
                     f"The Pi's SoC peaked at {temp:.0f} °C, against the 80 °C "
                     f"where throttling begins.", []))
+
+    rates = report.vehicle.get("tether_modem_mbps")
+    if report.vehicle.get("tether_modem_remote_lost"):
+        add(Finding(WARNING, "The tether modem lost its partner",
+                    "williangalvani.plc-diagnostics reported fewer than two "
+                    "PLC nodes on the line at least once — the Fathom-X pair "
+                    "stopped hearing each other, not just slowing down. Every "
+                    "host-side counter can read healthy while this happens; "
+                    "it is the one signal that comes from the modems "
+                    "themselves.", []))
+    elif rates:
+        split = rates.get("max_split")
+        if split is not None and split > 20:
+            add(Finding(WARNING, "Tether modem TX/RX rates pulled apart",
+                        f"TX ranged {rates['tx_min']:.0f}–{rates['tx_max']:.0f} "
+                        f"Mbps, RX {rates['rx_min']:.0f}–{rates['rx_max']:.0f}, "
+                        f"{split:.0f} Mbps apart at the widest — the "
+                        f"plc-diagnostics README calls a split this size an "
+                        f"impedance mismatch, most often one wire of the pair "
+                        f"not fully connected.", []))
+        else:
+            add(Finding(GOOD, "Tether modem link held steady",
+                        f"TX {rates['tx_min']:.0f}–{rates['tx_max']:.0f} Mbps, "
+                        f"RX {rates['rx_min']:.0f}–{rates['rx_max']:.0f}, "
+                        f"no split wider than {split:.0f} Mbps.", []))
+    elif not report.vehicle.get("tether_modem_seen"):
+        add(Finding(NOTE, "Tether modem rate not available",
+                    "williangalvani.plc-diagnostics did not answer at any "
+                    "point today, so the Fathom-X pair's own negotiated rate "
+                    "is not in this report — only what the two host "
+                    "computers saw on either end of it. Confirm the "
+                    "extension is installed and running before relying on "
+                    "its absence as good news.", []))
 
 
 #: The concerns `ccr_m2c.health` raises, as short titles. Its own text is a

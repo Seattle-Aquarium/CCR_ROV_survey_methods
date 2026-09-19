@@ -223,6 +223,11 @@ COLUMNS: tuple[str, ...] = (
     "rov_arp_ok",
     # and what the vehicle counted on its own side of the same link
     "pi_eth_rx_bytes", "pi_eth_rx_errors", "tether_link_mbps",
+    # the tether modem pair itself, via williangalvani.plc-diagnostics --
+    # separate from everything above because a link can measure perfectly
+    # healthy on both hosts while the powerline pair between them is the
+    # thing actually losing sync. Blank when the extension is not installed.
+    "tether_tx_mbps", "tether_rx_mbps", "tether_remote_seen",
 )
 
 #: Units, for the header note written beside the CSV. Anything not named here
@@ -246,7 +251,7 @@ UNITS: dict[str, str] = {
     "battery_discharge_w": "W", "battery_temp_c": "C", "fan_speed_rpm": "rpm",
     "motherboard_temp_c": "C", "system_uptime_s": "s", "rov_http_ms": "ms",
     "pi_soc_temp_c": "C", "phy_rx_bytes": "bytes", "pi_eth_rx_bytes": "bytes",
-    "tether_link_mbps": "Mbps",
+    "tether_link_mbps": "Mbps", "tether_tx_mbps": "Mbps", "tether_rx_mbps": "Mbps",
 }
 
 #: The groups the operator asked to be able to look at one at a time,
@@ -281,7 +286,8 @@ GROUPS: dict[str, tuple[str, ...]] = {
               "motherboard_temp_c", "pi_soc_temp_c", "system_uptime_s"),
     "Tether": ("nic_carrier", "phy_carrier", "nic_low_power",
                "phy_rx_bytes", "rov_arp_ok", "pi_eth_rx_bytes",
-               "tether_link_mbps"),
+               "tether_link_mbps", "tether_tx_mbps", "tether_rx_mbps",
+               "tether_remote_seen"),
 }
 
 #: What each group is actually for, shown under the strip. Written as the
@@ -314,7 +320,12 @@ GROUP_NOTES: dict[str, str] = {
               "different carrier. phy_rx_bytes still climbing while the "
               "bridge has gone quiet means the bridge stopped forwarding, not "
               "that the tether dropped. pi_eth_rx_bytes is the vehicle's own "
-              "count of what arrived.",
+              "count of what arrived. tether_tx/rx_mbps and "
+              "tether_remote_seen are the Fathom-X pair's own negotiated "
+              "rate and whether it can hear its partner at all -- the one "
+              "thing that can fail while every column above still reads "
+              "healthy on both computers, and blank whenever the "
+              "plc-diagnostics extension is not installed.",
 }
 
 
@@ -417,8 +428,15 @@ class VehicleState:
     eth_rx_bytes: int | None = None
     eth_rx_errors: int | None = None
     #: The negotiated rate between the two Fathom-X boards, when the tether
-    #: diagnostics extension is installed to report it.
-    tether_mbps: float | None = None
+    #: diagnostics extension is installed to report it. Two directions,
+    #: because a mismatch between them (README: >~20 Mbps apart) is itself a
+    #: diagnosis -- a wire likely disconnected rather than merely noisy.
+    tether_tx_mbps: float | None = None
+    tether_rx_mbps: float | None = None
+    #: Whether the extension currently hears a remote PLC node at all, apart
+    #: from whatever rate it last negotiated with one. None when the
+    #: extension itself could not be reached.
+    tether_remote_seen: bool | None = None
 
 
 class Sampler:
@@ -868,7 +886,14 @@ class Sampler:
         v = self.vehicle
         row["pi_eth_rx_bytes"] = v.eth_rx_bytes
         row["pi_eth_rx_errors"] = v.eth_rx_errors
-        row["tether_link_mbps"] = _f(v.tether_mbps, 1)
+        row["tether_tx_mbps"] = _f(v.tether_tx_mbps, 1)
+        row["tether_rx_mbps"] = _f(v.tether_rx_mbps, 1)
+        # The worse of the two, kept under the original column name: a single
+        # number a plot can already show, biased toward catching a one-sided
+        # drop rather than averaging it away.
+        pair = [x for x in (v.tether_tx_mbps, v.tether_rx_mbps) if x is not None]
+        row["tether_link_mbps"] = _f(min(pair), 1) if pair else None
+        row["tether_remote_seen"] = _b(v.tether_remote_seen)
 
     def _cockpit_columns(self, row: dict) -> None:
         c = self._cockpit()

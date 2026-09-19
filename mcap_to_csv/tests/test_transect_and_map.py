@@ -202,6 +202,72 @@ def test_track_without_any_fix_still_writes_a_file(builder, tmp_path):
     assert w["DVLx"].notna().all()          # the local track still exists
 
 
+def test_manual_origin_dead_reckons_when_theres_no_fix_at_all(builder, tmp_path):
+    """2026-09-17: ORIGIN_LAT/ORIGIN_LON were set correctly before arming, but
+    the EKF never adopted them, so the dive had no GPS or EKF fix anywhere.
+    ``manual_origin`` is the fallback for exactly that case."""
+    b = builder("nofix.mcap")
+    for i in range(10):
+        t = BASE_EPOCH + i
+        b.add(t, "ATTITUDE", {"roll": 0.0, "pitch": 0.0, "yaw": 0.0})
+        b.add(t, "VISION_POSITION_DELTA",
+              {"time_delta_usec": 1000000, "position_delta": [0.5, 0.0, 0.0],
+               "confidence": 99.0}, sysid=255, compid=0)
+        b.add(t, "GLOBAL_POSITION_INT", {"lat": 0, "lon": 0, "relative_alt": -2000})
+    df = add_empty_tide(read_mcaps([b.close()]).df)
+
+    origin = (47.62712, -122.39393)
+    r = export_transect(df, [("10:00:00", "10:00:09")], 1, "T1", "Site",
+                        tmp_path, manual_origin=origin)
+    assert r.path is not None
+    assert any("dead-reckoned" in w for w in r.warnings)
+    w = pd.read_csv(r.path)
+    assert w["DVLlat"].notna().all()
+    assert w["DVLlat"].iloc[0] == pytest.approx(origin[0], abs=1e-6)
+    assert w["DVLlon"].iloc[0] == pytest.approx(origin[1], abs=1e-6)
+    assert w["DVLlat"].is_monotonic_increasing            # still moved north
+    assert (w["DVLlat"].iloc[-1] - w["DVLlat"].iloc[0]) * 111_320 == \
+        pytest.approx(r.distance_m, rel=0.05)
+
+
+def test_manual_origin_keeps_transects_separated_across_the_dive(builder, tmp_path):
+    """The dive-wide pass, not each transect re-seeded at the same point.
+
+    Mirrors ``test_transects_keep_their_true_separation``, but for a dive that
+    has no fix anywhere rather than a static one -- the case
+    ``pipeline.run``'s ``site_frame`` logic must also treat as usable, since a
+    manual origin still produces one continuous, real track.
+    """
+    b = builder("nofix.mcap")
+    for i in range(150):
+        t = BASE_EPOCH + i
+        b.add(t, "ATTITUDE", {"roll": 0.0, "pitch": 0.0, "yaw": 0.0})
+        for k in range(5):
+            b.add(t + k / 5, "VISION_POSITION_DELTA",
+                  {"time_delta_usec": 200000, "angle_delta": [0, 0, 0],
+                   "position_delta": [0.1, 0.0, 0.0], "confidence": 99.0},
+                  sysid=255, compid=0)
+        b.add(t, "GLOBAL_POSITION_INT", {"lat": 0, "lon": 0, "relative_alt": -2000})
+
+    result = run([b.close()], site_name="S", survey_date="20260826", station_id=None,
+                 save_location=tmp_path, manual_origin=(47.62712, -122.39393),
+                 transects=[
+                     TransectSpec("T1", [("10:00:05", "10:00:25")]),
+                     TransectSpec("T2", [("10:01:30", "10:01:50")]),
+                 ], make_map=False)
+
+    assert any("dead-reckoned" in w for w in result.warnings)
+    t1 = pd.read_csv(tmp_path / "transects" / "T1.csv")
+    t2 = pd.read_csv(tmp_path / "transects" / "T2.csv")
+    assert t1["DVLlat"].notna().all() and t2["DVLlat"].notna().all()
+
+    # T2 continues from where the dive-wide track had reached, not from the
+    # origin again -- the failure mode a per-transect re-seed would produce.
+    gap_m = (t2["DVLlat"].iloc[0] - t1["DVLlat"].iloc[0]) * 111_320
+    assert gap_m == pytest.approx(0.5 * 85, rel=0.1)
+    assert t2["DVLlat"].iloc[0] > t1["DVLlat"].iloc[-1]
+
+
 def test_locked_output_lands_beside_the_original(dive, tmp_path):
     """Excel holding the last run's CSV must not lose this run's work."""
     df, _ = dive

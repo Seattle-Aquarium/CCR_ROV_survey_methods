@@ -305,6 +305,82 @@ def test_a_vehicle_without_the_extension_is_empty_not_an_error(monkeypatch):
     assert blueos.read_tether("192.168.2.2") == {}
 
 
+def test_tether_diagnostics_reads_the_extensions_actual_shape(monkeypatch):
+    """/v1.0/rate is a bare [tx, rx] list, not the dict the first cut guessed.
+
+    Confirmed from williangalvani/plc-extension's own source on 2026-09-18,
+    after a flight where the guessed paths and shape found nothing all day
+    despite the extension being installed and running.
+    """
+    hits = []
+
+    def fake_get(url, **kw):
+        hits.append(url)
+        if url.endswith("/v1.0/rate"):
+            return _Answer(json.dumps([163.0, 176.0]))
+        return _Answer("", ok=False)
+
+    monkeypatch.setattr(blueos, "_get", fake_get)
+    found = blueos.read_tether("192.168.2.2")
+    assert found["tx_mbps"] == 163.0
+    assert found["rx_mbps"] == 176.0
+    assert found["values"] == [163.0, 176.0]
+    assert found["port"] == 1142
+    assert any("/v1.0/rate" in h for h in hits)
+
+
+def test_tether_diagnostics_null_rate_is_not_a_missing_extension(monkeypatch):
+    """The extension answers `null` when it has never seen a remote device.
+
+    That is "installed, nothing to report yet" -- distinct from the empty
+    dict a vehicle without the extension at all returns, and the CSV column
+    needs to tell the two apart rather than showing the same blank for both.
+    """
+    monkeypatch.setattr(
+        blueos, "_get",
+        lambda url, **kw: (_Answer("null") if url.endswith("/v1.0/rate")
+                            else _Answer("", ok=False)))
+    found = blueos.read_tether("192.168.2.2")
+    assert found  # present: port/path/raw were filled in
+    assert "tx_mbps" not in found and "rx_mbps" not in found
+
+
+def test_tether_devices_reports_how_many_nodes_are_heard(monkeypatch):
+    devices = [
+        {"mac": "aa:aa", "firmware": "f1", "node": "001", "is_local": True},
+        {"mac": "bb:bb", "firmware": "f2", "node": "002", "is_local": False},
+    ]
+    monkeypatch.setattr(
+        blueos, "_get",
+        lambda url, **kw: (_Answer(json.dumps(devices))
+                            if url.endswith("/v1.0/devices") else _Answer("", ok=False)))
+    found = blueos.read_tether_devices("192.168.2.2")
+    assert found["count"] == 2
+    assert found["remote_mac"] == "bb:bb"
+
+
+def test_tether_devices_and_rate_do_not_share_a_cached_path(monkeypatch):
+    """The two routes live on one extension but are cached independently.
+
+    A bug fixed in the same pass this test guards: both calls shared one
+    `_TETHER_FOUND[host]` slot, so whichever endpoint was probed first
+    poisoned the other's cache and the second one silently served the wrong
+    URL's body forever after.
+    """
+    def fake_get(url, **kw):
+        if url.endswith("/v1.0/rate"):
+            return _Answer(json.dumps([10.0, 12.0]))
+        if url.endswith("/v1.0/devices"):
+            return _Answer(json.dumps([{"mac": "a", "is_local": True}]))
+        return _Answer("", ok=False)
+
+    monkeypatch.setattr(blueos, "_get", fake_get)
+    rate = blueos.read_tether("192.168.2.2")
+    devices = blueos.read_tether_devices("192.168.2.2")
+    assert rate["tx_mbps"] == 10.0
+    assert devices["count"] == 1
+
+
 # --------------------------------------------------------------------------
 #  against this actual machine, where it is a Windows one
 # --------------------------------------------------------------------------

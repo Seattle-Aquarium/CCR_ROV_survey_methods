@@ -167,6 +167,61 @@ def test_a_real_gps_fix_gives_the_offset(tmp_path, monkeypatch):
     assert al.trustworthy, "a GPS fix needs no further corroboration"
 
 
+def test_an_ekf_confirmed_origin_is_preferred_over_the_raw_parameters(
+        monkeypatch, tmp_path):
+    """ORGN is proof the EKF adopted an origin; the parameters are only proof
+    the operator entered one. When both exist, ORGN is ground truth."""
+    _fake_connection(monkeypatch, [
+        Msg("PARM", Name="ORIGIN_LAT", Value=47.6),
+        Msg("PARM", Name="ORIGIN_LON", Value=-122.3),
+        Msg("ORGN", Lat=47.61, Lng=-122.31)])
+    fix = binlog.read_origin_params(tmp_path / "x.BIN")
+    assert fix == binlog.OriginFix(47.61, -122.31, "ORGN")
+    assert fix.confirmed
+
+
+def test_origin_falls_back_to_the_raw_parameters_when_ekf_never_set_one(
+        monkeypatch, tmp_path):
+    """2026-09-17: ORIGIN_LAT/LON were set correctly before arming at both
+    sites, and the EKF logged no ORGN event either time. Losing the whole
+    track in that case, rather than falling back to what the operator
+    actually entered, is the bug this guards against."""
+    _fake_connection(monkeypatch, [
+        Msg("PARM", Name="ORIGIN_LAT", Value=47.62712097167969),
+        Msg("PARM", Name="ORIGIN_LON", Value=-122.39392852783203),
+        Msg("PARM", Name="ORIGIN_ALT", Value=0.0)])
+    fix = binlog.read_origin_params(tmp_path / "x.BIN")
+    assert fix == binlog.OriginFix(47.62712097167969, -122.39392852783203,
+                                   "params")
+    assert not fix.confirmed
+
+
+def test_origin_recognises_the_stock_applets_own_param_names(monkeypatch, tmp_path):
+    """A vehicle running ArduPilot's unmodified ahrs-set-origin.lua applet
+    names its parameters AHRS_ORIG_LAT/AHRS_ORIG_LON, not this fleet's
+    ORIGIN_LAT/ORIGIN_LON. Either has to be recognised."""
+    _fake_connection(monkeypatch, [
+        Msg("PARM", Name="AHRS_ORIG_LAT", Value=47.62712097167969),
+        Msg("PARM", Name="AHRS_ORIG_LON", Value=-122.39392852783203)])
+    fix = binlog.read_origin_params(tmp_path / "x.BIN")
+    assert fix == binlog.OriginFix(47.62712097167969, -122.39392852783203,
+                                   "params")
+
+
+def test_a_zero_origin_parameter_is_not_a_location(monkeypatch, tmp_path):
+    """0, 0 is the Gulf of Guinea, not "unset" -- but it is also what an
+    uninitialised parameter reads as, so it must not be handed on as real."""
+    _fake_connection(monkeypatch, [
+        Msg("PARM", Name="ORIGIN_LAT", Value=0.0),
+        Msg("PARM", Name="ORIGIN_LON", Value=0.0)])
+    assert binlog.read_origin_params(tmp_path / "x.BIN") is None
+
+
+def test_no_origin_anywhere_is_none_not_an_error(monkeypatch, tmp_path):
+    _fake_connection(monkeypatch, [Msg("MSG", Message="ArduSub V4.5.7")])
+    assert binlog.read_origin_params(tmp_path / "x.BIN") is None
+
+
 def _fake_connection(monkeypatch, msgs):
     class Conn:
         def __init__(self):

@@ -638,20 +638,33 @@ class FlightRecorder:
         # the flight began is still found -- which one failed first probe
         # used to prevent for the rest of the flight.
         try:
-            found = blueos.read_tether(self.host, timeout=2.5)
+            found = blueos.read_tether(self.host, timeout=6.0)
         except Exception:
             found = {}
         if found:
             self._tether_ok = True
-            rate = found.get("rx_mbps")
-            if rate is None:
-                rate = found.get("tx_mbps")
-            vehicle.tether_mbps = rate
+            vehicle.tether_tx_mbps = found.get("tx_mbps")
+            vehicle.tether_rx_mbps = found.get("rx_mbps")
             self._tether_seen = found
         else:
             if self._tether_ok is None:
                 self._tether_ok = False
-            vehicle.tether_mbps = None
+            vehicle.tether_tx_mbps = vehicle.tether_rx_mbps = None
+        # The device list is the plainer signal: whether the extension can
+        # currently hear a remote PLC node at all, separate from what rate it
+        # negotiated with it. Same probe-and-remember discipline as above, and
+        # deliberately a second call rather than folded into read_tether --
+        # the two are different routes on the same extension and one working
+        # says nothing about the other.
+        try:
+            devices = blueos.read_tether_devices(self.host, timeout=6.0)
+        except Exception:
+            devices = {}
+        if devices:
+            count = devices.get("count")
+            vehicle.tether_remote_seen = (count or 0) >= 2
+        else:
+            vehicle.tether_remote_seen = None
 
     def _on_armed(self, watch: _Watch) -> None:
         with self._lock:

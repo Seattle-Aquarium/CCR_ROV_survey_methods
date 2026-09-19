@@ -21,6 +21,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
+from .. import binlog
 from . import theme as T
 from .shell import JobStopped
 from .widgets import Card, button, entry, label, output_box
@@ -252,6 +253,31 @@ class TransectPage(ctk.CTkFrame):
         else:
             messagebox.showinfo(APP_NAME, "Nothing has been written yet.")
 
+    def _origin_fallback(self) -> "binlog.OriginFix | None":
+        """The dive's own ORIGIN_LAT/ORIGIN_LON, for when nothing else has one.
+
+        Read from whichever .BIN under this flight folder has it, newest
+        first -- one origin for the whole run, on the assumption behind this
+        page's own folder layout: one flight folder is one site, flown on one
+        boot of the vehicle. A day that changes ORIGIN_LAT/ORIGIN_LON between
+        sites *without* rebooting, inside one flight folder, is not something
+        this looks for.
+        """
+        if not self.app.flight_dir:
+            return None
+        try:
+            bins = binlog.list_bins(Path(self.app.flight_dir))
+        except Exception:
+            return None
+        for path in reversed(bins):
+            try:
+                fix = binlog.read_origin_params(path)
+            except Exception:
+                continue
+            if fix:
+                return fix
+        return None
+
     def _run(self) -> None:
         mod = _extractor()
         if mod is None:
@@ -267,6 +293,9 @@ class TransectPage(ctk.CTkFrame):
         if not mcaps:
             messagebox.showinfo(APP_NAME, "No .mcap files were found in this flight.")
             return
+
+        origin_fix = self._origin_fallback()
+        manual_origin = (origin_fix.lat, origin_fix.lon) if origin_fix else None
 
         plan = self.app._plan()
         errors = plan.validate() if hasattr(plan, "validate") else []
@@ -290,6 +319,14 @@ class TransectPage(ctk.CTkFrame):
 
         def work(progress, cancel):
             reports: list[str] = []
+            if origin_fix and not origin_fix.confirmed:
+                reports.append(
+                    f"! Using ORIGIN_LAT/ORIGIN_LON from the vehicle's own "
+                    f"BIN log ({origin_fix.lat:.6f}, {origin_fix.lon:.6f}) to "
+                    f"seed the DVL track -- the EKF itself never logged "
+                    f"adopting an origin (no ORGN event), so treat this run's "
+                    f"map as dead reckoning from that starting point, not a "
+                    f"confirmed fix.")
             for i, site in enumerate(sites):
                 if cancel.is_set():
                     raise JobStopped(f"before site {site.name}")
@@ -327,6 +364,7 @@ class TransectPage(ctk.CTkFrame):
                     save_location=out,
                     transects=specs,
                     make_map=want_map,
+                    manual_origin=manual_origin,
                     progress=report,
                 )
                 if cancel.is_set():

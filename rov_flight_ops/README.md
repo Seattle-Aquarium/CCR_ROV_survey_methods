@@ -513,6 +513,23 @@ How a recording's ending is described is limited to what the logs show:
 Unchanged from UTC for now: per-transect CSVs (with tide-corrected depth) and a
 map via the transect extractor, and a sensor-health report.
 
+**Fallback: dead reckoning from the vehicle's own origin.** `DVLlat`/`DVLlon`
+are normally seeded from the dive's first GPS or EKF fix. When a dive has
+neither anywhere in it -- confirmed on 2026-09-17 at both Sirens of Spring and
+EBM West, where `ORIGIN_LAT`/`ORIGIN_LON` were set correctly before arming
+each time but the EKF never logged adopting an origin (no `ORGN` event; see
+`binlog.read_origin_params`) -- this page reads whichever of the flight's own
+`.BIN` logs has an origin, ORGN-confirmed or just the raw parameters, and
+passes it to the extractor as `manual_origin`. The output warns when the
+origin was never actually confirmed by the autopilot, because the resulting
+map is dead reckoning from that starting point, not a verified fix: right
+relative to itself, but the whole track can sit off the true location and
+rotates with any compass error. See `mcap_to_csv/ccr_m2c/transect.py`'s
+`georeference_dvl` for the mechanics, and the OTS write-up from that date for
+why the origin was never applied in the first place -- most likely the script
+that turns those two parameters into a real EKF origin is no longer on the
+vehicle's SD card.
+
 ---
 
 ## The flight folder
