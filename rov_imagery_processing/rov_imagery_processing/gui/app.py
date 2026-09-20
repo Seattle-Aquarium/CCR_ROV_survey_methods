@@ -7,10 +7,15 @@ Everything to do with the imagery that came back from a flight:
    other tab sorts and cuts by. Saved by ROV Flight Operations into the flight
    folder, so opening the folder usually fills them in.
 2. **Import photos** -- a GoPro card, or the flight's own photos, into
-   per-transect folders.
+   per-transect folders, and the telemetry banner on the folders that result.
 3. **Process photos** -- GPR raws developed to TIF through Lightroom Classic.
-4. **Banner tools** -- the telemetry banner on folders of stills.
-5. **Video** -- trims, telemetry composites, clips and side-by-sides.
+4. **Video** -- trims, telemetry composites, clips and two-up comparisons.
+
+Bannering used to be a tab of its own. It is a step in importing rather than a
+job in its own right -- it acts on the folders an import has just made, inside
+the flight the rest of the tab is already pointed at -- so it is the third
+section of Import photos, and the tab that made you choose the folder all over
+again is gone.
 
 The vehicle itself -- monitoring, logs, flight reports -- is ROV Flight
 Operations, a separate program.
@@ -32,7 +37,7 @@ from ..config import AppConfig
 from ..pipeline import RunResult
 from ..survey import PLAN_FILENAME, Site, SurveyPlan, plan_path
 from . import theme as T
-from .shell import Shell
+from .shell import Lamp, Shell
 from .widgets import Card, SiteFrame, button, entry, fit_wrap, output_box, say
 
 APP_NAME = "ROV Imagery Processing"
@@ -50,6 +55,10 @@ class App(Shell):
         self.discovery: discovery.Discovery | None = None
         self._sites: list[SiteFrame] = []
         self._profile_img = None
+        #: What a page last scanned for imagery, and how much it held:
+        #: (path, files found). The banner's card lamp is this and nothing
+        #: else, so it never claims more than a page has actually looked at.
+        self._card: tuple[Path, int] | None = None
         super().__init__()
 
     # ------------------------------------------------------------------
@@ -57,7 +66,6 @@ class App(Shell):
     # ------------------------------------------------------------------
 
     def build_tabs(self) -> None:
-        from .bannertools import BannerToolsTab
         from .importpage import ImportPage
         from .processpage import ProcessPage
         from .videopage import VideoPage
@@ -67,7 +75,6 @@ class App(Shell):
 
         for name, key, cls in (("Import photos", "import", ImportPage),
                                ("Process photos", "process", ProcessPage),
-                               ("Banner tools", "banner", BannerToolsTab),
                                ("Video", "video", VideoPage)):
             tab = self.add_tab(name)
             page = cls(tab, self)
@@ -129,6 +136,68 @@ class App(Shell):
         self.preview_img.grid(row=2, column=0, sticky="w", pady=(8, 0))
         self.preview_img.grid_remove()          # takes no room until drawn
         self.add_site()
+
+    # ------------------------------------------------------------------
+    #  the two banner lamps
+    # ------------------------------------------------------------------
+
+    def lamp_states(self) -> dict[str, tuple[str, str]]:
+        """What the banner shows about the two things this program reads.
+
+        Both are answered from the disk rather than from what a page last
+        believed, so a card pulled out of the reader and a flight folder that
+        has gone offline both go dark on their own. Between them they cover
+        the two ways an hour of work gets aimed at the wrong place: no
+        transects saved for the flight, and no card where the pictures were
+        supposed to be.
+        """
+        return {"flight": self._flight_lamp(), "card": self._card_lamp()}
+
+    def _flight_lamp(self) -> tuple[str, str]:
+        """Grey with no folder, a ring without transects, lit with them.
+
+        The ring is the case worth having: a flight folder is chosen and looks
+        right, but nothing has written its transects into it, so every tab
+        that sorts or cuts by them has nothing to go on. Saving the plan on
+        this tab fills the lamp in.
+        """
+        flight = self.flight_dir
+        if not flight:
+            return Lamp.OFF
+        try:
+            if not Path(flight).is_dir():
+                return Lamp.OFF
+            return Lamp.ON if plan_path(flight).is_file() else Lamp.WAITING
+        except OSError:
+            return Lamp.OFF                # offline, or the drive went away
+
+    def _card_lamp(self) -> tuple[str, str]:
+        """Grey until a page has scanned a source, then what it found.
+
+        A ring means the source is still there but held nothing this program
+        can use -- the wrong folder on the right card, most often, which is
+        worth seeing before Import now is pressed.
+        """
+        if self._card is None:
+            return Lamp.OFF
+        path, found = self._card
+        try:
+            if not path.exists():
+                self._card = None          # the card came out
+                return Lamp.OFF
+        except OSError:
+            self._card = None
+            return Lamp.OFF
+        return Lamp.ON if found else Lamp.WAITING
+
+    def note_source(self, path: Path | None, found: int) -> None:
+        """A page scanned `path` and found `found` files there.
+
+        Called by Import photos and by Video, which are the two tabs a card is
+        ever pointed at. The most recent scan wins: whichever of them was used
+        last is the one the operator is thinking about.
+        """
+        self._card = (Path(path), int(found)) if path else None
 
     # ------------------------------------------------------------------
     #  the flight

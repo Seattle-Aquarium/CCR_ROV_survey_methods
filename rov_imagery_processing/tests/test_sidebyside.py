@@ -139,6 +139,23 @@ def test_a_format_that_would_upscale_the_smaller_source_is_not_offered():
     assert sbs.usable_formats(_side(h=480), _side(h=480)) == ["720p"]
 
 
+def test_upscaling_is_judged_on_whichever_dimension_the_arrangement_imposes():
+    """Stacked panes share a width, not a height, so a source tall enough for
+    4K but not wide enough must still be refused it -- and the other way
+    round. Judging both arrangements on height would upscale a narrow source
+    sideways and call it fine."""
+    # 2160 tall but only 2160 wide (a 1:1 source): fine stacked at 1080p,
+    # fine side by side at 4K.
+    square = _side("square", w=2160, h=2160)
+    wide = _side("wide", w=3840, h=2160)
+    assert sbs.usable_formats(square, wide, sbs.HORIZONTAL) == \
+        ["4K", "1080p", "720p"]
+    assert sbs.usable_formats(square, wide, sbs.VERTICAL) == ["1080p", "720p"]
+    # and horizontal stays the default
+    assert sbs.usable_formats(square, wide) == \
+        sbs.usable_formats(square, wide, sbs.HORIZONTAL)
+
+
 def test_a_span_past_the_end_is_caught_before_encoding():
     short, long_ = _side("S", dur=100.0), _side("L", dur=600.0)
     errs = sbs.validate(short, long_, in_l=80.0, in_r=0.0, seconds=90.0)
@@ -162,6 +179,18 @@ def test_the_output_name_says_which_is_which():
                         sbs.SBS_FORMATS["1080p"])
     assert n == "Lutris-T1_vs_Nereo-T5_1080p.mp4"
     assert not any(c in n for c in '\\/:*?"<>|')
+
+
+def test_the_two_arrangements_of_one_pair_do_not_share_a_name():
+    """Sharing one would mean the second build found the first already there,
+    kept it, and left the operator looking at the wrong shape wondering why
+    nothing had changed."""
+    left, right = _side("Lutris T1"), _side("Nereo T5")
+    fmt = sbs.SBS_FORMATS["1080p"]
+    flat = sbs.output_name(left, right, fmt, sbs.HORIZONTAL)
+    tall = sbs.output_name(left, right, fmt, sbs.VERTICAL)
+    assert flat != tall
+    assert "_over_" in tall and "_vs_" in flat
 
 
 def test_output_lands_in_composites():
@@ -188,6 +217,54 @@ def test_the_panes_end_up_the_same_height_and_the_frame_holds_both():
         assert rep.height == 720
         assert rep.width == 1280 + sbs.DIVIDER_PX + 1280
         assert 2.5 <= rep.seconds <= 3.6
+
+
+def test_stacked_panes_share_a_width_and_the_frame_holds_both():
+    """The mirror of the test above. vstack refuses inputs of unequal width,
+    so the two sources -- 16:9 and 16:9 here, but any pair in practice -- have
+    to be scaled to a common width and left to keep their own heights."""
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        a = _video(td / "a.mp4", seconds=6, size="640x360")
+        b = _video(td / "b.mp4", seconds=6, size="320x180")
+        left = sbs.probe_side(a, label="A", cache_root=td / "c")
+        right = sbs.probe_side(b, label="B", cache_root=td / "c")
+
+        rep = sbs.make_side_by_side(left, right, 1.0, 1.0, 3.0,
+                                    td / "out", "720p", labels=False,
+                                    orientation=sbs.VERTICAL)
+        assert rep.ok, rep.summary()
+        # 1280 wide -- one pane, not two -- and as tall as two 16:9 panes
+        # plus the divider.
+        assert rep.width == 1280
+        assert rep.height == 720 + sbs.DIVIDER_PX + 720
+        assert 2.5 <= rep.seconds <= 3.6
+
+
+def test_a_pair_of_unequal_shapes_is_never_stretched_to_match():
+    """A 4:3 ROV camera stacked under a 16:9 GoPro keeps its own aspect
+    ratio: the imposed width is shared, and the heights simply differ."""
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        a = _video(td / "a.mp4", seconds=5, size="640x360")     # 16:9
+        b = _video(td / "b.mp4", seconds=5, size="640x480")     # 4:3
+        left = sbs.probe_side(a, label="A", cache_root=td / "c")
+        right = sbs.probe_side(b, label="B", cache_root=td / "c")
+
+        rep = sbs.make_side_by_side(left, right, 0.0, 0.0, 2.0, td / "o",
+                                    "720p", labels=False,
+                                    orientation=sbs.VERTICAL)
+        assert rep.ok, rep.summary()
+        assert rep.width == 1280
+        # 1280 wide: 720 for the 16:9 pane, 960 for the 4:3 one.
+        assert rep.height == 720 + sbs.DIVIDER_PX + 960
+
+
+def test_an_unknown_arrangement_is_refused_rather_than_guessed():
+    left = right = _side("A")
+    rep = sbs.make_side_by_side(left, right, 0.0, 0.0, 2.0, Path("o"),
+                                "720p", orientation="diagonal")
+    assert not rep.ok and "diagonal" in rep.errors[0]
 
 
 def test_a_source_is_never_modified():

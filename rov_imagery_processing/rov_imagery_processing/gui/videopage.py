@@ -11,6 +11,12 @@ separately:
 Either can be run now or months later by pointing at a flight whose footage is
 already in ``videos/downward``, so a rushed field day can dump the card and
 leave the slow work for a desk.
+
+Two more sections cut something shareable out of what is already there: one
+clip from one video, and two videos in one frame -- beside each other, or
+stacked for a phone. Both run from the button at the foot of their own
+section, because a section holding nothing but a button is a place the eye has
+to travel to after it has finished deciding.
 """
 
 from __future__ import annotations
@@ -122,13 +128,11 @@ class VideoPage(ctk.CTkFrame):
                      font=T.FONT_SMALL, text_color=T.TEXT_MUTED, anchor="w",
                      justify="left").grid(row=4, column=0, sticky="w",
                                           padx=(26, 0), pady=(6, 0))
+        # At the foot of the two choices it acts on, rather than in a section
+        # of its own that held one button and no information.
+        button(c2.body, "Process video", self._go, "primary", width=160
+               ).grid(row=5, column=0, sticky="w", pady=(14, 0))
         self._toggle_comp()
-
-        # ---- go ------------------------------------------------------
-        c3 = Card(body, "3.  Run", "")
-        c3.grid(row=2, column=0, sticky="ew", pady=(0, 12))
-        button(c3.body, "Process video", self._go, "primary", width=160
-               ).grid(row=0, column=0, sticky="w")
 
         self._build_clips(body)
 
@@ -146,10 +150,10 @@ class VideoPage(ctk.CTkFrame):
         """
         from .. import clips
 
-        c = Card(body, "4.  Short clip from one video",
+        c = Card(body, "3.  Short clip from one video",
                  "For a talk or a post. Times are minutes:seconds into the "
                  "file you pick — not TC-25. Output goes to videos/clips/.")
-        c.grid(row=3, column=0, sticky="ew")
+        c.grid(row=2, column=0, sticky="ew")
         c.body.grid_columnconfigure(0, weight=1)
 
         row = ctk.CTkFrame(c.body, fg_color="transparent")
@@ -212,21 +216,40 @@ class VideoPage(ctk.CTkFrame):
         button(c.body, "Make clip", self._clip_go, "primary", width=140
                ).grid(row=5, column=0, sticky="w", pady=(12, 0))
 
-        # ---- 5. two videos side by side ------------------------------
-        c5 = Card(body, "5.  Two videos side by side",
-                  "Compare two flights in one frame. Either side can be a "
-                  "video file or a folder of mcaps (the ROV's forward "
-                  "camera). Output goes to videos/composites/.")
-        c5.grid(row=4, column=0, sticky="ew", pady=(12, 0))
-        c5.body.grid_columnconfigure(0, weight=1)
+        # ---- 4. two videos in one frame ------------------------------
+        c4 = Card(body, "4.  Two videos in one frame",
+                  "Compare two flights, beside each other or one above the "
+                  "other. Either pane can be a video file or a folder of "
+                  "mcaps (the ROV's forward camera). Output goes to "
+                  "videos/composites/.")
+        c4.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+        c4.body.grid_columnconfigure(0, weight=1)
+
+        # First, because it renames the two panes underneath it and decides
+        # which shape everything below is being set up for.
+        orow = ctk.CTkFrame(c4.body, fg_color="transparent")
+        orow.grid(row=0, column=0, sticky="w", pady=(0, 10))
+        self.sbs_orient = ctk.StringVar(value=sidebyside.HORIZONTAL)
+        for i, (key, (name, _a, _b)) in enumerate(
+                sidebyside.ORIENTATIONS.items()):
+            ctk.CTkRadioButton(orow, text=name, value=key,
+                               variable=self.sbs_orient, font=T.FONT_BODY,
+                               text_color=T.TEXT, fg_color=T.ACCENT,
+                               hover_color=T.ACCENT_HOVER,
+                               border_color=T.FIELD_BORDER,
+                               command=self._sbs_orient_changed
+                               ).grid(row=0, column=i, padx=(0, 22))
 
         self.sbs_rows = {}
         for i, which in enumerate(("left", "right")):
-            r = ctk.CTkFrame(c5.body, fg_color="transparent")
-            r.grid(row=i, column=0, sticky="ew", pady=(0, 6))
+            r = ctk.CTkFrame(c4.body, fg_color="transparent")
+            r.grid(row=1 + i, column=0, sticky="ew", pady=(0, 6))
             r.grid_columnconfigure(1, weight=1)
-            label(r, which, muted=True).grid(row=0, column=0, padx=(0, 8),
-                                             sticky="w")
+            # Wide enough for "bottom" as well as "left", so switching the
+            # arrangement does not shuffle the fields sideways.
+            name = label(r, which, muted=True)
+            name.configure(width=52, anchor="w")
+            name.grid(row=0, column=0, padx=(0, 8), sticky="w")
             src = entry(r, "a video file, or a folder of .mcap", width=460)
             src.grid(row=0, column=1, sticky="ew", padx=(0, 8))
             button(r, "Folder…", lambda w=which: self._sbs_pick(w, True),
@@ -239,48 +262,51 @@ class VideoPage(ctk.CTkFrame):
             note = ctk.CTkLabel(r, text="", font=T.FONT_SMALL,
                                 text_color=T.TEXT_MUTED, anchor="w")
             note.grid(row=0, column=6, sticky="w", padx=(10, 0))
-            self.sbs_rows[which] = {"src": src, "start": start, "note": note}
+            self.sbs_rows[which] = {"src": src, "start": start, "note": note,
+                                    "name": name}
 
-        srow = ctk.CTkFrame(c5.body, fg_color="transparent")
-        srow.grid(row=2, column=0, sticky="w", pady=(6, 0))
+        srow = ctk.CTkFrame(c4.body, fg_color="transparent")
+        srow.grid(row=3, column=0, sticky="w", pady=(6, 0))
         label(srow, "seconds", muted=True).grid(row=0, column=0, padx=(0, 6))
         self.sbs_secs = entry(srow, "90", width=80)
         self.sbs_secs.grid(row=0, column=1, padx=(0, 16))
         self.sbs_labels = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(srow, text="caption each side", variable=self.sbs_labels,
+        ctk.CTkCheckBox(srow, text="caption each pane", variable=self.sbs_labels,
                         font=T.FONT_BODY, text_color=T.TEXT, fg_color=T.ACCENT,
                         hover_color=T.ACCENT_HOVER,
                         checkmark_color=T.ACCENT_TEXT,
                         border_color=T.FIELD_BORDER, corner_radius=4
                         ).grid(row=0, column=2, padx=(0, 18))
 
-        frow5 = ctk.CTkFrame(c5.body, fg_color="transparent")
-        frow5.grid(row=3, column=0, sticky="w", pady=(8, 0))
+        frow4 = ctk.CTkFrame(c4.body, fg_color="transparent")
+        frow4.grid(row=4, column=0, sticky="w", pady=(8, 0))
         self.sbs_fmt = ctk.StringVar(value="1080p")
         for i, (key, fmt) in enumerate(sidebyside.SBS_FORMATS.items()):
-            ctk.CTkRadioButton(frow5, text=fmt.label, value=key,
+            ctk.CTkRadioButton(frow4, text=fmt.label, value=key,
                                variable=self.sbs_fmt, font=T.FONT_BODY,
                                text_color=T.TEXT, fg_color=T.ACCENT,
                                hover_color=T.ACCENT_HOVER,
                                border_color=T.FIELD_BORDER
                                ).grid(row=0, column=i, padx=(0, 18))
         ctk.CTkLabel(
-            c5.body,
+            c4.body,
             text=("Start is hh:mm:ss for a time of day, or m:ss for an offset "
-                  "into the file. Each side keeps its own start, so two "
+                  "into the file. Each pane keeps its own start, so two "
                   "different transects can be compared from their own "
                   "beginnings. A source with no trustworthy clock — a trim or "
-                  "a composite — takes an offset only."),
+                  "a composite — takes an offset only. The format is what one "
+                  "pane is scaled to, so side by side is twice as wide as it "
+                  "says and stacked is twice as tall."),
             font=T.FONT_SMALL, text_color=T.TEXT_MUTED, anchor="w",
             justify="left", wraplength=900
-        ).grid(row=4, column=0, sticky="w", pady=(6, 0))
+        ).grid(row=5, column=0, sticky="w", pady=(6, 0))
 
-        self.sbs_note = ctk.CTkLabel(c5.body, text="", font=T.FONT_SMALL,
+        self.sbs_note = ctk.CTkLabel(c4.body, text="", font=T.FONT_SMALL,
                                      text_color=T.TEXT_MUTED, anchor="w",
                                      justify="left", wraplength=900)
-        self.sbs_note.grid(row=5, column=0, sticky="w", pady=(6, 0))
-        button(c5.body, "Build side by side", self._sbs_go, "primary",
-               width=180).grid(row=6, column=0, sticky="w", pady=(12, 0))
+        self.sbs_note.grid(row=6, column=0, sticky="w", pady=(6, 0))
+        button(c4.body, "Make clip", self._sbs_go, "primary",
+               width=140).grid(row=7, column=0, sticky="w", pady=(12, 0))
 
     def _clip_pick_dir(self) -> None:
         d = filedialog.askdirectory(title="Folder of videos")
@@ -478,19 +504,37 @@ class VideoPage(ctk.CTkFrame):
 
 
     # ------------------------------------------------------------------
-    #  5. side by side
+    #  4. two videos in one frame
     # ------------------------------------------------------------------
+
+    def _sbs_names(self) -> dict[str, str]:
+        """What to call each pane in the arrangement now chosen."""
+        first, second = sidebyside.side_names(self.sbs_orient.get())
+        return {"left": first, "right": second}
+
+    def _sbs_orient_changed(self) -> None:
+        """Rename the two panes. Nothing else about them changes.
+
+        The sources, the starts and the duration all mean exactly what they
+        meant a moment ago, so switching arrangement keeps everything typed
+        so far -- which is the point of putting the choice at the top rather
+        than making it a different section.
+        """
+        names = self._sbs_names()
+        for which, row in self.sbs_rows.items():
+            row["name"].configure(text=names[which])
 
     def _sbs_pick(self, which: str, want_dir: bool) -> None:
         row = self.sbs_rows[which]
+        name = self._sbs_names()[which]
         start = row["src"].get().strip() or str(self.app.flight_dir or "")
         if want_dir:
             p = filedialog.askdirectory(
-                title=f"Folder of .mcap for the {which} side",
+                title=f"Folder of .mcap for the {name} pane",
                 initialdir=start or None)
         else:
             p = filedialog.askopenfilename(
-                title=f"Video for the {which} side",
+                title=f"Video for the {name} pane",
                 initialdir=start or None,
                 filetypes=[("Video", "*.mp4 *.mov *.mkv *.m4v"),
                            ("All files", "*.*")])
@@ -503,12 +547,14 @@ class VideoPage(ctk.CTkFrame):
         from .. import sidebyside as sbs
         from ..config import AppConfig
 
+        names = self._sbs_names()
         picks = {}
         for which, row in self.sbs_rows.items():
             raw = row["src"].get().strip()
             if not raw:
-                messagebox.showinfo(self.app.title(),
-                                    f"Choose a source for the {which} side.")
+                messagebox.showinfo(
+                    self.app.title(),
+                    f"Choose a source for the {names[which]} pane.")
                 return
             picks[which] = (Path(raw), row["start"].get().strip())
 
@@ -520,6 +566,7 @@ class VideoPage(ctk.CTkFrame):
             return
         seconds = secs[1]
         fmt = self.sbs_fmt.get()
+        orientation = self.sbs_orient.get()
         want_labels = bool(self.sbs_labels.get())
         cfg = AppConfig()
         flight = Path(self.app.flight_dir) if self.app.flight_dir else \
@@ -550,11 +597,12 @@ class VideoPage(ctk.CTkFrame):
             in_r = right.in_point(picks["right"][1])
             return sbs.make_side_by_side(
                 left, right, in_l, in_r, seconds, out_dir, fmt,
-                labels=want_labels,
+                labels=want_labels, orientation=orientation,
                 progress=lambda f, m="": progress(0.9 + f * 0.1, m),
                 cancel=cancel)
 
-        self.app.submit(work, f"Building a {fmt} side-by-side…",
+        shape = ("stacked" if orientation == sbs.VERTICAL else "side-by-side")
+        self.app.submit(work, f"Building a {fmt} {shape} clip…",
                         on_done=self._sbs_done)
 
     def _sbs_done(self, rep) -> None:

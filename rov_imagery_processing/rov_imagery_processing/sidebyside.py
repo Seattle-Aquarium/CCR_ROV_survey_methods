@@ -1,9 +1,17 @@
 """
-Two videos side by side in one frame.
+Two videos in one frame, beside each other or one above the other.
 
 Built to answer a question the separate recordings cannot: how much of the
 difference between two flights is the lighting rig and how much is the seabed.
 Put Lutris next to Nereo over the same site and the comparison is direct.
+
+**Which way round is a question about where it will be watched**, not about
+the footage. Two panes beside each other fill a laptop or a projector and let
+the eye cross between them in one movement, which is what a comparison wants.
+Stacked, the frame is tall and narrow and reads on a phone held upright, where
+a side-by-side would shrink each pane to a postage stamp. The same two
+sources, the same two in-points, the same duration -- only the stacking
+changes, so the choice can be made last, and both can be made from one setup.
 
 Either side may be a **video file** or a **folder of mcaps**, and the two need
 not match -- a 4K GoPro chapter on the left and an ROV forward camera on the
@@ -51,30 +59,50 @@ VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".m4v"}
 DIVIDER_PX = 6
 DIVIDER_COLOUR = "0x0B1A24"
 
+#: How the two panes are arranged, and what to call each side when they are.
+#: The words matter: "left" means nothing once the panes are stacked, and an
+#: operator reading back a caption should not have to translate.
+HORIZONTAL = "horizontal"
+VERTICAL = "vertical"
+ORIENTATIONS: dict[str, tuple[str, str, str]] = {
+    #: key: (what to call it, first pane, second pane)
+    HORIZONTAL: ("Side by side", "left", "right"),
+    VERTICAL: ("Stacked, one above the other", "top", "bottom"),
+}
+
+
+def side_names(orientation: str) -> tuple[str, str]:
+    """What the two panes are called in this arrangement."""
+    return ORIENTATIONS.get(orientation, ORIENTATIONS[HORIZONTAL])[1:]
+
 
 @dataclass(frozen=True)
 class SideBySideFormat:
     key: str
     label: str
     note: str
-    #: Height of each pane. The output is twice this tall only in the sense
-    #: that both panes share it; the frame is as wide as the two panes plus
-    #: the divider.
+    #: What one pane is scaled to. Only one of the two is ever imposed, and
+    #: which one is the whole of the difference between the arrangements:
+    #: panes beside each other must share a height for hstack to take them,
+    #: panes above each other must share a width for vstack to. The other
+    #: dimension follows each source's own aspect ratio, so neither is ever
+    #: stretched to match the other.
     height: int
+    width: int
     crf: int = 20
     preset: str = "medium"
 
 
 SBS_FORMATS: dict[str, SideBySideFormat] = {
     "4K": SideBySideFormat(
-        "4K", "4K", "each pane 2160 tall -- only if both sources can supply it",
-        2160, crf=20, preset="medium"),
+        "4K", "4K", "each pane at 4K -- only if both sources can supply it",
+        2160, 3840, crf=20, preset="medium"),
     "1080p": SideBySideFormat(
-        "1080p", "1080p", "each pane 1080 tall; the usual choice",
-        1080, crf=20, preset="medium"),
+        "1080p", "1080p", "each pane at 1080p; the usual choice",
+        1080, 1920, crf=20, preset="medium"),
     "720p": SideBySideFormat(
-        "720p", "720p", "each pane 720 tall, for sharing",
-        720, crf=22, preset="medium"),
+        "720p", "720p", "each pane at 720p, for sharing",
+        720, 1280, crf=22, preset="medium"),
 }
 
 
@@ -402,8 +430,16 @@ def output_dir(flight: Path) -> Path:
     return Path(flight) / layout.VIDEOS / layout.COMPOSITES
 
 
-def output_name(left: Side, right: Side, fmt: SideBySideFormat) -> str:
-    return f"{_safe(left.label)}_vs_{_safe(right.label)}_{fmt.key}.mp4"
+def output_name(left: Side, right: Side, fmt: SideBySideFormat,
+                orientation: str = HORIZONTAL) -> str:
+    """Two arrangements of the same pair get two names, deliberately.
+
+    Sharing one would mean the second build found the first already there and
+    kept it -- and the operator would be looking at the wrong shape wondering
+    why nothing had changed.
+    """
+    joiner = "_over_" if orientation == VERTICAL else "_vs_"
+    return f"{_safe(left.label)}{joiner}{_safe(right.label)}_{fmt.key}.mp4"
 
 
 def _safe(text: str) -> str:
@@ -414,12 +450,19 @@ def _safe(text: str) -> str:
     return out.strip("-") or "side"
 
 
-def usable_formats(left: Side, right: Side) -> list[str]:
+def usable_formats(left: Side, right: Side,
+                   orientation: str = HORIZONTAL) -> list[str]:
     """Formats neither side has to be upscaled for.
 
     Blowing 1080 up to 2160 next to real 2160 would look like the ROV camera
-    is the blurry one, when the difference is entirely the scaler.
+    is the blurry one, when the difference is entirely the scaler. Which
+    dimension decides that is the one the arrangement imposes: a shared height
+    beside each other, a shared width stacked.
     """
+    if orientation == VERTICAL:
+        limit = min(left.width or 0, right.width or 0)
+        return [k for k, f in SBS_FORMATS.items()
+                if f.width <= limit] or ["720p"]
     limit = min(left.height or 0, right.height or 0)
     return [k for k, f in SBS_FORMATS.items() if f.height <= limit] or ["720p"]
 
@@ -444,11 +487,27 @@ def validate(left: Side, right: Side, in_l: float, in_r: float,
 
 
 def _filter(left: Side, right: Side, fmt: SideBySideFormat,
-            labels: bool) -> str:
-    h = fmt.height
+            labels: bool, orientation: str = HORIZONTAL) -> str:
+    """The whole graph: scale both panes alike, caption them, join them.
+
+    Only one dimension is ever imposed. ``hstack`` refuses inputs of unequal
+    height and ``vstack`` refuses unequal width, so each arrangement fixes the
+    dimension its stacker insists on and lets the other follow the source's
+    own aspect ratio. Scaling both into a fixed frame instead would letterbox
+    a 4:3 ROV camera inside a 16:9 pane, or worse, stretch it.
+    """
+    vertical = orientation == VERTICAL
+    if vertical:
+        scale = f"scale={fmt.width}:-2"
+        # Captions are sized off the pane's shorter dimension either way, so
+        # a stacked pane's text is the size it would be side by side.
+        text_px = fmt.width * 9 // 16
+    else:
+        scale = f"scale=-2:{fmt.height}"
+        text_px = fmt.height
     parts = [
-        f"[0:v]scale=-2:{h}:flags=lanczos,setsar=1[l0]",
-        f"[1:v]scale=-2:{h}:flags=lanczos,setsar=1[r0]",
+        f"[0:v]{scale}:flags=lanczos,setsar=1[l0]",
+        f"[1:v]{scale}:flags=lanczos,setsar=1[r0]",
     ]
     lab_l, lab_r = "l0", "r0"
     if labels:
@@ -456,19 +515,24 @@ def _filter(left: Side, right: Side, fmt: SideBySideFormat,
         font = brand.font_path("semibold") or brand.font_path("regular")
         if font:
             fp = str(font).replace("\\", "/").replace(":", "\\:")
-            size = max(18, h // 30)
-            pad = max(10, h // 60)
+            size = max(18, text_px // 30)
+            pad = max(10, text_px // 60)
             common = (f"fontfile='{fp}':fontsize={size}:fontcolor=white:"
                       f"box=1:boxcolor=0x0B1A24@0.72:boxborderw={pad // 2}:"
                       f"x={pad}:y={pad}")
             parts.append(f"[l0]drawtext={common}:text='{_dt(left.label)}'[l1]")
             parts.append(f"[r0]drawtext={common}:text='{_dt(right.label)}'[r1]")
             lab_l, lab_r = "l1", "r1"
-    # The divider is padding on the left pane, so it cannot be mistaken for
-    # part of either image.
-    parts.append(
-        f"[{lab_l}]pad=iw+{DIVIDER_PX}:ih:0:0:color={DIVIDER_COLOUR}[lp]")
-    parts.append(f"[lp][{lab_r}]hstack=inputs=2[out]")
+    # The divider is padding on the first pane -- to its right, or below it --
+    # so it cannot be mistaken for part of either image.
+    if vertical:
+        parts.append(
+            f"[{lab_l}]pad=iw:ih+{DIVIDER_PX}:0:0:color={DIVIDER_COLOUR}[lp]")
+        parts.append(f"[lp][{lab_r}]vstack=inputs=2[out]")
+    else:
+        parts.append(
+            f"[{lab_l}]pad=iw+{DIVIDER_PX}:ih:0:0:color={DIVIDER_COLOUR}[lp]")
+        parts.append(f"[lp][{lab_r}]hstack=inputs=2[out]")
     return ";".join(parts)
 
 
@@ -490,18 +554,27 @@ def make_side_by_side(
     fmt_key: str = "1080p",
     *,
     labels: bool = True,
+    orientation: str = HORIZONTAL,
     progress: ProgressCB | None = None,
     cancel=None,
     overwrite: bool = False,
 ) -> SideBySideReport:
-    """Cut the same length from each source and stand them next to each other."""
+    """Cut the same length from each source and put the two in one frame.
+
+    `orientation` decides whether the second pane goes beside the first or
+    under it; everything else -- the in-points, the duration, the captions --
+    is the same either way.
+    """
     rep = SideBySideReport()
     fmt = SBS_FORMATS.get(fmt_key)
     if fmt is None:
         rep.errors.append(f"unknown format {fmt_key!r}")
         return rep
+    if orientation not in ORIENTATIONS:
+        rep.errors.append(f"unknown orientation {orientation!r}")
+        return rep
 
-    allowed = usable_formats(left, right)
+    allowed = usable_formats(left, right, orientation)
     if fmt_key not in allowed:
         rep.warnings.append(
             f"{fmt_key} would upscale the smaller source; using "
@@ -515,7 +588,7 @@ def make_side_by_side(
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / output_name(left, right, fmt)
+    out = out_dir / output_name(left, right, fmt, orientation)
     if out.exists() and not overwrite:
         rep.warnings.append(f"{out.name} already existed and was kept")
         rep.output = out
@@ -526,7 +599,7 @@ def make_side_by_side(
         "-y",
         "-ss", f"{in_l:.3f}", "-t", f"{seconds:.3f}", "-i", str(left.playable),
         "-ss", f"{in_r:.3f}", "-t", f"{seconds:.3f}", "-i", str(right.playable),
-        "-filter_complex", _filter(left, right, fmt, labels),
+        "-filter_complex", _filter(left, right, fmt, labels, orientation),
         "-map", "[out]", "-an",
         "-c:v", "libx264", "-crf", str(fmt.crf), "-preset", fmt.preset,
         "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(scratch),

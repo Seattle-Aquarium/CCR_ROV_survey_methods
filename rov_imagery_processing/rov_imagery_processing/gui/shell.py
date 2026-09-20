@@ -6,6 +6,15 @@ program per job there are no chapters left to choose between, so the tabs that
 used to sit inside a chapter are the navigation, and the width the rail took
 goes back to the work.
 
+This is the imagery program's copy, and it has deliberately drifted from the
+flight program's. Nothing here is ever plugged into a vehicle, so the banner
+carries no BlueOS / ArduSub / Cockpit versions and no vehicle or recorder
+lamps: there is no tether to read them over, and a row of permanent em-dashes
+is worse than saying nothing at all. What the lamps watch instead is what
+this program actually depends on -- a flight folder with its transects in it,
+and a card with imagery on it -- which is the same question ("is it seeing
+what I think it is seeing?") asked about the things that are really there.
+
 Three things about it are deliberate.
 
 **The banner folds, the rule does not.** The logo, title and attribution are
@@ -139,28 +148,14 @@ def _font_kw(font: tuple) -> dict:
 ATTRIBUTION_LINES = ("Conservation Programs and Partnerships",
                      "Coastal Climate Resilience")
 
-#: What is shown for a version nobody has been able to read yet.
-UNKNOWN_VERSION = "—"
-
-#: The three versions the banner carries, and what to call each. They are
-#: what a question six months from now turns on -- "why does August look
-#: different?" is a lookup rather than an argument only if the answer was on
-#: screen at the time.
-VERSION_KEYS = ("blueos", "ardusub", "cockpit")
-VERSION_LABELS = {"blueos": "BlueOS", "ardusub": "ArduSub",
-                  "cockpit": "Cockpit"}
-
 #: Gradient rules kept as Tk images, by width. One drag across a screen passes
 #: through a few dozen widths and comes back through the same ones; past that
 #: the oldest goes.
 RULE_CACHE_MAX = 48
 
-#: How often the vehicle is asked for them. They change when somebody updates
-#: the vehicle, which is not during a dive, so a minute is plenty -- and this
-#: runs for a whole survey day.
-VERSION_POLL_S = 60.0
-#: And how often the lamps are refreshed. Fast enough that losing the tether
-#: shows up as quickly as the recorder itself notices.
+#: How often the lamps are refreshed. They watch the disk -- a plan file, a
+#: card that may have been pulled out -- so a second is both fast enough to
+#: catch a card being removed and slow enough to cost nothing.
 STATUS_POLL_MS = 1000
 
 
@@ -168,12 +163,13 @@ class Lamp(ctk.CTkFrame):
     """A small indicator: a dot, and the word for what it is watching.
 
     Three states rather than two, because there genuinely are three and
-    flattening them would be a lie at exactly the moment it mattered. The
-    recorder watches for the ROV to arm and only writes rows once it has, so
-    between two transects the monitoring is up and the logging is not. A ring
-    says "on and waiting", a filled dot says "happening now", and grey says
-    neither -- which reads at a glance and survives being colour-blind, a
-    laptop in daylight, and a screenshot in a report.
+    flattening them would be a lie at exactly the moment it mattered. A flight
+    folder can be chosen but have no transects saved in it yet, and a card can
+    be plugged in and hold nothing this program can use; both are halfway, and
+    both are worth seeing before an hour of work is aimed at them. A ring says
+    "there, but not ready", a filled dot says "there and ready", and grey says
+    nothing is pointed at -- which reads at a glance and survives being
+    colour-blind, a laptop in daylight, and a screenshot in a report.
     """
 
     #: dot, colour attribute on the theme.
@@ -453,20 +449,11 @@ class Shell(ctk.CTk):
         self.controls = ctk.CTkFrame(self.header, fg_color=T.HEADER_BG,
                                      corner_radius=0)
         # Folded away, everything sits in one row reading left to right:
-        # versions, lamps, then the three controls. Open, the versions move
-        # up beside the title and the lamps drop under the two controls --
-        # see `_lay_out_controls`.
-        self.versions_row = ctk.CTkFrame(self.controls, fg_color="transparent")
-        self.version_labels: dict[str, ctk.CTkLabel] = {}
-        for i, key in enumerate(VERSION_KEYS):
-            lab = ctk.CTkLabel(self.versions_row, text="", font=T.FONT_SMALL,
-                               text_color=T.TEXT_MUTED, anchor="w")
-            lab.grid(row=0, column=i, padx=(0, 12), sticky="w")
-            self.version_labels[key] = lab
-
+        # lamps, then the three controls. Open, the lamps drop under the two
+        # controls -- see `_lay_out_controls`.
         self.lamps = {
-            "vehicle": Lamp(self.controls, "Vehicle connected"),
-            "logging": Lamp(self.controls, "Logging"),
+            "flight": Lamp(self.controls, "Flight folder linked"),
+            "card": Lamp(self.controls, "SD card connected"),
         }
 
         # Where the diagnostics log is, one click away for whoever is asked
@@ -505,9 +492,6 @@ class Shell(ctk.CTk):
         #: answer every time the banner is painted.
         self._fonts: dict[tuple, object] = {}
         self._load_logo()
-        self._versions: dict[str, str] = dict.fromkeys(VERSION_KEYS, "")
-        self._versions_read_at = 0.0
-        self._versions_reading = False
         self.after(1200, self._tick_status)
 
     # ---- the row (or block) of controls ---------------------------------
@@ -517,28 +501,27 @@ class Shell(ctk.CTk):
 
         Open, the two lamps sit directly under the two controls they line up
         with, and the fold button stands beside both rows. Folded, everything
-        is one row: versions, lamps, Diagnostics, appearance, fold -- so the
-        fold button is in the same place either way, which is the one thing
-        about this banner that has always been deliberate.
+        is one row: lamps, Diagnostics, appearance, fold -- so the fold button
+        is in the same place either way, which is the one thing about this
+        banner that has always been deliberate.
         """
-        for w in (self.versions_row, *self.lamps.values(), self.diag_btn,
+        for w in (*self.lamps.values(), self.diag_btn,
                   self.theme_switch, self.fold_btn):
             w.grid_forget()
         if self.banner_open:
             self.diag_btn.grid(row=0, column=0, padx=(0, 10), sticky="w")
             self.theme_switch.grid(row=0, column=1, padx=(0, 10), sticky="w")
             self.fold_btn.grid(row=0, column=2, rowspan=2)
-            self.lamps["vehicle"].grid(row=1, column=0, padx=(0, 10),
-                                       pady=(6, 0), sticky="w")
-            self.lamps["logging"].grid(row=1, column=1, padx=(0, 10),
-                                       pady=(6, 0), sticky="w")
+            self.lamps["flight"].grid(row=1, column=0, padx=(0, 10),
+                                      pady=(6, 0), sticky="w")
+            self.lamps["card"].grid(row=1, column=1, padx=(0, 10),
+                                    pady=(6, 0), sticky="w")
         else:
-            self.versions_row.grid(row=0, column=0, padx=(0, 16), sticky="w")
-            self.lamps["vehicle"].grid(row=0, column=1, padx=(0, 12))
-            self.lamps["logging"].grid(row=0, column=2, padx=(0, 16))
-            self.diag_btn.grid(row=0, column=3, padx=(0, 10))
-            self.theme_switch.grid(row=0, column=4, padx=(0, 10))
-            self.fold_btn.grid(row=0, column=5)
+            self.lamps["flight"].grid(row=0, column=0, padx=(0, 12))
+            self.lamps["card"].grid(row=0, column=1, padx=(0, 16))
+            self.diag_btn.grid(row=0, column=2, padx=(0, 10))
+            self.theme_switch.grid(row=0, column=3, padx=(0, 10))
+            self.fold_btn.grid(row=0, column=4)
 
     def _font(self, font: tuple, scale: float):
         """A Tk font for a theme tuple at this display's scale, made once."""
@@ -595,30 +578,28 @@ class Shell(ctk.CTk):
         self._paint_header()
 
     # ------------------------------------------------------------------
-    #  versions and lamps
+    #  the lamps
     # ------------------------------------------------------------------
 
-    def vehicle_status(self) -> tuple[bool, str]:
-        """(is the vehicle answering, what the logging lamp should show).
+    def lamp_states(self) -> dict[str, tuple[str, str]]:
+        """What each lamp should show, by the key it was built under.
 
-        A subclass that has a recorder overrides this. The shell itself has
-        no vehicle, so the lamps stay grey -- which is the truth for the
-        imagery program, where there is nothing plugged in at all.
+        A subclass answers this; the shell itself knows nothing about flight
+        folders or cards, and a key it is not given is left as it was. Called
+        once a second on the Tk thread, so what it does has to be cheap -- a
+        stat or two, never a walk of a folder.
         """
-        return False, "off"
+        return {}
 
     def _tick_status(self) -> None:
-        """Lamps every second; versions every `VERSION_POLL_S` when connected."""
+        """The lamps, once a second."""
         if self._closing:
             return
         try:
-            connected, logging_state = self.vehicle_status()
-            self.lamps["vehicle"].set_state(
-                Lamp.ON if connected else Lamp.OFF)
-            self.lamps["logging"].set_state(
-                {"on": Lamp.ON, "waiting": Lamp.WAITING}.get(
-                    logging_state, Lamp.OFF))
-            self._maybe_read_versions(connected)
+            for key, state in self.lamp_states().items():
+                lamp = self.lamps.get(key)
+                if lamp is not None:
+                    lamp.set_state(state)
         except Exception:
             diagnostics.log_exception("banner status", *sys.exc_info(),
                                       level=logging.WARNING)
@@ -626,72 +607,6 @@ class Shell(ctk.CTk):
             self.after(STATUS_POLL_MS, self._tick_status)
         except tkinter.TclError:
             pass
-
-    def _maybe_read_versions(self, connected: bool) -> None:
-        """Ask the vehicle what it is running, off the window's thread.
-
-        Not through `submit`: that is the one worker, and it belongs to
-        whatever the operator pressed. A banner poll must never be the reason
-        a download will not start.
-        """
-        host = self.version_host()
-        if not host or self._versions_reading:
-            return
-        due = time.monotonic() - self._versions_read_at
-        if not connected and self._versions_read_at:
-            return                       # nothing to ask; keep what we have
-        if due < VERSION_POLL_S and self._versions_read_at:
-            return
-        self._versions_reading = True
-        self._versions_read_at = time.monotonic()
-
-        def read():
-            from .. import blueos, laptop
-            found = blueos.read_versions_brief(host)
-            if not found.get("cockpit"):
-                # Cockpit is normally flown from this laptop rather than
-                # served off the vehicle, and the vehicle cannot see that.
-                found["cockpit"] = laptop.cockpit_version()
-                found["cockpit_from"] = "this laptop" if found["cockpit"] else ""
-            return found
-
-        def shown(found) -> None:
-            self._versions_reading = False
-            self.merge_versions(found)
-
-        self.background("banner-versions", read, shown)
-
-    def merge_versions(self, found) -> None:
-        """Take what a read came back with, and show it.
-
-        A blank answer does not erase a version already read. The tether comes
-        and goes all day and the vehicle has not changed underneath it, so a
-        banner that blanked itself every time a request timed out would be
-        noise rather than information.
-        """
-        if not isinstance(found, dict):
-            return                       # an exception, or nothing at all
-        for key in VERSION_KEYS:
-            if found.get(key):
-                self._versions[key] = str(found[key])
-        self._show_versions()
-
-    def version_host(self) -> str | None:
-        """The vehicle to ask. None in a program that has no vehicle."""
-        return None
-
-    def version_lines(self) -> list[str]:
-        return [f"{VERSION_LABELS[k]} {self._versions.get(k) or UNKNOWN_VERSION}"
-                for k in VERSION_KEYS]
-
-    def _show_versions(self) -> None:
-        for key, text in zip(VERSION_KEYS, self.version_lines(), strict=True):
-            try:
-                self.version_labels[key].configure(text=text)
-            except Exception:
-                return
-        if self.banner_open:
-            self._paint_header()         # they are drawn beside the title
 
     def _paint_header(self) -> None:
         """Logo, title and attribution, then the rule and the two controls.
@@ -702,11 +617,11 @@ class Shell(ctk.CTk):
 
         Widening the window changes three of these and none of the rest: the
         ground behind everything, the gradient rule along the foot, and where
-        the controls sit. The logo, the title, the attribution and the version
-        column are all pinned to the left edge and do not move at all. So a
-        width-only change moves those three and leaves the rest of the canvas
-        alone, rather than tearing the banner down and drawing it again --
-        which was nine milliseconds of every frame of a drag.
+        the controls sit. The logo, the title and the attribution are all
+        pinned to the left edge and do not move at all. So a width-only change
+        moves those three and leaves the rest of the canvas alone, rather than
+        tearing the banner down and drawing it again -- which was nine
+        milliseconds of every frame of a drag.
         """
         from PIL import ImageTk
 
@@ -736,11 +651,9 @@ class Shell(ctk.CTk):
             block_h = 0
             h = int(6 * s) + ctl_h + int(6 * s) + rule_h
 
-        # Everything a full repaint depends on except the width. The version
-        # column is in here because it is drawn, so a version arriving has to
-        # be able to redraw it.
+        # Everything a full repaint depends on except the width.
         shape = (h, rule_h, pad, self.banner_open, self.mode, round(s, 3),
-                 self.DISPLAY_TITLE, tuple(self.version_lines()))
+                 self.DISPLAY_TITLE)
         if shape == self._painted and self._ground_id is not None:
             self._restretch(w, h, rule_h, pad)
             return
@@ -775,20 +688,6 @@ class Shell(ctk.CTk):
                 c.create_text(x1, y, anchor="nw", text=line,
                               font=T.scale_font(T.FONT_BANNER_SUB, s), fill=muted)
                 y += sub_h + int(2 * s)
-
-            # What the vehicle is running, in a column beside the title, at
-            # the attribution's weight -- present without competing with it.
-            # Drawn as canvas text rather than as the widget that carries the
-            # same words when the banner is folded, for the same reason the
-            # title is: this half of the banner is one drawn block.
-            vx = x1 + f_title.measure(self.DISPLAY_TITLE) + int(40 * s)
-            if vx < w - pad - int(320 * s):
-                vy = pad + int(2 * s)
-                for line in self.version_lines():
-                    c.create_text(vx, vy, anchor="nw", text=line,
-                                  font=T.scale_font(T.FONT_BANNER_SUB, s),
-                                  fill=muted)
-                    vy += sub_h + int(4 * s)
 
         # The one gradient in the application: a single object, no type on it.
         self._rule_id = c.create_image(0, h - rule_h, image=self._rule(w, rule_h),
@@ -838,8 +737,6 @@ class Shell(ctk.CTk):
                                     else "Light mode")
         for lamp in self.lamps.values():
             lamp.refresh_theme()
-        for lab in self.version_labels.values():
-            lab.configure(text_color=T.TEXT_MUTED)
         self._load_logo()
         self._paint_header()
         self.nav.refresh_theme()

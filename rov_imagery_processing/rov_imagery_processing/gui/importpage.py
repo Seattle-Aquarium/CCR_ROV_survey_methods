@@ -11,6 +11,9 @@ source:
 
 Which one applies is decided by where the source sits, not by a toggle, so the
 safe behaviour cannot be turned off by accident.
+
+Bannering the folders an import has just made is the third section,
+`BannerSection`, rather than a tab of its own -- see `bannertools`.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ import customtkinter as ctk
 
 from .. import ingest, layout
 from . import theme as T
+from .bannertools import BannerSection
 from .widgets import Card, button, entry, label, output_box
 
 
@@ -114,18 +118,28 @@ class ImportPage(ctk.CTkFrame):
                      justify="left").grid(row=2, column=0, sticky="w",
                                           padx=(26, 0), pady=(2, 0))
 
-        # ---- go ------------------------------------------------------
-        c3 = Card(body, "3.  Import", "")
-        c3.grid(row=2, column=0, sticky="ew")
-        c3.body.grid_columnconfigure(0, weight=1)
-        self.plan_note = ctk.CTkLabel(c3.body, text="Scan a source first.",
+        # What the choices above add up to, then the button that acts on
+        # them. A section of its own for one button was a section the eye had
+        # to travel to after it had already finished deciding.
+        self.plan_note = ctk.CTkLabel(c2.body, text="Scan a source first.",
                                       font=T.FONT_SMALL, text_color=T.TEXT_MUTED,
                                       anchor="w", justify="left")
-        self.plan_note.grid(row=0, column=0, sticky="w")
-        button(c3.body, "Import now", self._go, "primary", width=150
-               ).grid(row=1, column=0, sticky="w", pady=(10, 0))
+        self.plan_note.grid(row=3, column=0, sticky="w", pady=(12, 0))
+        button(c2.body, "Import now", self._go, "primary", width=150
+               ).grid(row=4, column=0, sticky="w", pady=(10, 0))
+
+        # ---- banner --------------------------------------------------
+        self.banner = BannerSection(body, app)
+        self.banner.grid(row=2, column=0, sticky="ew")
 
     # ------------------------------------------------------------------
+
+    def refresh(self) -> None:
+        """The flight folder changed, or the tab was opened."""
+        self.banner.refresh()
+
+    def refresh_theme(self) -> None:
+        self.banner.refresh_theme()
 
     def _say(self, text: str) -> None:
         self.found.configure(state="normal")
@@ -229,6 +243,9 @@ class ImportPage(ctk.CTkFrame):
                        else "COPIED (source is outside the flight)"))
         for w in self.scan.warnings:
             text.append(f"  WARNING: {w}")
+        # The banner's card lamp is whatever the last scan on this tab or on
+        # Video actually found, so it can never be more hopeful than that.
+        self.app.note_source(src, len(self.scan.frames) + len(self.scan.videos))
         self._say("\n".join(text))
         self._recount()
 

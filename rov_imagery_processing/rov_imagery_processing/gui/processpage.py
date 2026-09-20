@@ -94,7 +94,7 @@ class ProcessPage(ctk.CTkFrame):
                   f"{lr.DENOISE_AMOUNT}, export 16-bit ProPhoto RGB TIF. The "
                   f"sizes and the colour space are the survey protocol, so "
                   f"they are not adjustable here.")
-        c2.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        c2.grid(row=1, column=0, sticky="ew")
         c2.body.grid_columnconfigure(0, weight=1)
 
         opts = ctk.CTkFrame(c2.body, fg_color="transparent")
@@ -124,13 +124,11 @@ class ProcessPage(ctk.CTkFrame):
             justify="left", wraplength=780
         ).grid(row=1, column=0, sticky="w", padx=(26, 0), pady=(6, 0))
 
-        # ---- 3. run --------------------------------------------------
-        c3 = Card(body, "3.  Develop", "")
-        c3.grid(row=2, column=0, sticky="ew")
-        c3.body.grid_columnconfigure(0, weight=1)
-
-        acts = ctk.CTkFrame(c3.body, fg_color="transparent")
-        acts.grid(row=0, column=0, sticky="w")
+        # The run starts from the foot of the recipe it is going to run. A
+        # section of its own held one button and said nothing the two above
+        # it had not already said.
+        acts = ctk.CTkFrame(c2.body, fg_color="transparent")
+        acts.grid(row=2, column=0, sticky="w", pady=(14, 0))
         button(acts, "Develop and export", self._go, "primary", width=180
                ).grid(row=0, column=0)
         self.setup_btn = button(acts, "Set up Lightroom…",
@@ -139,9 +137,9 @@ class ProcessPage(ctk.CTkFrame):
         self.setup_btn.grid_remove()
 
         self.plan_note = ctk.CTkLabel(
-            c3.body, text="Check a folder first.", font=T.FONT_SMALL,
+            c2.body, text="Check a folder first.", font=T.FONT_SMALL,
             text_color=T.TEXT_MUTED, anchor="w", justify="left")
-        self.plan_note.grid(row=1, column=0, sticky="w", pady=(10, 0))
+        self.plan_note.grid(row=3, column=0, sticky="w", pady=(10, 0))
 
         self.refresh_sources()
         self._poll_flight()
