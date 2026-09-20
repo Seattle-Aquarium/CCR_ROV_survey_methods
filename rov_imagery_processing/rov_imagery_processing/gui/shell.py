@@ -446,8 +446,17 @@ class Shell(ctk.CTk):
         self.header.bind("<Configure>", self._header_configured)
         self._header_at: tuple[int, int] | None = None
 
+        # bg_color as well as fg_color, and both as the (light, dark) pair.
+        # CustomTkinter works a widget's bg_color out from its master, and a
+        # plain Tk canvas can only answer with the one colour it is painted
+        # right now -- which at start-up is the dark banner. The frame then
+        # held that dark literal for the rest of the session, and at fractional
+        # display scaling its rounded fill lands a pixel or two short of its
+        # own canvas, so a hairline of it showed down the right edge and along
+        # the foot in light mode. Every control inside the frame already
+        # carries this for the same reason; the frame holding them did not.
         self.controls = ctk.CTkFrame(self.header, fg_color=T.HEADER_BG,
-                                     corner_radius=0)
+                                     bg_color=T.HEADER_BG, corner_radius=0)
         # Folded away, everything sits in one row reading left to right:
         # lamps, then the three controls. Open, the lamps drop under the two
         # controls -- see `_lay_out_controls`.
