@@ -48,12 +48,39 @@ def _pump(app, n=20):
 
 
 def test_the_tabs_run_in_the_order_of_a_survey_day(app):
-    """Monitoring while flying, the transect times straight after, then the
-    logs, then the reading-back -- and no imagery, which is its own program."""
-    assert app.nav.sections == ["Monitoring", "Transects", "BlueOS logs",
-                                "Flight summary", "Analyze transects"]
+    """Set up, fly, then read back -- and no imagery, which is its own program.
+
+    Navigation went in at position 2 in September 2026 and pushed Transects to
+    3. It sits there because that is the order of the day: the folder is
+    chosen on Monitoring before the ROV is wet, Navigation is where the
+    operator sits for the whole dive, and the transect times are typed
+    afterwards with the vehicle disarmed on deck.
+    """
+    assert app.nav.sections == ["Monitoring", "Navigation", "Transects",
+                                "BlueOS logs", "Flight summary",
+                                "Analyze transects"]
     assert "analyze" in app.pages
     assert not any("photo" in k.lower() or "video" in k.lower() for k in app.pages)
+
+
+def test_a_tab_is_identified_by_a_key_rather_than_its_position(app):
+    """Inserting a chapter must not silently reopen a different one.
+
+    Nothing persists the open tab today. This is the guard for when something
+    does: a saved "2" from before Navigation existed would now be Navigation
+    rather than Transects, so what gets saved has to be the key.
+    """
+    assert app.nav.key_of("Transects") == "transects"
+    assert app.nav.key_of("Navigation") == "navigation"
+    before = app.nav.current
+    try:
+        assert app.nav.select_key("transects")
+        assert app.nav.current == "Transects"
+        assert not app.nav.select_key("a_chapter_that_was_removed")
+        assert app.nav.current == "Transects"      # unchanged, not guessed at
+    finally:
+        if before:
+            app.nav.select(before)
 
 
 def test_raising_the_page_re_reads_the_plan(app):

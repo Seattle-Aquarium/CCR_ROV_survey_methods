@@ -423,20 +423,91 @@ def test_a_folder_emptied_by_the_delete_goes_too_but_never_a_type_root(vehicle, 
     assert REC not in deleted and C3 not in deleted
 
 
-def test_only_this_module_ever_sends_anything_but_a_get():
-    """The vehicle client and every other module stay read-only; the words
-    that would change the vehicle appear in exactly one file."""
+#: The only files allowed to send the vehicle anything but a GET, and the
+#: single thing each is allowed to send. Every other module in the package is
+#: read-only, and this list is the whole of the exception.
+#:
+#: `pifiles.py` deletes, to clear old recordings off the Pi. `nav/mav2rest.py`
+#: posts, because switching navigation profile and setting the EKF origin
+#: genuinely have to write -- but it is one file, one function, and one gate
+#: (`_require_writes`), which the next test proves.
+MAY_WRITE = {
+    "pifiles.py": {'method="DELETE"', "_delete_request"},
+    "mav2rest.py": {'method="POST"'},
+}
+
+
+def test_only_the_named_modules_ever_send_anything_but_a_get():
+    """Read-only everywhere except two files, each allowed one verb.
+
+    The point of counting the words rather than the behaviour is that it
+    cannot be got round by accident: a new module that starts POSTing to the
+    vehicle fails here on the day it is written, not on the day it breaks
+    somebody's dive.
+    """
     pkg = Path(PF.__file__).parent
     offenders = []
     for path in pkg.rglob("*.py"):
-        if path.name == "pifiles.py":
-            continue
+        allowed = MAY_WRITE.get(path.name, set())
         text = path.read_text(encoding="utf-8")
         for word in ('method="DELETE"', 'method="POST"', 'method="PUT"',
                      'method="PATCH"', "_delete_request"):
-            if word in text:
+            if word in text and word not in allowed:
                 offenders.append(f"{path.name}: {word}")
     assert not offenders, offenders
+
+
+def test_every_mavlink_send_goes_through_the_write_gate():
+    """No path sends to a vehicle without checking it is allowed to.
+
+    `_require_writes` raises unless the operator has unlocked writes, and it
+    does not exist at all on the replay collector. This asserts that every
+    function that reaches `_post` passes through it first, so a new sending
+    helper cannot quietly skip the gate.
+    """
+    from rov_flight_ops.nav import mav2rest
+
+    src = Path(mav2rest.__file__).read_text(encoding="utf-8")
+    body = src.split("class Mavlink2Rest:", 1)[1]
+    # Split into methods and look at each one that posts.
+    methods, current = {}, None
+    for line in body.splitlines():
+        if line.startswith("    def "):
+            current = line.split("def ", 1)[1].split("(", 1)[0]
+            methods[current] = []
+        elif current:
+            methods[current].append(line)
+    posting = {name: lines for name, lines in methods.items()
+               if any("_post(" in ln for ln in lines)}
+    assert posting, "no method posts at all — has the transport changed?"
+    ungated = [name for name, lines in posting.items()
+               if not any("_require_writes(" in ln for ln in lines)]
+    assert not ungated, f"these send without the write gate: {ungated}"
+
+
+def test_replay_has_no_connection_to_write_through():
+    """Replay cannot write because there is nothing to write with.
+
+    Not a flag that happens to be False -- the replay collector has no
+    `Mavlink2Rest` at all, so there is no object on which a send could be
+    called. A path that is inert in replay only because of a boolean is a
+    path nobody has tested.
+    """
+    from rov_flight_ops.nav import replay
+
+    rc = replay.ReplayCollector([], label="test")
+    assert rc.mav is None
+    assert rc.allow_writes is False
+
+
+def test_a_read_only_connection_refuses_to_send():
+    from rov_flight_ops.nav import mav2rest
+
+    mav = mav2rest.Mavlink2Rest("192.0.2.1", allow_writes=False)
+    with pytest.raises(mav2rest.VehicleWriteRefused):
+        mav.send({"message": {}}, what="a test that must never reach a vehicle")
+    with pytest.raises(mav2rest.VehicleWriteRefused):
+        mav.request_message(49, reason="a test")
 
 
 # --------------------------------------------------------------------------

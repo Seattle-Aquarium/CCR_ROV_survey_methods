@@ -167,7 +167,9 @@ From a terminal: `python -m rov_flight_ops` (in the environment above).
 
 ## 1  Monitoring
 
-Where the operator sits during a flight.
+Where the operator sits *before* a flight — the flight folder, the path to the
+vehicle, and the laptop and tether while they work. During the flight itself,
+see [2 Navigation](#2--navigation).
 
 ### 1. Flight folder
 
@@ -252,7 +254,45 @@ covers the full 30.
 
 ---
 
-## 2  Transects
+## 2  Navigation
+
+The primary instruments display: a live map, the flight and power HUDs, and the
+navigation suite. This is the page the operator sits in front of for the whole
+dive — Cockpit is on the monitor above it and has the forward camera, and on a
+survey flown 0.8 m off the bottom in low visibility the numbers here matter
+more to the pilot than the picture does.
+
+**Its own guide is [NAVIGATION.md](NAVIGATION.md)**, which covers the origin,
+the profiles, the map, waypoints, energy, every measurement's source, the
+compatibility matrix and a bench checklist. In outline:
+
+* a **map** with the ROV's track, the vessel when there is one, waypoints and
+  the origin, over nautical charts with bathymetric shading — cached on disk so
+  it works offline, and falling back to a metre grid rather than to nothing;
+* a **Flight Ops HUD**: a two-mode altitude gauge whose survey scale puts the
+  0.8 m working altitude at its exact midpoint, plus flight mode, velocity and
+  depth;
+* a **Power HUD**: a fixed 0–1,000 W gauge with the 900 W band marked and the
+  observed peak, plus voltage, current and watt-hours integrated over the
+  intervals that actually happened;
+* a **navigation workspace** whose sensor matrix answers three separate
+  questions per source — *configured*, *available* and **used** — because a
+  source can be all of the first two and none of the third, which is exactly
+  the state that cost this programme a day of coordinates on 18 September 2026;
+* **navigation profiles** (DVL dead reckoning, acoustic + DVL) with parameter
+  validation that explains *why* each requirement exists, and a deliberate
+  review → apply → read-back path that is locked until the operator unlocks it
+  and refused while the vehicle is armed;
+* **EKF origin** setup, which is what makes a DVL-only dive have coordinates at
+  all.
+
+Everything it reads is read-only except the profile and origin writes above.
+It is the only part of the program that can write to a vehicle besides
+`pifiles.py`, and a test enforces that.
+
+---
+
+## 3  Transects
 
 Straight after the flight, with the vehicle on deck and disarmed.
 
@@ -320,7 +360,7 @@ with the vehicle's own time preserved.
 
 ---
 
-## 3  BlueOS logs
+## 4  BlueOS logs
 
 See what is on the Pi, download it into the flight folder, and clear old files
 off it.
@@ -488,7 +528,7 @@ module issues read-only GETs, and a test fails if a write appears anywhere else.
 
 ---
 
-## 4  Flight summary
+## 5  Flight summary
 
 **Read the day** builds the flight report (PDF) from everything in the flight's
 `logs`; **Recordings / What the check found / Autopilot logs / Transects** are
@@ -508,7 +548,7 @@ How a recording's ending is described is limited to what the logs show:
 * **unexplained** — anything else, including a recording the vehicle never
   closed, where an interrupted recorder and a disarm look alike.
 
-## 5  Analyze transects
+## 6  Analyze transects
 
 Unchanged from UTC for now: per-transect CSVs (with tide-corrected depth) and a
 map via the transect extractor, and a sensor-health report.
@@ -680,14 +720,32 @@ rov_flight_ops/
     assets/                  fonts, logos, icon
     rov_flight_ops/          the package
         gui/
-            app.py           the window and its five tabs
+            app.py           the window and its six tabs
             shell.py         banner fold, tabs, resizable output (same file as imagery's copy)
             widgets.py       cards, resize grips, site/transect editors
             monitorpage.py   Monitoring sections 2-4
+            navpage.py       Navigation tab: layout, wiring, the HUDs
+            navmap.py        the chart canvas
+            navgauges.py     the altitude and power gauges
+            navstatus.py     configured / available / used, testable without a screen
+            navdialogs.py    details, origin, and the review-and-apply path
             transectsetup.py Transects tab
             logspage.py      BlueOS logs tab
             summarypage.py, healthpage.py   Flight summary
             transectpage.py  Analyze transects
+        nav/                 Navigation, everything that is not a widget
+            model.py         the typed reading -- unknown is never zero
+            mav2rest.py      live MAVLink, and why an HTTP 200 proves nothing
+            extensions.py    the DVL and both Water Linked UGPS extensions
+            collector.py     one shared background reader
+            geo.py           WGS-84 distance, bearing and local-NED projection
+            power.py         watts, the observed peak, watt-hours
+            profiles.py      the two navigation profiles and their validation
+            origin.py        which mechanism owns the EKF origin
+            session.py       the navigation session log
+            waypoints.py     points captured at the press
+            tiles.py         the basemap cache
+            replay.py        recorded and synthetic playback
         pifiles.py           Pi files: list, spans, choose, download, delete
         diagnostics.py       app.log, faults.log, stall watchdog (same file as imagery's copy)
         previewsource.py     where the transect preview's depth comes from

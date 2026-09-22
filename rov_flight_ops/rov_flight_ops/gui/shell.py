@@ -240,8 +240,19 @@ class TabStrip(ctk.CTkFrame):
         #: The tab to come back to when the start-up warm-up has been round
         #: them all; None when it is not running.
         self._warm_home: str | None = None
+        #: A stable identifier per tab, independent of its position and of
+        #: its displayed name.
+        #:
+        #: Nothing persists a chosen tab today -- the window always opens on
+        #: the first one -- and this exists so that if anything ever does, it
+        #: cannot persist a *number*. Navigation was inserted at position 2 in
+        #: September 2026 and pushed Transects to 3; a saved "tab 2" from
+        #: before that would now reopen Navigation, which is the kind of
+        #: silent migration bug that is only ever noticed by the person it
+        #: confuses. Save `key_of(name)`, restore with `select_key`.
+        self._keys: dict[str, str] = {}
 
-    def add(self, name: str) -> ctk.CTkFrame:
+    def add(self, name: str, key: str = "") -> ctk.CTkFrame:
         n = len(self._buttons) + 1
         btn = ctk.CTkButton(
             self, text=f"{n}  {name}", font=T.FONT_TAB, height=36,
@@ -259,9 +270,27 @@ class TabStrip(ctk.CTkFrame):
         # chosen. Until then Tk has nothing to lay out for it.
         page.grid_remove()
         self._pages[name] = page
+        self._keys[name] = key or name.lower().replace(" ", "_")
         if self._current is None:
             self.select(name, notify=False)
         return page
+
+    def key_of(self, name: str) -> str:
+        """The stable identifier for a tab. Save this, never the position."""
+        return self._keys.get(name, "")
+
+    def select_key(self, key: str) -> bool:
+        """Open the tab with this identifier. False if it no longer exists.
+
+        A key that has gone is not an error -- a chapter can be removed
+        between releases -- and the caller falls back to the first tab rather
+        than opening whatever now happens to sit where the old one did.
+        """
+        for name, k in self._keys.items():
+            if k == key:
+                self.select(name)
+                return True
+        return False
 
     def select(self, name: str, notify: bool = True) -> None:
         if name not in self._pages:
@@ -420,8 +449,9 @@ class Shell(ctk.CTk):
     def build_tabs(self) -> None:
         """Add the program's tabs with `add_tab`. Called once, at startup."""
 
-    def add_tab(self, name: str) -> ctk.CTkFrame:
-        return self.nav.add(name)
+    def add_tab(self, name: str, key: str = "") -> ctk.CTkFrame:
+        """Add a tab. `key` is its stable identifier -- see `TabStrip`."""
+        return self.nav.add(name, key)
 
     def mount(self, tab: str, key: str, page) -> None:
         """Remember a page built into a tab, so showing the tab refreshes it."""

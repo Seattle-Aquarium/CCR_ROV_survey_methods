@@ -4,17 +4,20 @@ ROV Flight Operations (working title) -- the desktop application.
 Everything to do with the vehicle and what it recorded, in the order a survey
 day uses it:
 
-1. **Monitoring** -- where the operator sits during a flight. The flight folder
+1. **Monitoring** -- where the operator sits before a flight. The flight folder
    is chosen here first, usually before the ROV is even connected, because it
    is where everything the program writes is filed.
-2. **Transects** -- straight after the flight, with the vehicle disarmed on
+2. **Navigation** -- where the operator sits *during* a flight: the map, the
+   flight and power instruments, and the navigation suite. Cockpit is on the
+   monitor above and has the camera; this has everything else.
+3. **Transects** -- straight after the flight, with the vehicle disarmed on
    deck: type the transect times, save them, and check them against the dive
    profile.
-3. **BlueOS logs** -- see what is on the Pi, download it into the flight
+4. **BlueOS logs** -- see what is on the Pi, download it into the flight
    folder, and clear old files off it.
-4. **Flight summary** -- the day read back, and whether the recordings are
+5. **Flight summary** -- the day read back, and whether the recordings are
    sound.
-5. **Analyze transects** -- per-transect CSVs and sensor health.
+6. **Analyze transects** -- per-transect CSVs and sensor health.
 
 Imagery -- photos and video -- is ROV Imagery Processing, a separate program.
 """
@@ -145,13 +148,14 @@ class App(Shell):
         from .healthpage import HealthPage
         from .logspage import LogsPage
         from .monitorpage import MonitorPage
+        from .navpage import NavigationPage
         from .summarypage import SummaryPage
         from .transectpage import TransectPage
         from .transectsetup import TransectSetup
 
         # 1. Monitoring: the flight folder, then the vehicle path and the
         #    recorder side by side, then the live charts.
-        tab = self.add_tab("Monitoring")
+        tab = self.add_tab("Monitoring", "monitoring")
         body = self.scroll_body(tab)
         self._build_folder_card(body, row=0)
         left, right = self.pair(body, row=1)
@@ -161,18 +165,26 @@ class App(Shell):
         monitor = MonitorPage(tab, self, parents=(left, right, charts))
         self.mount("Monitoring", "monitor", monitor)
 
-        # 2. Transects.
-        tab = self.add_tab("Transects")
+        # 2. Navigation. Deliberately *not* inside a scrolling body: this is
+        #    an instrument panel, and an instrument that can be scrolled off
+        #    the screen is an instrument that will be, at the worst moment.
+        tab = self.add_tab("Navigation", "navigation")
+        nav = NavigationPage(tab, self)
+        nav.grid(row=0, column=0, sticky="nsew")
+        self.mount("Navigation", "navigation", nav)
+
+        # 3. Transects.
+        tab = self.add_tab("Transects", "transects")
         self.mount("Transects", "transects", TransectSetup(tab, self))
 
-        # 3. BlueOS logs.
-        tab = self.add_tab("BlueOS logs")
+        # 4. BlueOS logs.
+        tab = self.add_tab("BlueOS logs", "blueos_logs")
         logs = LogsPage(tab, self)
         logs.grid(row=0, column=0, sticky="nsew")
         self.mount("BlueOS logs", "logs", logs)
 
-        # 4. Flight summary: the report, then recording health, in one column.
-        tab = self.add_tab("Flight summary")
+        # 5. Flight summary: the report, then recording health, in one column.
+        tab = self.add_tab("Flight summary", "flight_summary")
         body = self.scroll_body(tab)
         summary = SummaryPage(body, self, scroll=False)
         summary.grid(row=0, column=0, sticky="ew")
@@ -181,8 +193,8 @@ class App(Shell):
         self.mount("Flight summary", "summary", summary)
         self.mount("Flight summary", "health", health)
 
-        # 5. Analyze transects.
-        tab = self.add_tab("Analyze transects")
+        # 6. Analyze transects.
+        tab = self.add_tab("Analyze transects", "analyze_transects")
         analyze = TransectPage(tab, self)
         analyze.grid(row=0, column=0, sticky="nsew")
         self.mount("Analyze transects", "analyze", analyze)
@@ -468,6 +480,21 @@ class App(Shell):
         the recorder closes on its own thread, the window shows how it is
         going, and it closes when the recorder is finished.
         """
+        # The Navigation collector, the tile fetcher and the navigation log
+        # first, and unconditionally: they are cheap to stop, none of them can
+        # block, and doing it here means they are stopped even on the paths
+        # below that return False and come back round again. Stopping twice is
+        # harmless; leaving a collector polling a vehicle after the window has
+        # gone is not.
+        nav = self.pages.get("navigation")
+        if nav is not None and not getattr(self, "_nav_stopped", False):
+            self._nav_stopped = True
+            try:
+                nav.shutdown()
+            except Exception:
+                diagnostics.log_exception("stopping Navigation", *sys.exc_info(),
+                                          level=logging.WARNING)
+
         rec = self.recorder
         waiting = self._close_request
         if waiting is not None and not waiting.is_set():
