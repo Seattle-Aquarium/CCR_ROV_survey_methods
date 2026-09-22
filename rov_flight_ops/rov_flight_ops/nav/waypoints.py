@@ -305,3 +305,104 @@ def track_geojson(segments, name: str = "ROV track") -> dict:
             "properties": {"name": name, "segment": i},
         } for i, line in enumerate(lines)],
     }
+
+
+# --------------------------------------------------------------------------
+#  Planned features
+# --------------------------------------------------------------------------
+#
+# Survey sites and planned transects come in as GeoJSON, because this
+# repository's own `survey.Site` has no coordinates in it at all -- it is
+# names, dates and transect *times*, which is what the rest of the programme
+# needs and is no use to a map. Rather than bend that format into carrying
+# geometry it was not designed for, planned features are imported from the
+# lightweight standard every GIS tool this team uses can already write.
+
+PLANNED_FILENAME = "planned.geojson"
+
+
+@dataclass
+class Planned:
+    """A site marker or a planned transect line, read from GeoJSON."""
+
+    name: str
+    #: "point" or "line".
+    shape: str
+    #: [(lat, lon), ...]. One pair for a point.
+    points: list
+    note: str = ""
+
+
+def read_planned(path: Path) -> tuple[list[Planned], list[str]]:
+    """(features, problems) from a GeoJSON file.
+
+    Tolerant on purpose: a file that is half usable gives the usable half and
+    says what it could not read, because a survey plan exported from somebody
+    else's software is not going to be exactly what this expects and a map
+    that refuses the whole file helps nobody on a boat.
+
+    GeoJSON coordinates are **[lon, lat]** -- the opposite order to everywhere
+    else in this program, and the single most common way an imported plan ends
+    up in the wrong hemisphere.
+    """
+    problems: list[str] = []
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return [], [f"{path} does not exist"]
+    except Exception as ex:
+        return [], [f"{path} could not be read: {ex}"]
+
+    features = data.get("features") if isinstance(data, dict) else None
+    if not isinstance(features, list):
+        # A bare geometry or a bare list is common enough to accept.
+        features = data if isinstance(data, list) else [data]
+
+    out: list[Planned] = []
+    for i, feat in enumerate(features):
+        if not isinstance(feat, dict):
+            continue
+        geom = feat.get("geometry", feat)
+        props = feat.get("properties") or {}
+        if not isinstance(geom, dict):
+            problems.append(f"feature {i} has no geometry")
+            continue
+        kind = str(geom.get("type") or "")
+        coords = geom.get("coordinates")
+        name = str(props.get("name") or props.get("Name")
+                   or props.get("site") or f"plan {i + 1}")
+        note = str(props.get("note") or props.get("description") or "")
+
+        pairs: list[tuple[float, float]] = []
+        if kind == "Point" and isinstance(coords, (list, tuple)):
+            coords = [coords]
+        elif kind in ("LineString", "MultiPoint"):
+            pass
+        elif kind in ("MultiLineString", "Polygon"):
+            # Take the first ring or line; a survey plan rarely needs more and
+            # guessing at the rest would be worse than saying so.
+            coords = coords[0] if isinstance(coords, list) and coords else []
+            if kind == "Polygon":
+                problems.append(f"{name}: polygon imported as its outer ring")
+        else:
+            problems.append(f"{name}: {kind or 'unknown geometry'} not imported")
+            continue
+
+        for c in coords if isinstance(coords, list) else []:
+            if not (isinstance(c, (list, tuple)) and len(c) >= 2):
+                continue
+            lon, lat = c[0], c[1]          # GeoJSON order
+            if M.valid_latlon(lat, lon):
+                pairs.append((float(lat), float(lon)))
+            else:
+                problems.append(f"{name}: ({lat}, {lon}) is not a usable "
+                                f"coordinate — check the lon/lat order")
+        if not pairs:
+            problems.append(f"{name}: no usable coordinates")
+            continue
+        out.append(Planned(name=name,
+                           shape="point" if len(pairs) == 1 else "line",
+                           points=pairs, note=note))
+    log.info("read %d planned feature(s) from %s (%d problem(s))",
+             len(out), path, len(problems))
+    return out, problems

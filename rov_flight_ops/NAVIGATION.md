@@ -610,8 +610,8 @@ With Nereo on the bench, disarmed, tether connected. Tick these before flying.
 | Stable chapter identifiers so a saved tab cannot mis-restore | **done** — tested |
 | Live map, marker with heading, breadcrumb, pan/zoom/follow/fit | **done** |
 | Offline basemap + grid fallback, attribution retained | **done** — grid fallback verified; NOAA tiles unreachable from the development machine |
-| Saved sites / planned transects overlay | **partial** — waypoints and origin draw; the survey plan's sites are not yet overlaid |
-| GeoJSON/CSV import-export | **done** — export; import not implemented |
+| Saved sites / planned transects overlay | **done** — imported from GeoJSON and drawn dashed beneath everything live. `survey.Site` carries names, dates and transect *times* and no coordinates, so there was no existing format to reuse |
+| GeoJSON/CSV import-export | **done** — waypoints and tracks export; survey plans import, with wrong-way-round coordinates named rather than plotted |
 | Tracks break on resets, longitude wraparound handled | **done** — tested |
 | Uncertainty only when actually estimated | **done** — no invented accuracy radius |
 | Altitude gauge, two modes, 0.8 m at the exact midpoint, hysteresis | **done** — tested through the acceptance sequence |

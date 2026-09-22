@@ -154,10 +154,12 @@ class NavigationPage(ctk.CTkFrame):
                                                          padx=(6, 0))
         button(bar, "Fit", self._fit, "ghost", width=54).grid(row=0, column=3,
                                                               padx=(6, 0))
-        bar.grid_columnconfigure(4, weight=1)
+        button(bar, "Plan…", self._import_plan, "ghost", width=70
+               ).grid(row=0, column=4, padx=(6, 0))
+        bar.grid_columnconfigure(5, weight=1)
         self.wp_button = button(bar, "＋ Create waypoint", self._create_waypoint,
                                 "primary", width=160)
-        self.wp_button.grid(row=0, column=5)
+        self.wp_button.grid(row=0, column=6)
 
         self.map = MapCanvas(col, cache=self.tile_cache)
         self.map.grid(row=1, column=0, sticky="nsew")
@@ -308,6 +310,8 @@ class NavigationPage(ctk.CTkFrame):
         if folder is not None and (self.waypoints is None
                                    or self.waypoints.folder != Path(folder)):
             self.waypoints = waypoints.WaypointStore(Path(folder))
+            self._load_plan(Path(folder) / waypoints.PLANNED_FILENAME,
+                            quiet=True)
             self._sync_markers()
         if self.collector is None:
             self._start_live()
@@ -598,6 +602,48 @@ class NavigationPage(ctk.CTkFrame):
     def _fit(self) -> None:
         self.map.fit_track()
         self.follow_var.set(False)
+
+    def _import_plan(self) -> None:
+        """Import planned sites and transects from GeoJSON.
+
+        The survey plan this program already keeps (`survey.Site`) carries
+        names, dates and transect *times* and no coordinates at all, so there
+        is no existing format to reuse for a map overlay. GeoJSON is what
+        every GIS tool this team uses can already write.
+        """
+        from tkinter import filedialog
+
+        start = str(self.app.flight_dir) if getattr(self.app, "flight_dir",
+                                                    None) else None
+        chosen = filedialog.askopenfilename(
+            title="Import a survey plan", initialdir=start,
+            filetypes=[("GeoJSON", "*.geojson *.json"), ("All files", "*.*")])
+        if chosen:
+            self._load_plan(Path(chosen))
+
+    def _load_plan(self, path: Path, *, quiet: bool = False) -> None:
+        if quiet and not path.is_file():
+            return
+        features, problems = waypoints.read_planned(path)
+        self.map.planned = features
+        self.map.draw()
+        if self.session is not None:
+            self.session.event("plan_imported", {
+                "path": str(path), "features": len(features),
+                "problems": problems})
+        if quiet:
+            return
+        note = f"Imported {len(features)} planned feature(s) from {path.name}."
+        if problems:
+            # Shown rather than swallowed: a plan exported from somebody
+            # else's software is never quite what this expects, and the most
+            # common fault -- coordinates the wrong way round -- is invisible
+            # unless it is named.
+            lines = "\n  ".join(problems[:12])
+            note += f"\n\nNot imported:\n  {lines}"
+            if len(problems) > 12:
+                note += f"\n  … and {len(problems) - 12} more"
+        messagebox.showinfo("Survey plan", note)
 
     def _pick_profile(self, label_text: str) -> None:
         for k, p in PR.PROFILES.items():

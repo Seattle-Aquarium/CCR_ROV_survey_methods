@@ -98,6 +98,10 @@ class MapCanvas(ctk.CTkFrame):
         self.vessel_heading: float | None = None
         self.rov_heading: float | None = None
         self.markers: list[Marker] = []
+        #: Planned sites and transects, imported from GeoJSON. Drawn
+        #: under everything live, so a plan can never be mistaken for
+        #: a measurement.
+        self.planned: list = []
         #: (lat, lon, seabed_depth_m) accumulated for the depth colouring.
         self.depth_points: list[tuple[float, float, float]] = []
         #: When there is no geographic reference, positions are (north, east)
@@ -142,6 +146,7 @@ class MapCanvas(ctk.CTkFrame):
         pts = [(p.lat, p.lon) for p in self.rov_track]
         pts += [(p.lat, p.lon) for p in self.vessel_track]
         pts += [(m.lat, m.lon) for m in self.markers]
+        pts += [pair for item in self.planned for pair in item.points]
         if self.rov_fix is not None:
             pts.append((self.rov_fix.lat, self.rov_fix.lon))
         if not pts:
@@ -281,6 +286,7 @@ class MapCanvas(ctk.CTkFrame):
 
         drew_tiles = self._draw_tiles(w, h) if self.show_tiles else 0
         self._draw_grid(w, h, faint=drew_tiles > 0)
+        self._draw_planned()
         self._draw_track(self.vessel_track, _hex(T.WARN), width=2,
                          dash=(4, 3))
         self._draw_track(self.rov_track, _hex(T.ACCENT), width=3,
@@ -425,6 +431,36 @@ class MapCanvas(ctk.CTkFrame):
         self.canvas.create_text(
             6, 30, anchor="w", font=T.FONT_SMALL, fill=_hex(T.TEXT_MUTED),
             text=f"seabed {lo:.1f}–{hi:.1f} m (measured: depth − altitude)")
+
+    def _draw_planned(self) -> None:
+        """The survey plan: dashed, muted, and clearly not a measurement.
+
+        Drawn first so everything live sits on top of it, and in a dashed
+        outline so that a planned transect and a flown one cannot be confused
+        at a glance -- which is the whole risk of putting them on one chart.
+        """
+        for item in self.planned:
+            pts: list[float] = []
+            for lat, lon in item.points:
+                at = self.xy(lat, lon)
+                if at is not None:
+                    pts.extend(at)
+            if not pts:
+                continue
+            if item.shape == "line" and len(pts) >= 4:
+                self.canvas.create_line(*pts, fill=_hex(T.TEXT_MUTED), width=2,
+                                        dash=(6, 4))
+                self.canvas.create_text(pts[0] + 8, pts[1] - 8, text=item.name,
+                                        anchor="w", fill=_hex(T.TEXT_MUTED),
+                                        font=T.FONT_SMALL)
+            else:
+                x, y = pts[0], pts[1]
+                self.canvas.create_oval(x - 7, y - 7, x + 7, y + 7,
+                                        outline=_hex(T.TEXT_MUTED), width=2,
+                                        dash=(3, 3))
+                self.canvas.create_text(x + 10, y, text=item.name, anchor="w",
+                                        fill=_hex(T.TEXT_MUTED),
+                                        font=T.FONT_SMALL)
 
     def _draw_markers(self) -> None:
         for m in self.markers:

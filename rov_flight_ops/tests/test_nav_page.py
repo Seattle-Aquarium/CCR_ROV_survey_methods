@@ -597,3 +597,179 @@ def test_stopping_the_page_does_not_block_the_window(app):
     finally:
         page.collector = previous
         page.session = previous_session
+
+
+# --------------------------------------------------------------------------
+#  Planned features
+# --------------------------------------------------------------------------
+
+
+def _plan_file(tmp_path, features):
+    p = tmp_path / "planned.geojson"
+    p.write_text(json.dumps({"type": "FeatureCollection",
+                             "features": features}), encoding="utf-8")
+    return p
+
+
+def test_a_survey_plan_imports_from_geojson(tmp_path):
+    """`survey.Site` carries names, dates and transect times and no
+    coordinates, so there is no existing format to reuse for a map overlay."""
+    p = _plan_file(tmp_path, [
+        {"type": "Feature", "properties": {"name": "EBM East"},
+         "geometry": {"type": "Point",
+                      "coordinates": [-122.39018, 47.62691]}},
+        {"type": "Feature", "properties": {"name": "T1"},
+         "geometry": {"type": "LineString",
+                      "coordinates": [[-122.390, 47.6269],
+                                      [-122.394, 47.6271]]}},
+    ])
+    features, problems = waypoints.read_planned(p)
+    assert not problems
+    assert [f.shape for f in features] == ["point", "line"]
+    # GeoJSON is [lon, lat]; the import puts them back the right way round.
+    assert features[0].points == [(47.62691, -122.39018)]
+
+
+def test_coordinates_the_wrong_way_round_are_caught_and_named(tmp_path):
+    """The single most common way an imported plan ends up in the wrong
+    hemisphere."""
+    p = _plan_file(tmp_path, [
+        {"type": "Feature", "properties": {"name": "swapped"},
+         "geometry": {"type": "Point", "coordinates": [47.6, -122.4]}},
+    ])
+    features, problems = waypoints.read_planned(p)
+    assert not features
+    assert any("lon/lat order" in x for x in problems)
+
+
+def test_a_half_usable_plan_gives_the_usable_half(tmp_path):
+    """A map that refuses a whole file because one feature is odd helps
+    nobody on a boat."""
+    p = _plan_file(tmp_path, [
+        {"type": "Feature", "properties": {"name": "good"},
+         "geometry": {"type": "Point", "coordinates": [-122.39, 47.62]}},
+        {"type": "Feature", "properties": {"name": "odd"},
+         "geometry": {"type": "GeometryCollection"}},
+    ])
+    features, problems = waypoints.read_planned(p)
+    assert len(features) == 1 and features[0].name == "good"
+    assert any("odd" in x for x in problems)
+
+
+def test_a_missing_plan_is_not_an_error(tmp_path):
+    features, problems = waypoints.read_planned(tmp_path / "nothing.geojson")
+    assert features == [] and len(problems) == 1
+
+
+def test_the_map_draws_a_plan_without_a_vehicle(app):
+    """The plan is drawn under everything live, and drawing it must not
+    depend on there being any telemetry at all.
+
+    The canvas is given an explicit size and laid out before anything is
+    asserted. A Tk canvas inside a frame that has not been mapped reports
+    1x1, `draw` returns early on it, and the test passes or fails for reasons
+    that have nothing to do with the drawing -- which is the same trap that
+    makes a widget tree look perfect while showing nothing.
+    """
+    import customtkinter as ctk
+
+    from rov_flight_ops.gui.navmap import MapCanvas
+    from rov_flight_ops.nav.tiles import TileCache
+
+    holder = ctk.CTkFrame(app, width=640, height=420)
+    holder.grid(row=0, column=0)
+    holder.grid_propagate(False)
+    holder.grid_rowconfigure(0, weight=1)
+    holder.grid_columnconfigure(0, weight=1)
+    cache = TileCache(online=False)
+    m = MapCanvas(holder, cache=cache)
+    m.grid(row=0, column=0, sticky="nsew")
+    for _ in range(20):
+        app.update()
+        time.sleep(0.005)
+    try:
+        assert m.canvas.winfo_width() > 20, "the canvas was never laid out"
+        m.planned = [
+            waypoints.Planned("EBM East", "point", [(47.62691, -122.39018)]),
+            waypoints.Planned("T1", "line",
+                              [(47.6269, -122.390), (47.6271, -122.394)])]
+        m.centre = (47.6270, -122.392)
+        m.draw()
+        items = m.canvas.find_all()
+        assert items, "the map drew nothing at all"
+        texts = {m.canvas.itemcget(i, "text") for i in items
+                 if m.canvas.type(i) == "text"}
+        assert "EBM East" in texts and "T1" in texts
+        # Fit frames the plan even with no track at all.
+        m.fit_track()
+        assert m.centre is not None
+    finally:
+        cache.stop()
+        holder.destroy()
+
+
+def test_the_map_falls_back_to_a_grid_with_no_tiles(app):
+    """No basemap is a supported state, not a broken one: the grid, the scale
+    bar and the tracks are most of what the map is for."""
+    import customtkinter as ctk
+
+    from rov_flight_ops.gui.navmap import MapCanvas
+    from rov_flight_ops.nav.tiles import TileCache
+
+    holder = ctk.CTkFrame(app, width=640, height=420)
+    holder.grid(row=0, column=0)
+    holder.grid_propagate(False)
+    holder.grid_rowconfigure(0, weight=1)
+    holder.grid_columnconfigure(0, weight=1)
+    cache = TileCache(online=False)
+    m = MapCanvas(holder, cache=cache)
+    m.grid(row=0, column=0, sticky="nsew")
+    for _ in range(20):
+        app.update()
+        time.sleep(0.005)
+    try:
+        m.centre = (47.6270, -122.392)
+        m.draw()
+        texts = " ".join(m.canvas.itemcget(i, "text")
+                         for i in m.canvas.find_all()
+                         if m.canvas.type(i) == "text")
+        assert "grid" in texts, "no grid was drawn"
+        assert "no basemap" in texts, "the missing basemap was not declared"
+        assert "N" in texts                       # the north arrow
+    finally:
+        cache.stop()
+        holder.destroy()
+
+
+def test_the_map_says_so_when_there_is_no_geographic_position(app):
+    """A DVL-only dive before the origin is set: the shape is real and its
+    place on the Earth is not known, and the map must not imply otherwise."""
+    import customtkinter as ctk
+
+    from rov_flight_ops.gui.navmap import MapCanvas
+    from rov_flight_ops.nav.tiles import TileCache
+
+    holder = ctk.CTkFrame(app, width=640, height=420)
+    holder.grid(row=0, column=0)
+    holder.grid_propagate(False)
+    holder.grid_rowconfigure(0, weight=1)
+    holder.grid_columnconfigure(0, weight=1)
+    cache = TileCache(online=False)
+    m = MapCanvas(holder, cache=cache)
+    m.grid(row=0, column=0, sticky="nsew")
+    for _ in range(20):
+        app.update()
+        time.sleep(0.005)
+    try:
+        m.local_only = True
+        m.local_track = [(0.0, 0.0), (5.0, 2.0), (11.0, 7.0)]
+        m.draw()
+        texts = " ".join(m.canvas.itemcget(i, "text")
+                         for i in m.canvas.find_all()
+                         if m.canvas.type(i) == "text")
+        assert "LOCAL VIEW" in texts
+        assert "not a geographic position" in texts
+        assert "start" in texts
+    finally:
+        cache.stop()
+        holder.destroy()
