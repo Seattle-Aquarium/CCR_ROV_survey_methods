@@ -17,3 +17,8 @@ data/Satellite
 
 # per-user GUI state, not source (personal paths, last site used)
 code/.tlog_to_csv_config.json
+
+# Scratch for the bundled-map build script; the Overpass extract is 8 MB and
+# is refetched on demand. The built packs under assets/maps/pier59/ ARE
+# tracked -- they are the offline first-launch basemap.
+rov_flight_ops/assets/maps/_work/

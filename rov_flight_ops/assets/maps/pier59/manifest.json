@@ -1,0 +1,49 @@
+{
+ "site": "Seattle Aquarium \u2014 Pier 59 / OTS",
+ "centre": {
+  "lat": 47.6075661,
+  "lon": -122.3438752
+ },
+ "radius_m": 200.0,
+ "bounds": {
+  "west": -122.34654,
+  "south": 47.6057695,
+  "east": -122.3412104,
+  "north": 47.6093627
+ },
+ "built": "2026-09-22",
+ "built_by": "assets/maps/build_pier59.py",
+ "layers": {
+  "pier59_imagery": {
+   "tiles": 16,
+   "missing": 0,
+   "zooms": [
+    13,
+    16
+   ],
+   "source": "USGS The National Map (USGSImageryOnly)",
+   "url": "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}",
+   "licence": "Public domain. A work of the U.S. Government under 17 U.S.C. 105; USGS National Map products carry no copyright restriction.",
+   "attribution": "USGS The National Map \u2014 public domain",
+   "format": "jpg",
+   "bytes": 413696,
+   "sha256": "130889ab7c2b0dc0ca956bbe3450808d8fae341a99e22fec4ecdd44526071e7c"
+  },
+  "pier59_chart": {
+   "tiles": 118,
+   "zooms": [
+    14,
+    19
+   ],
+   "osm_elements": 278,
+   "source": "OpenStreetMap via Overpass API, rendered locally",
+   "url": "https://overpass-api.de/api/interpreter",
+   "licence": "Rendered from OpenStreetMap data, \u00a9 OpenStreetMap contributors, licensed ODbL 1.0 (https://opendatacommons.org/licenses/odbl/). This rendering is a Produced Work and is distributed with the required attribution.",
+   "attribution": "\u00a9 OpenStreetMap contributors (ODbL), rendered locally",
+   "format": "png",
+   "bytes": 208896,
+   "sha256": "f2bb94360aba32a185eed13190b8cb0f458973c0e4eacf2aff7b690701494808"
+  }
+ },
+ "total_bytes": 622592
+}

@@ -149,8 +149,36 @@ SOURCES: dict[str, TileSource] = {
         note="Place names for the nautical layer."),
 }
 
-#: What the map opens on. Nautical plus seamarks: depth first, marks on top.
-DEFAULT_BASE = "ocean"
+#: The layers that ship with the program, added to SOURCES so the picker and
+#: the renderer treat them like any other basemap. They have no URL: they are
+#: served from `bundled.BundledMaps` and never fetched.
+BUNDLED_SOURCES: dict[str, TileSource] = {
+    "pier59_imagery": TileSource(
+        "pier59_imagery", "Pier 59 imagery (offline)", "",
+        "USGS The National Map — public domain",
+        min_zoom=13, max_zoom=16, ext="jpg",
+        note="Bundled with the program. Real aerial imagery of Pier 59, "
+             "available with no network and no cache. USGS has no tiles "
+             "finer than z16 here."),
+    "pier59_chart": TileSource(
+        "pier59_chart", "Pier 59 chart (offline)", "",
+        "© OpenStreetMap contributors (ODbL), rendered locally",
+        min_zoom=14, max_zoom=19, ext="png",
+        note="Bundled with the program. Coastline, piers, seawall and "
+             "buildings, rendered from OpenStreetMap data — the detail USGS "
+             "imagery does not reach."),
+}
+SOURCES.update(BUNDLED_SOURCES)
+
+#: True for a layer that comes out of a packed file rather than the network.
+def is_bundled(key: str) -> bool:
+    return key in BUNDLED_SOURCES
+
+
+#: What the map opens on with nothing else chosen. The bundled chart, because
+#: it is the only layer guaranteed to be there on a first launch at a dock
+#: with no signal -- which is exactly when somebody is trying to plan.
+DEFAULT_BASE = "pier59_chart"
 DEFAULT_OVERLAYS = ("seamark",)
 
 BASE_KEYS = tuple(k for k, s in SOURCES.items() if not s.overlay)
@@ -178,8 +206,14 @@ class TileCache:
     """
 
     def __init__(self, root: Path | None = None, *, online: bool = True,
-                 on_ready=None) -> None:
+                 on_ready=None, bundled=None) -> None:
         self.root = Path(root) if root else cache_root()
+        #: The packs that shipped with the program. Read-only, never fetched,
+        #: and never removed by a cache clear -- they are tracked assets.
+        if bundled is None:
+            from .bundled import BundledMaps
+            bundled = BundledMaps()
+        self.bundled = bundled
         #: Turned off by the operator, or by a network that is not there.
         #: When off, only cached tiles are used and nothing is requested.
         self.online = online
@@ -236,6 +270,15 @@ class TileCache:
         if hit is not None:
             return hit
 
+        # A bundled layer is served from its pack and is never fetched or
+        # written to the runtime cache: it is already on the disk, in Git,
+        # and clearing the cache must not take it away.
+        if is_bundled(key):
+            img = self._from_bundle(ident)
+            if img is not None:
+                self._remember(ident, img)
+            return img
+
         # Only go to the disk when it is worth it. A tile that is not there
         # stays not there, and stat-ing forty absent files on every redraw --
         # which is what a first version did, 7,900 times across two minutes of
@@ -251,6 +294,21 @@ class TileCache:
         if self.online:
             self._enqueue(ident)
         return None
+
+    def _from_bundle(self, ident: tuple):
+        key, z, x, y = ident
+        raw = self.bundled.tile(key, z, x, y)
+        if raw is None:
+            return None
+        try:
+            import io
+
+            from PIL import Image
+            with Image.open(io.BytesIO(raw)) as im:
+                return im.convert("RGBA")
+        except Exception as ex:
+            log.debug("bundled tile %s did not decode: %s", ident, ex)
+            return None
 
     def _load_disk(self, ident: tuple):
         key, z, x, y = ident
@@ -281,6 +339,8 @@ class TileCache:
     # -- fetching -----------------------------------------------------------
 
     def _enqueue(self, ident: tuple) -> None:
+        if is_bundled(ident[0]):
+            return            # it is packed or it is nowhere; never fetched
         now = time.monotonic()
         with self._lock:
             if ident in self._queued:
