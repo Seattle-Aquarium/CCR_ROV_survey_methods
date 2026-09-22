@@ -773,3 +773,96 @@ def test_the_map_says_so_when_there_is_no_geographic_position(app):
     finally:
         cache.stop()
         holder.destroy()
+
+
+def test_the_canvases_pick_the_right_half_of_a_theme_colour(app):
+    """`theme` stores every colour as a (light, dark) pair for CustomTkinter,
+    which resolves them itself. A raw Tk canvas does not, so the gauges and
+    the map have to pick the current mode's half -- and a canvas handed a
+    tuple raises rather than drawing."""
+    import customtkinter as ctk
+
+    from rov_flight_ops.gui import navgauges, navmap
+    from rov_flight_ops.gui import theme as T
+
+    before = ctk.get_appearance_mode()
+    try:
+        for mode in ("Light", "Dark"):
+            ctk.set_appearance_mode(mode)
+            for fn in (navgauges._hex, navmap._hex):
+                got = fn(T.SURFACE)
+                assert isinstance(got, str) and got.startswith("#"), (mode, got)
+                assert got == (T.SURFACE[0] if mode == "Light"
+                               else T.SURFACE[1])
+            assert navgauges._hex("#123456") == "#123456"
+    finally:
+        ctk.set_appearance_mode(before)
+
+
+def test_the_gauges_draw_in_both_appearance_modes(app):
+    """A gauge that raises on a theme change takes the whole redraw with it."""
+    import customtkinter as ctk
+
+    from rov_flight_ops.gui.navgauges import AltitudeGauge, PowerGauge
+
+    before = ctk.get_appearance_mode()
+    holder = ctk.CTkFrame(app, width=260, height=340)
+    holder.grid(row=0, column=0)
+    holder.grid_propagate(False)
+    holder.grid_rowconfigure((0, 1), weight=1)
+    holder.grid_columnconfigure(0, weight=1)
+    alt = AltitudeGauge(holder)
+    alt.grid(row=0, column=0, sticky="nsew")
+    pwr = PowerGauge(holder)
+    pwr.grid(row=1, column=0, sticky="nsew")
+    for _ in range(20):
+        app.update()
+        time.sleep(0.005)
+    try:
+        for mode in ("Light", "Dark"):
+            ctk.set_appearance_mode(mode)
+            alt.update_reading(M.good(0.84, unit="m"),
+                               M.good(0.75, unit="m"), now=1.0)
+            pwr.update_reading(M.good(940.0, unit="W"),
+                               M.good(1180.0, unit="W"))
+            app.update()
+            for gauge in (alt, pwr):
+                assert gauge.canvas.find_all(), f"{mode}: nothing drawn"
+            # The high-load and over-range states must still be announced.
+            texts = " ".join(pwr.canvas.itemcget(i, "text")
+                             for i in pwr.canvas.find_all()
+                             if pwr.canvas.type(i) == "text")
+            assert "HIGH LOAD" in texts and "900" in texts
+            assert "1,180" in texts, "the observed peak is not shown"
+    finally:
+        ctk.set_appearance_mode(before)
+        holder.destroy()
+
+
+def test_an_over_range_reading_keeps_its_true_value(app):
+    """Pinned marker, true number, and an over-range mark -- never a marker
+    at the top with 1,000 W beside it."""
+    import customtkinter as ctk
+
+    from rov_flight_ops.gui.navgauges import PowerGauge
+
+    holder = ctk.CTkFrame(app, width=260, height=300)
+    holder.grid(row=0, column=0)
+    holder.grid_propagate(False)
+    holder.grid_rowconfigure(0, weight=1)
+    holder.grid_columnconfigure(0, weight=1)
+    pwr = PowerGauge(holder)
+    pwr.grid(row=0, column=0, sticky="nsew")
+    for _ in range(20):
+        app.update()
+        time.sleep(0.005)
+    try:
+        pwr.update_reading(M.good(1180.0, unit="W"))
+        app.update()
+        texts = " ".join(pwr.canvas.itemcget(i, "text")
+                         for i in pwr.canvas.find_all()
+                         if pwr.canvas.type(i) == "text")
+        assert "1,180" in texts
+        assert "OVER" in texts
+    finally:
+        holder.destroy()
