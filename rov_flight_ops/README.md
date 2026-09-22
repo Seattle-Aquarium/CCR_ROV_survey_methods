@@ -256,29 +256,45 @@ covers the full 30.
 
 ## 2  Navigation
 
-The primary instruments display: a live map, the flight and power HUDs, and the
-navigation suite. This is the page the operator sits in front of for the whole
-dive — Cockpit is on the monitor above it and has the forward camera, and on a
-survey flown 0.8 m off the bottom in low visibility the numbers here matter
-more to the pilot than the picture does.
+Where the survey is planned and flown: a live map, the plan drawn on it, and
+the navigation diagnostics. This is the page the operator sits in front of for
+the whole dive — Cockpit is on the monitor above it and has the forward camera,
+and on a survey flown 0.8 m off the bottom in low visibility the numbers here
+matter more to the pilot than the picture does.
+
+The flight and power gauges that used to be on this page are gone, and are not
+drawn anywhere else — live, in the water, Cockpit is on the monitor above with
+the same numbers, and the space mattered more. All of the telemetry behind them
+is still collected and still feeds navigation, the logs, replay, the flight
+summary and the exported CSVs; `gui/navgauges.py` keeps the widgets and their
+tests for whenever they want a home.
 
 **Its own guide is [NAVIGATION.md](NAVIGATION.md)**, which covers the origin,
-the profiles, the map, waypoints, energy, every measurement's source, the
-compatibility matrix and a bench checklist. In outline:
+the profiles, the map, the survey plan, waypoints, energy, every measurement's
+source, the compatibility matrix and a bench checklist. In outline:
 
 * a **map** with the ROV's track, the vessel when there is one, waypoints and
-  the origin, over nautical charts with bathymetric shading — cached on disk so
-  it works offline, and falling back to a metre grid rather than to nothing;
-* a **Flight Ops HUD**: a two-mode altitude gauge whose survey scale puts the
-  0.8 m working altitude at its exact midpoint, plus flight mode, velocity and
-  depth;
-* a **Power HUD**: a fixed 0–1,000 W gauge with the 900 W band marked and the
-  observed peak, plus voltage, current and watt-hours integrated over the
-  intervals that actually happened;
-* a **navigation workspace** whose sensor matrix answers three separate
-  questions per source — *configured*, *available* and **used** — because a
-  source can be all of the first two and none of the third, which is exactly
-  the state that cost this programme a day of coordinates on 18 September 2026;
+  the origin. **The Pier 59 basemap ships in the repository** — two MBTiles
+  layers, about 600 KiB, covering 200 m around the site, so a laptop that has
+  only ever pulled from Git has a chart of the pier with no network at all.
+  Past a layer's top zoom the view is enlarged rather than blanked, and says
+  so; with no tiles at all it falls back to a metre grid rather than to
+  nothing;
+* an **interactive survey plan**: measured lines and polylines ("30.0 m at
+  125°T", either endpoint held), rectangles at any rotation with live L × W and
+  area, survey grids whose lanes are clipped to the box with a documented
+  edge-offset rule, circles and polygons — all in metres taken from the
+  geometry, never from pixels, with undo, snapping and GeoJSON export;
+* **live guidance** along a selected line or lane: cross-track relative to the
+  line's own direction of travel rather than the bow, along-track progress as a
+  projection rather than distance flown, and no arrival claimed from a position
+  that is not current;
+* a **navigation readiness** panel whose sensor matrix answers four separate
+  questions per source — *configured*, *receiving*, *valid* and **fused** —
+  because a source can be the first three and not the fourth, which is exactly
+  the state that cost this programme a day of coordinates on 18 September 2026.
+  The fourth column shows `?` rather than guessing, since ArduPilot publishes
+  aiding mode rather than per-instance fusion;
 * **navigation profiles** (DVL dead reckoning, acoustic + DVL) with parameter
   validation that explains *why* each requirement exists, and a deliberate
   review → apply → read-back path that is locked until the operator unlocks it
@@ -724,11 +740,13 @@ rov_flight_ops/
             shell.py         banner fold, tabs, resizable output (same file as imagery's copy)
             widgets.py       cards, resize grips, site/transect editors
             monitorpage.py   Monitoring sections 2-4
-            navpage.py       Navigation tab: layout, wiring, the HUDs
+            navpage.py       Navigation tab: layout and wiring
             navmap.py        the chart canvas
-            navgauges.py     the altitude and power gauges
-            navstatus.py     configured / available / used, testable without a screen
-            navdialogs.py    details, origin, and the review-and-apply path
+            navdraw.py       drawing and editing a plan on the map
+            navplanpanel.py  the plan's tools, feature list and inspector
+            navgauges.py     the altitude and power gauges -- built and tested, drawn by nothing since the Navigation restructure
+            navstatus.py     configured / receiving / valid / fused, testable without a screen
+            navdialogs.py    health, origin, offline maps, start, and review-and-apply
             transectsetup.py Transects tab
             logspage.py      BlueOS logs tab
             summarypage.py, healthpage.py   Flight summary
@@ -744,7 +762,11 @@ rov_flight_ops/
             origin.py        which mechanism owns the EKF origin
             session.py       the navigation session log
             waypoints.py     points captured at the press
-            tiles.py         the basemap cache
+            tiles.py         the basemap cache, and enlarging past a pack's detail
+            bundled.py       the Pier 59 packs that ship in assets/maps/
+            offline.py       what a site has cached, and fetching the rest
+            plan.py          survey-plan geometry: lines, boxes, grids, lanes
+            guidance.py      following a line: cross-track and along-track
             replay.py        recorded and synthetic playback
         pifiles.py           Pi files: list, spans, choose, download, delete
         diagnostics.py       app.log, faults.log, stall watchdog (same file as imagery's copy)
