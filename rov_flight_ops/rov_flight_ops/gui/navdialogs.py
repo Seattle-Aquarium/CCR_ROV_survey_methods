@@ -22,6 +22,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
+from ..nav import bundled, geo, offline, tiles
 from ..nav import origin as O
 from ..nav import profiles as PR
 from . import theme as T
@@ -438,7 +439,7 @@ def _param_setter(mav):
             return False, "mavlink2rest would not supply a PARAM_SET template"
         msg = tpl.setdefault("message", {})
         # mavlink2rest wants the id as a fixed-width character array.
-        msg["param_id"] = list(name.ljust(16, " ")[:16])
+        msg["param_id"] = list(name.ljust(16, chr(0))[:16])
         msg["param_value"] = float(value)
         msg["param_type"] = {"type": "MAV_PARAM_TYPE_REAL32"}
         msg["target_system"] = mav.system
@@ -623,3 +624,344 @@ class ApplyDialog(_Drawer):
                   "partially applied": T.WARN}.get(state, T.TEXT_MUTED)
         self.state_label.configure(text=f"{state.upper()} — {text}",
                                    text_color=colour)
+
+
+# --------------------------------------------------------------------------
+#  Offline maps
+# --------------------------------------------------------------------------
+
+
+class OfflineDialog(_Drawer):
+    """What is available with no network, and how to prepare more.
+
+    The question this answers is "can I work at this site tomorrow when there
+    is no signal?", and it has to be answerable *now*, while there is still a
+    connection to do something about the answer. So readiness is counted from
+    the disk and the bundled packs; nothing here asks the network anything
+    until the operator presses Prepare.
+    """
+
+    def __init__(self, page):
+        super().__init__(page, "Offline maps", "820x620")
+        self.page = page
+        body = ctk.CTkScrollableFrame(self, fg_color=T.BG)
+        body.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        body.grid_columnconfigure(0, weight=1)
+
+        site = page.site
+        bundled_card = Card(
+            body, "Ships with the program",
+            "Available on a fresh clone with no network, no cache and no ROV.")
+        bundled_card.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        box = output_box(bundled_card.body, wrap="word")
+        box.grid(row=0, column=0, sticky="ew")
+        box.configure(height=110)
+        lines = [page.bundled.summary(), ""]
+        for key, layer in page.bundled.layers.items():
+            lines.append(
+                f"{key}: {'available' if layer.available else 'MISSING'} · "
+                f"z{layer.min_zoom}-{layer.max_zoom} · {layer.tiles} tiles · "
+                f"{layer.bytes / 1024:.0f} KiB")
+            lines.append(f"    {layer.attribution}")
+            if layer.note:
+                lines.append(f"    {layer.note}")
+        lines += ["",
+                  "These live in the repository and are never downloaded, "
+                  "never modified, and never removed by clearing the runtime "
+                  "cache, which is somewhere else entirely."]
+        say(box, "\n".join(lines))
+
+        ready = Card(body, "Readiness here",
+                     f"{site['name']} - {site['lat']:.6f}, {site['lon']:.6f}, "
+                     f"200 m, zooms 14-19.")
+        ready.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        self.ready_box = output_box(ready.body, wrap="none")
+        self.ready_box.grid(row=0, column=0, sticky="ew")
+        self.ready_box.configure(height=150)
+        button(ready.body, "Re-check", self._recheck, "ghost", width=100
+               ).grid(row=1, column=0, sticky="w", pady=(8, 0))
+
+        prep = Card(body, "Prepare a layer for offline use",
+                    "One bounded extent, one tile at a time, at the polite "
+                    "interval. Not a bulk download.")
+        prep.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+        row = ctk.CTkFrame(prep.body, fg_color="transparent")
+        row.grid(row=0, column=0, sticky="ew")
+        label(row, "Layer").grid(row=0, column=0, padx=(0, 6))
+        downloadable = [tiles.SOURCES[k].label for k in tiles.BASE_KEYS
+                        if not tiles.is_bundled(k)]
+        self.layer_menu = ctk.CTkOptionMenu(row, width=200, font=T.FONT_SMALL,
+                                            values=downloadable)
+        self.layer_menu.grid(row=0, column=1, padx=(0, 12))
+        label(row, "Radius").grid(row=0, column=2, padx=(0, 6))
+        self.radius = entry(row, "200", width=70)
+        self.radius.insert(0, "200")
+        self.radius.grid(row=0, column=3)
+        label(row, "m").grid(row=0, column=4, padx=(4, 0))
+
+        buttons = ctk.CTkFrame(prep.body, fg_color="transparent")
+        buttons.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        self.start_btn = button(buttons, "Prepare offline map", self._start,
+                                "primary", width=170)
+        self.start_btn.grid(row=0, column=0)
+        button(buttons, "Cancel", self._cancel, "ghost", width=90
+               ).grid(row=0, column=1, padx=(8, 0))
+        self.progress = ctk.CTkProgressBar(prep.body)
+        self.progress.set(0)
+        self.progress.grid(row=2, column=0, sticky="ew", pady=(10, 4))
+        self.progress_label = label(prep.body, "", muted=True)
+        self.progress_label.configure(anchor="w")
+        self.progress_label.grid(row=3, column=0, sticky="ew")
+
+        self._recheck()
+        self._poll()
+
+    def _recheck(self) -> None:
+        p = self.page
+        rows = offline.all_readiness(p.tile_cache, p.site["lat"],
+                                     p.site["lon"], 200.0)
+        lines = [f"{'LAYER':<30}{'STATE':<14}NOTE", "-" * 78]
+        for r in rows:
+            state = ("bundled" if r.bundled else
+                     "ready" if r.ready else f"{r.missing}/{r.want} missing")
+            lines.append(f"{r.label[:29]:<30}{state:<14}{r.note}")
+        lines += ["", "Four different answers, because they call for four "
+                      "different things: a layer that ships with the program, "
+                      "one that is prepared, one that is not prepared yet, "
+                      "and one whose provider could not be reached at all."]
+        say(self.ready_box, "\n".join(lines))
+
+    def _start(self) -> None:
+        p = self.page
+        label_text = self.layer_menu.get()
+        key = next((k for k in tiles.BASE_KEYS
+                    if tiles.SOURCES[k].label == label_text), None)
+        if key is None:
+            return
+        try:
+            radius = float(self.radius.get())
+        except ValueError:
+            messagebox.showwarning("Offline maps", "The radius must be metres.")
+            return
+        count = offline.count_tiles(p.site["lat"], p.site["lon"], radius,
+                                    offline.SURVEY_ZOOMS)
+        est = offline.estimate_bytes(count) / 2 ** 20
+        if not messagebox.askyesno(
+            "Prepare offline map",
+            f"Download {label_text} for {radius:.0f} m around "
+            f"{p.site['short']}?\n\n"
+            f"About {count:,} tiles, roughly {est:.1f} MiB. That is an "
+            f"estimate from this program's own cache, not a measured size.\n\n"
+            f"Tiles already held are skipped."):
+            return
+        try:
+            p.prepare.start(key, p.site["lat"], p.site["lon"], radius)
+        except Exception as ex:
+            messagebox.showwarning("Prepare offline map", str(ex))
+            return
+        if p.session is not None:
+            p.session.event("offline_prepare_start",
+                            {"layer": key, "radius_m": radius,
+                             "tiles": count})
+
+    def _cancel(self) -> None:
+        self.page.prepare.cancel()
+
+    def _poll(self) -> None:
+        job = self.page.prepare.job
+        if job is not None:
+            self.progress.set(job.fraction)
+            self.progress_label.configure(text=job.line())
+            if job.finished and not self.page.prepare.running:
+                self._recheck()
+        self.start_btn.configure(
+            state="disabled" if self.page.prepare.running else "normal")
+        try:
+            self.after(400, self._poll)
+        except Exception:
+            pass
+
+
+# --------------------------------------------------------------------------
+#  Starting a dive
+# --------------------------------------------------------------------------
+
+
+class StartDialog(_Drawer):
+    """OTS, a custom start, or acoustic-assisted, and what each one does.
+
+    The distinction this dialog exists to make: **choosing a site is a local
+    action and writes nothing to the vehicle.** Selecting OTS recentres the
+    map and stages the coordinates; initialising the vehicle is a separate,
+    reviewed step behind the write interlock. An operator should be able to
+    set a dive up on the train.
+    """
+
+    def __init__(self, page):
+        super().__init__(page, "Start a dive", "820x640")
+        self.page = page
+        body = ctk.CTkScrollableFrame(self, fg_color=T.BG)
+        body.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        body.grid_columnconfigure(0, weight=1)
+
+        choose = Card(body, "1.  Where are we going in?",
+                      "Local only. Nothing is sent to the vehicle by choosing "
+                      "a site.")
+        choose.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        row = ctk.CTkFrame(choose.body, fg_color="transparent")
+        row.grid(row=0, column=0, sticky="ew")
+        button(row, f"OTS - {bundled.PIER59['short']}", self._pick_ots,
+               "primary", width=210).grid(row=0, column=0)
+        button(row, "Custom start...", self._pick_custom, "ghost", width=140
+               ).grid(row=0, column=1, padx=(8, 0))
+        self.site_label = label(choose.body, "", muted=True)
+        self.site_label.configure(anchor="w")
+        self.site_label.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+
+        mode = Card(body, "2.  How will it know where it is?",
+                    "The two profiles differ in where horizontal position "
+                    "comes from. Both need an origin to have coordinates.")
+        mode.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        self.mode_var = ctk.StringVar(value=page.profile_key)
+        for i, key in enumerate(PR.PROFILE_ORDER):
+            prof = PR.PROFILES[key]
+            ctk.CTkRadioButton(mode.body, text=prof.label,
+                               variable=self.mode_var, value=key,
+                               font=T.FONT_BODY,
+                               command=self._mode_changed).grid(
+                row=i * 2, column=0, sticky="w", pady=(4, 0))
+            label(mode.body, prof.summary, muted=True).grid(
+                row=i * 2 + 1, column=0, sticky="w", padx=(26, 0))
+        self.mode_note = label(mode.body, "", muted=True)
+        self.mode_note.configure(anchor="w", justify="left")
+        self.mode_note.grid(row=99, column=0, sticky="ew", pady=(8, 0))
+
+        init = Card(body, "3.  Initialise the vehicle",
+                    "The only step here that touches the ROV. Reviewed, read "
+                    "back, and refused while armed.")
+        init.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+        self.init_box = output_box(init.body, wrap="word")
+        self.init_box.grid(row=0, column=0, sticky="ew")
+        self.init_box.configure(height=140)
+        button(init.body, "Review and initialize vehicle...",
+               self._open_origin, "primary", width=240
+               ).grid(row=1, column=0, sticky="w", pady=(8, 0))
+
+        self._pick(page.site, announce=False)
+        self._mode_changed()
+
+    # -- the site --------------------------------------------------------
+
+    def _pick_ots(self) -> None:
+        self._pick(dict(bundled.PIER59))
+
+    def _pick_custom(self) -> None:
+        dlg = ctk.CTkInputDialog(
+            text="Latitude and longitude in decimal degrees, e.g.\n"
+                 "47.6075661, -122.3438752",
+            title="Custom start")
+        got = dlg.get_input()
+        if not got:
+            return
+        try:
+            parts = [x for x in got.replace(",", " ").split() if x]
+            lat, lon, _alt = O.validate(parts[0], parts[1], 0.0)
+        except (O.OriginError, IndexError) as ex:
+            messagebox.showwarning("Custom start", str(ex))
+            return
+        self._pick({"key": "custom",
+                    "name": f"Custom start {lat:.5f}, {lon:.5f}",
+                    "short": "Custom start", "lat": lat, "lon": lon,
+                    "zoom": 18})
+
+    def _pick(self, site: dict, *, announce: bool = True) -> None:
+        """Select a site. Local: the map moves, the vehicle does not."""
+        page = self.page
+        page.site = site
+        page.map.site = site
+        if announce:
+            page.centre_on_site()
+            if page.session is not None:
+                page.session.event("site_selected", {
+                    "site": site["key"], "lat": site["lat"],
+                    "lon": site["lon"],
+                    "note": "local only; nothing written to the vehicle"})
+        self.site_label.configure(
+            text=f"{site['name']} - {site['lat']:.7f}, {site['lon']:.7f} "
+                 f"(WGS-84). Staged as the proposed launch reference; nothing "
+                 f"has been sent to the vehicle.")
+        self._refresh_init()
+
+    def _mode_changed(self) -> None:
+        key = self.mode_var.get()
+        self.page._pick_profile(PR.PROFILES[key].label)
+        try:
+            self.page.profile_menu.set(PR.PROFILES[key].label)
+        except Exception:
+            pass
+        if key == "acoustic":
+            self.mode_note.configure(text=(
+                "Acoustic mode uses the acoustic solution for the ROV's own "
+                "position, injected as GPS_INPUT. It does not use the "
+                "vessel's GGA as the ROV position; that only orients the "
+                "topside. A running UGPS container is not evidence that an "
+                "origin exists or that the estimator is using the fixes. The "
+                "readiness table is."))
+        else:
+            self.mode_note.configure(text=(
+                "DVL dead reckoning needs an origin to have coordinates at "
+                "all. With one, the track is right relative to itself and "
+                "drifts as a whole."))
+        self._refresh_init()
+
+    def _refresh_init(self) -> None:
+        page = self.page
+        st = page.origin_state
+        site = page.site
+        lines = [
+            f"Proposed launch reference: {site['lat']:.7f}, "
+            f"{site['lon']:.7f} (WGS-84, from the operator).",
+            "",
+            "Altitude: the supplied coordinates carry none. The origin's "
+            "altitude is metres above the ellipsoid and is NOT the dive "
+            "depth. Zero is used unless a site datum is entered, and which "
+            "was used is recorded either way.",
+            "",
+        ]
+        if st.active is True and st.active_lat is not None:
+            d = geo.distance_m(st.active_lat, st.active_lon,
+                               site["lat"], site["lon"])
+            lines.append(
+                f"This vehicle ALREADY HAS an origin at {st.active_lat:.6f}, "
+                f"{st.active_lon:.6f}, which is {d:,.0f} m from the proposed "
+                f"one.")
+            lines.append(
+                "An origin that is already set cannot be moved by sending "
+                "another: EKF3 refuses it. Nothing here will overwrite it, "
+                "reset the vision position or reboot the vehicle. If it is "
+                "wrong, reboot deliberately and initialise again.")
+        elif st.active is False:
+            lines.append("This vehicle has NO origin. Initialising will set "
+                         "one and read it back to confirm.")
+        else:
+            lines.append("Whether this vehicle has an origin has not been "
+                         "confirmed. ArduPilot does not stream "
+                         "GPS_GLOBAL_ORIGIN, so it has to be asked for.")
+        if st.authority_reason:
+            lines += ["", f"Mechanism: {st.authority_reason}"]
+        for w in st.warnings:
+            lines += ["", f"! {w}"]
+        if not page._can_write():
+            lines += ["", "Writes are locked. Tick Allow writes on the "
+                          "Navigation page, with the vehicle disarmed."]
+        say(self.init_box, "\n".join(lines))
+
+    def _open_origin(self) -> None:
+        dlg = OriginDialog(self.page)
+        try:
+            dlg.lat.delete(0, "end")
+            dlg.lat.insert(0, f"{self.page.site['lat']:.7f}")
+            dlg.lon.delete(0, "end")
+            dlg.lon.insert(0, f"{self.page.site['lon']:.7f}")
+        except Exception:
+            pass

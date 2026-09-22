@@ -474,7 +474,7 @@ class Grid(Feature):
 
         Lanes are inset half a spacing from each edge, and the remainder is
         distributed evenly between them. So for a width W and requested
-        spacing S the lane count is `max(1, round(W / S))` and the *effective*
+        spacing S the lane count is `max(1, ceil(W / S))` and the *effective*
         spacing is `(W - S) / (count - 1)`, which is never more than the
         requested spacing.
 

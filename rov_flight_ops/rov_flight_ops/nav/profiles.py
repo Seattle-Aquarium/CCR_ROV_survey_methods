@@ -21,15 +21,21 @@ permanent false alarm; one that silently ignored it would hide that the
 extension's own preset is partly inert on this firmware. It is listed as
 `ABSENT_OK` and explained.
 
-**`VISION_POSITION_DELTA` cannot produce a geographic position.** ArduPilot
-routes it to `writeBodyFrameOdom`, so EKF3 enters *relative* aiding
-(`readyToUseBodyOdm`), never absolute -- `readyToUseExtNav` requires
+**`VISION_POSITION_DELTA` gives relative aiding, not absolute.** ArduPilot
+routes it to `writeBodyFrameOdom`, so EKF3 reaches relative aiding
+(`readyToUseBodyOdm`) rather than absolute -- `readyToUseExtNav` requires
 `extNavDataToFuse`, which only `writeExtNavData` fills, and only
 `VISION_POSITION_ESTIMATE`/`GLOBAL_VISION_POSITION_ESTIMATE`/`ODOMETRY` reach
-that. With a valid origin, relative aiding still yields a dead-reckoned
-lat/lon through `getLLH`; with no origin it yields lat 0, lon 0. That pairing
-is why this fleet's 18 September dive produced no coordinates, and it is why
-the DVL message type is a checked requirement rather than a detail.
+that.
+
+It does **not** follow that POSITION_DELTA means no coordinates, and an
+earlier version of this file said so, which was wrong. With a confirmed origin
+`getLLH` returns the origin plus the relative offset whenever `horiz_pos_rel`
+is set, which is a perfectly usable dead-reckoned latitude and longitude. What
+produced this fleet's 18 September dive with no coordinates at all was the
+*missing origin*; the message type decides whether the fix is absolute or
+dead-reckoned. So the message type is an advisory checked against the role the
+profile actually gives the DVL, and the origin is the blocker.
 
 **Source-set switching works but the sets are empty.** ArduSub 4.5.7 does
 handle `MAV_CMD_SET_EKF_SOURCE_SET` for sets 1-3. This fleet's `EK3_SRC2_*`
@@ -136,7 +142,10 @@ class Profile:
     label: str
     summary: str
     requirements: tuple[Requirement, ...]
-    #: What the DVL extension's `should_send` must be for this profile.
+    #: What the DVL extension should be sending for this profile's use of it.
+    #: Checked against the estimator role the profile actually assigns the
+    #: DVL, rather than as a universal rule -- a profile that only wants
+    #: velocity from it does not need a position message.
     dvl_message_type: str = "POSITION_ESTIMATE"
     #: Which preconfigured EKF source set this corresponds to, when the
     #: vehicle has one set up. None means "there is no configured set for
@@ -389,18 +398,36 @@ def check(profile: Profile, params: dict[str, float] | None, *,
             "vehicle can have a geographic position at all."))
     elif dvl_message_type != profile.dvl_message_type:
         if dvl_message_type == "POSITION_DELTA":
+            # Deliberately an advisory, not a blocker, and worded carefully.
+            # ArduPilot routes VISION_POSITION_DELTA to writeBodyFrameOdom, so
+            # EKF3 reaches relative aiding rather than absolute -- but with a
+            # confirmed origin `getLLH` still returns origin + offset when
+            # `horiz_pos_rel` is set, which is a perfectly usable
+            # dead-reckoned latitude and longitude. Calling that "no
+            # coordinates" was wrong, and calling it a blocker would stop a
+            # configuration this fleet has flown successfully.
             res.notes.append((
-                Severity.BLOCKER,
-                "The DVL is sending POSITION_DELTA. ArduPilot treats that as "
-                "body-frame odometry, which puts EKF3 into relative aiding "
-                "only — EK3_SRC1_POSXY=ExternalNav has no external position "
-                "to consume. Set the extension's message type to "
-                "POSITION_ESTIMATE for an absolute position."))
+                Severity.ADVISORY,
+                "The DVL is sending POSITION_DELTA. ArduPilot routes that to "
+                "body-frame odometry, so the estimator reaches relative "
+                "aiding rather than absolute: with a confirmed origin the "
+                "position is dead-reckoned and usable, without one there are "
+                "no coordinates at all. POSITION_ESTIMATE reaches "
+                "writeExtNavData and gives absolute aiding."))
         elif dvl_message_type == "SPEED_ESTIMATE":
+            # A blocker only when the DVL is meant to supply position. In the
+            # acoustic profile the DVL supplies velocity and nothing else, so
+            # SPEED_ESTIMATE is a legitimate choice there.
+            severity = (Severity.BLOCKER
+                        if profile.key == "dvl" else Severity.ADVISORY)
             res.notes.append((
-                Severity.BLOCKER,
+                severity,
                 "The DVL is sending SPEED_ESTIMATE, which carries velocity "
-                "only. There is no position in it for EK3_SRC1_POSXY to use."))
+                "only. "
+                + ("This profile needs it for horizontal position too."
+                   if profile.key == "dvl" else
+                   "That is enough for this profile, where position comes "
+                   "from the acoustics and the DVL supplies velocity.")))
         elif dvl_message_type:
             res.notes.append((
                 Severity.BLOCKER,
@@ -413,7 +440,9 @@ def check(profile: Profile, params: dict[str, float] | None, *,
             Severity.BLOCKER,
             "The EKF has no origin, so there is no geographic position even "
             "when the estimator is otherwise healthy — GLOBAL_POSITION_INT "
-            "reports latitude and longitude 0. Set an origin before the dive."))
+            "reports latitude and longitude 0. This is what leaves a dive "
+            "with no coordinates, whatever message the DVL is sending. Set "
+            "an origin before the dive."))
     elif origin_set is None:
         res.notes.append((
             Severity.ADVISORY,

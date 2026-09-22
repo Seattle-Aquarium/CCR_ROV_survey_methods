@@ -1,29 +1,32 @@
 """
-Turning a snapshot into the sensor matrix's three columns.
+Turning a snapshot into the sensor matrix, honestly.
 
-Kept out of the widget so it can be tested without a screen, and because the
-judgements here are the substance of the panel -- the widget only paints them.
+Kept out of the widget so the judgements can be tested without a screen, and
+because the judgements *are* the panel -- the widget only paints them.
 
-**Configured, available and used are three different questions**, and the
-whole reason this matrix exists is that collapsing them into one status light
-hides the state that actually strands a dive:
+**Four columns, not three.** An earlier version had "configured, available,
+used", and the third was the problem: it inferred use from general estimator
+flags, from which parameters were selected, and from a fresh derived heading.
+None of those is evidence that a particular sensor is being fused. So:
 
-``Configured``  the parameters and integration settings say this source should
-                be used. Read from the parameter dump.
-``Available``   fresh, valid measurements are arriving. Read from the
-                messages, with freshness from the counters rather than from a
-                successful HTTP request.
-``Used``        the estimator's own behaviour shows it is being fused. This is
-                the one that usually cannot be established, and when it cannot
-                it says **?** rather than a tick.
+``Conf``   the parameters say this source should be used.
+``Recv``   samples are arriving at all -- from the message counter, so a
+           cached HTTP reply is not mistaken for a new measurement.
+``Valid``  the measurement itself says it means something: a bottom lock, a
+           fix type above zero, a range greater than nought.
+``Fused``  the estimator's own behaviour supports it being used, with the
+           basis shown. **`?` when it cannot be established**, which is most
+           of the time, because ArduPilot publishes aiding mode rather than
+           per-instance fusion.
 
-The gap between the second and the third is where this fleet lost a whole
-day's coordinates on 18 September 2026: the DVL was configured correctly,
-delivering beautifully, and feeding `VISION_POSITION_DELTA`, which ArduPilot
-routes to body-frame odometry. EKF3 was in relative aiding the entire dive, so
-`EK3_SRC1_POSXY = ExternalNav` had no external position to consume and
-`GLOBAL_POSITION_INT` read 0, 0 from start to finish. Every "available" light
-was green. The row that would have shown it is *used*.
+**Aiding mode is not freshness and not geographic validity.** Relative aiding
+with a confirmed origin produces a perfectly good dead-reckoned latitude and
+longitude; it is a different thing from stale, and from having no coordinates
+at all. Those three used to be conflated into one amber row.
+
+**DVL position and DVL velocity are separate rows.** In the acoustic profile
+the DVL supplies velocity while position comes from the acoustics, and a
+single DVL row cannot say that.
 """
 
 from __future__ import annotations
@@ -37,32 +40,47 @@ from . import theme as T
 #: eats the colour first, and so does colour-vision deficiency.
 YES = ("✓", T.OK)
 NO = ("✗", T.ERROR)
-STALE = ("◐", T.WARN)
+PART = ("◐", T.WARN)
 UNKNOWN = ("?", T.WARN)
 NA = ("–", T.TEXT_MUTED)
 
 
 @dataclass
 class Row:
-    """One line of the matrix."""
+    """One line of the matrix: four marks and a sentence."""
 
-    marks: list = field(default_factory=lambda: [NA, NA, NA])
+    marks: list = field(default_factory=lambda: [NA, NA, NA, NA])
     detail: str = ""
+    #: What the fusion verdict rests on, for the drawer.
+    basis: str = ""
 
 
-def _avail(r) -> tuple:
-    """The Available mark for one reading."""
+def _recv(r) -> tuple:
+    """Is anything arriving? Freshness only -- not whether it is any good."""
+    if r is None:
+        return NA
+    if r.quality in (Quality.OK, Quality.INVALID):
+        return YES          # it arrived; whether it is valid is the next column
+    if r.quality is Quality.STALE:
+        return PART
+    if r.quality is Quality.UNSUPPORTED:
+        return NA
+    return UNKNOWN
+
+
+def _valid(r) -> tuple:
+    """Does the measurement say it means something?"""
     if r is None:
         return NA
     if r.quality is Quality.OK:
         return YES
+    if r.quality is Quality.INVALID:
+        return NO
     if r.quality is Quality.STALE:
-        return STALE
+        return PART
     if r.quality is Quality.UNSUPPORTED:
         return NA
-    if r.quality is Quality.NEVER_RECEIVED:
-        return UNKNOWN
-    return NO
+    return UNKNOWN
 
 
 def _cfg(params: dict, name: str, want: float) -> tuple:
@@ -74,130 +92,200 @@ def _cfg(params: dict, name: str, want: float) -> tuple:
     return YES if abs(v - want) < 1e-6 else NO
 
 
+def aiding_mode(s) -> tuple[str, str]:
+    """(mode, sentence) from the estimator's own flags.
+
+    Three states worth telling apart, and the middle one is the one that was
+    being misreported:
+
+    ``absolute``  the estimator has an absolute horizontal position.
+    ``relative``  it has a relative one. With a confirmed origin that still
+                  yields a usable dead-reckoned latitude and longitude --
+                  `getLLH` returns origin + offset when `horiz_pos_rel` is
+                  set -- so this is a working state, not a fault.
+    ``none``      constant-position mode: no horizontal aiding at all.
+    """
+    abs_ = s.ekf.get("horiz_pos_abs")
+    rel = s.ekf.get("horiz_pos_rel")
+    const = s.ekf.get("const_pos_mode")
+    if const is not None and const.number():
+        return "none", "constant position mode — no horizontal aiding at all"
+    if abs_ is not None and abs_.number():
+        return "absolute", "absolute horizontal position"
+    if rel is not None and rel.number():
+        return "relative", ("relative horizontal position — dead-reckoned, "
+                            "and a usable fix when the origin is confirmed")
+    return "unknown", "no EKF_STATUS_REPORT to judge from"
+
+
 def matrix_rows(s, now: float) -> dict[str, Row]:
     """Every row of the sensor matrix, from one snapshot."""
     params = s.params or {}
     out: dict[str, Row] = {}
 
     posxy = params.get("EK3_SRC1_POSXY")
-    ekf_abs = s.ekf.get("horiz_pos_abs")
-    ekf_rel = s.ekf.get("horiz_pos_rel")
-    ekf_const = s.ekf.get("const_pos_mode")
-    has_abs = bool(ekf_abs is not None and ekf_abs.number())
-    has_rel = bool(ekf_rel is not None and ekf_rel.number())
-    is_const = bool(ekf_const is not None and ekf_const.number())
+    velxy = params.get("EK3_SRC1_VELXY")
+    mode, mode_note = aiding_mode(s)
+    has_geo = s.rov_fix is not None and s.rov_fix.quality is Quality.OK
 
     # -- acoustic position ---------------------------------------------------
     acoustic = s.ugps.get("fix")
     std = s.ugps.get("std_m")
+    acoustic_configured = posxy == 3.0
+    if not acoustic_configured:
+        fused = NO if posxy is not None else UNKNOWN
+        basis = ("EK3_SRC1_POSXY is not GPS, so the acoustic position is not "
+                 "the estimator's horizontal source")
+    elif mode == "absolute" and acoustic is not None \
+            and acoustic.quality is Quality.OK:
+        fused, basis = YES, ("configured as the horizontal source, valid "
+                             "fixes arriving, and the estimator has an "
+                             "absolute position")
+    else:
+        fused, basis = UNKNOWN, ("configured, but nothing observable confirms "
+                                 "the estimator is using these fixes")
     out["acoustic"] = Row(
-        marks=[
-            _cfg(params, "EK3_SRC1_POSXY", 3.0) if params else UNKNOWN,
-            _avail(acoustic),
-            # Only "used" if the EKF has an absolute position *and* the
-            # configured horizontal source is GPS. Either alone proves
-            # nothing.
-            (YES if (has_abs and posxy == 3.0) else
-             NO if posxy != 3.0 else UNKNOWN),
-        ],
+        marks=[_cfg(params, "EK3_SRC1_POSXY", 3.0) if params else UNKNOWN,
+               _recv(acoustic), _valid(acoustic), fused],
         detail=(f"σ {std.number():.1f} m (GPS_INPUT.vdop)"
                 if std is not None and std.number() is not None
-                else (acoustic.note if acoustic is not None else
-                      "no GPS_INPUT")))
+                else (acoustic.note if acoustic is not None else "no GPS_INPUT")),
+        basis=basis)
 
-    # -- the vessel, which feeds the acoustic solution, not the EKF ----------
+    # -- the vessel: it orients the acoustics, it is never the ROV ----------
     gga = s.vessel.get("position")
     hdt = s.vessel.get("heading")
     inject = s.vessel.get("inject")
     injecting = bool(inject is not None and inject.number())
     out["vessel_gga"] = Row(
-        marks=[YES if inject is not None else UNKNOWN, _avail(gga),
-               # Never a tick: vessel position is not fused as vehicle
-               # position, it orients the acoustic solution.
-               (YES if injecting else NO) if gga is not None else NA],
-        detail="orients the acoustic topside; never fused as ROV position")
+        marks=[YES if inject is not None else UNKNOWN, _recv(gga), _valid(gga),
+               NA],
+        detail="orients the acoustic topside; never fused as ROV position",
+        basis="vessel position is not a vehicle position source at all")
     out["vessel_hdt"] = Row(
-        marks=[YES if inject is not None else UNKNOWN, _avail(hdt),
-               (YES if injecting else NO) if hdt is not None else NA],
+        marks=[YES if inject is not None else UNKNOWN, _recv(hdt), _valid(hdt),
+               NA],
         detail=("bow direction only — not the ROV's yaw"
                 if hdt is not None and hdt.quality is Quality.OK
-                else (hdt.note if hdt is not None else "")))
+                else (hdt.note if hdt is not None else "")),
+        basis="the vessel's satellite compass rotates the acoustic solution")
+    if not injecting and inject is not None:
+        out["vessel_gga"].detail = ("not reaching the acoustic topside — "
+                                    + out["vessel_gga"].detail)
 
-    # -- DVL -----------------------------------------------------------------
-    msg_type = s.dvl.get("message_type")
+    # -- the DVL, split into the two jobs it does ---------------------------
+    msg = s.dvl.get("message_type")
     lock = s.dvl.get("bottom_lock")
-    mt = msg_type.value if msg_type is not None and isinstance(
-        msg_type.value, str) else ""
-    dvl_cfg = (YES if (posxy == 6.0 and mt == "POSITION_ESTIMATE")
-               else NO if posxy == 6.0 and mt else UNKNOWN)
-    if posxy == 6.0 and mt == "POSITION_DELTA":
-        dvl_used = NO
-        dvl_detail = ("POSITION_DELTA is body-frame odometry — relative "
-                      "aiding only, no absolute position")
-    elif posxy == 6.0 and has_abs:
-        dvl_used, dvl_detail = YES, "external nav accepted for position"
-    elif posxy == 6.0 and has_rel:
-        dvl_used = STALE
-        dvl_detail = "relative aiding only — no absolute position"
+    mt = msg.value if msg is not None and isinstance(msg.value, str) else ""
+    # Position: only when the DVL is the configured horizontal source *and*
+    # it is sending a message that carries a position at all.
+    carries_position = mt in ("POSITION_ESTIMATE", "POSITION_DELTA")
+    absolute_capable = mt == "POSITION_ESTIMATE"
+    if posxy != 6.0:
+        pos_cfg = NO if posxy is not None else UNKNOWN
+        pos_fused = NA if posxy == 3.0 else UNKNOWN
+        pos_detail = ("not the horizontal source in this profile"
+                      if posxy == 3.0 else "EK3_SRC1_POSXY is not ExternalNav")
+        pos_basis = pos_detail
+    elif not carries_position:
+        pos_cfg, pos_fused = NO, NO
+        pos_detail = (f"{mt or 'message type unknown'} carries no position "
+                      f"for EK3_SRC1_POSXY = ExternalNav")
+        pos_basis = pos_detail
+    elif mode == "absolute" and absolute_capable:
+        pos_cfg, pos_fused = YES, YES
+        pos_detail = "external navigation accepted as absolute position"
+        pos_basis = ("POSITION_ESTIMATE reaches writeExtNavData, and the "
+                     "estimator reports an absolute horizontal position")
+    elif mode == "relative":
+        pos_cfg = YES if absolute_capable else PART
+        pos_fused = PART
+        pos_detail = ("relative aiding" + ("" if has_geo else ", and no "
+                                           "confirmed origin to reference it")
+                      + (" — dead-reckoned position is usable" if has_geo
+                         else ""))
+        pos_basis = (
+            "POSITION_DELTA reaches writeBodyFrameOdom, which is body-frame "
+            "odometry and gives relative aiding only; with a confirmed origin "
+            "that still yields a dead-reckoned latitude and longitude"
+            if mt == "POSITION_DELTA" else
+            "the estimator reports relative rather than absolute position")
     else:
-        dvl_used = UNKNOWN
-        dvl_detail = mt or "message type unknown"
-    out["dvl"] = Row(marks=[dvl_cfg, _avail(lock), dvl_used],
-                     detail=dvl_detail)
+        pos_cfg = YES if absolute_capable else PART
+        pos_fused, pos_detail = UNKNOWN, (mt or "message type unknown")
+        pos_basis = "aiding mode is not observable"
+    out["dvl_position"] = Row(
+        marks=[pos_cfg, _recv(lock), _valid(lock), pos_fused],
+        detail=pos_detail, basis=pos_basis)
+
+    # Velocity is a separate job, and in the acoustic profile it is the DVL's
+    # only one. A single DVL row could not say that.
+    vel_cfg = _cfg(params, "EK3_SRC1_VELXY", 6.0) if params else UNKNOWN
+    vel_fused = (YES if (velxy == 6.0 and mode in ("absolute", "relative")
+                         and lock is not None and lock.quality is Quality.OK)
+                 else NO if velxy not in (6.0, None) else UNKNOWN)
+    out["dvl_velocity"] = Row(
+        marks=[vel_cfg, _recv(lock), _valid(lock), vel_fused],
+        detail=("horizontal velocity from the DVL"
+                if velxy == 6.0 else
+                "EK3_SRC1_VELXY is not ExternalNav"),
+        basis=("the DVL supplies velocity in both profiles; in the acoustic "
+               "profile it is the only thing it supplies to the estimator"))
 
     # -- heading, attitude, depth, range -------------------------------------
     hdg = s.heading
     out["compass"] = Row(
         marks=[_cfg(params, "EK3_SRC1_YAW", 1.0) if params else UNKNOWN,
-               _avail(hdg),
-               YES if (hdg is not None and hdg.quality is Quality.OK
-                       and not is_const) else UNKNOWN],
-        detail="vehicle compass; the vessel's satellite compass is separate")
+               _recv(hdg), _valid(hdg),
+               # A fresh heading is the *output* of the estimator, not proof
+               # that any particular compass went into it.
+               UNKNOWN],
+        detail="vehicle compass; the vessel's satellite compass is separate",
+        basis=("the heading on the wire is the fused yaw. ArduPilot does not "
+               "publish which compass instance produced it, so per-instance "
+               "fusion cannot be confirmed from here"))
 
     roll = s.roll
     out["imu"] = Row(
-        marks=[YES if params else UNKNOWN, _avail(roll),
-               YES if (roll is not None and roll.quality is Quality.OK)
-               else UNKNOWN],
+        marks=[YES if params else UNKNOWN, _recv(roll), _valid(roll),
+               YES if (roll is not None and roll.quality is Quality.OK
+                       and mode != "unknown") else UNKNOWN],
         detail=(f"roll {roll.number():+.1f}°  pitch {s.pitch.number():+.1f}°"
                 if roll.number() is not None and s.pitch.number() is not None
-                else "no attitude"))
+                else "no attitude"),
+        basis="attitude is always fused; the estimator cannot run without it")
 
     depth = s.depth
     out["depth"] = Row(
         marks=[_cfg(params, "EK3_SRC1_POSZ", 1.0) if params else UNKNOWN,
-               _avail(depth),
-               YES if (depth is not None and depth.quality is Quality.OK)
-               else UNKNOWN],
-        detail="barometer, negative down; not the DVL's vertical range")
+               _recv(depth), _valid(depth),
+               YES if (depth is not None and depth.quality is Quality.OK
+                       and params.get("EK3_SRC1_POSZ") == 1.0) else UNKNOWN],
+        detail="barometer, negative down; not the DVL's vertical range",
+        basis="EK3_SRC1_POSZ selects the barometer for vertical position")
 
     alt = s.altitude
     out["range"] = Row(
         marks=[_cfg(params, "RNGFND1_TYPE", 10.0) if params else UNKNOWN,
-               _avail(alt),
-               # The rangefinder is an instrument here, not an EKF source:
-               # EK3_SRC1_POSZ is the barometer.
-               NA],
-        detail=_range_detail(params, alt))
+               _recv(alt), _valid(alt), NA],
+        detail=_range_detail(params, alt),
+        basis=("the rangefinder is an instrument and a Surftrak input, not an "
+               "estimator source: EK3_SRC1_POSZ is the barometer"))
 
     # -- the estimator --------------------------------------------------------
     flags = s.ekf.get("flags")
-    if is_const:
-        ekf_used, ekf_detail = NO, "constant position mode — no aiding at all"
-    elif has_abs:
-        ekf_used, ekf_detail = YES, "absolute horizontal position"
-    elif has_rel:
-        ekf_used = STALE
-        ekf_detail = ("relative horizontal position only — position is "
-                      "dead-reckoned, there is no geographic fix")
-    else:
-        ekf_used, ekf_detail = UNKNOWN, (
-            flags.value if flags is not None and isinstance(flags.value, str)
-            else "no EKF_STATUS_REPORT")
+    geo_note = ""
+    if mode in ("absolute", "relative"):
+        geo_note = (" · geographic fix available" if has_geo
+                    else " · no geographic fix (origin not confirmed)")
     out["ekf"] = Row(
         marks=[_cfg(params, "AHRS_EKF_TYPE", 3.0) if params else UNKNOWN,
-               _avail(flags), ekf_used],
-        detail=ekf_detail)
+               _recv(flags), _valid(flags),
+               {"absolute": YES, "relative": PART, "none": NO}.get(mode,
+                                                                   UNKNOWN)],
+        detail=(mode_note + geo_note),
+        basis=(flags.value if flags is not None and isinstance(flags.value, str)
+               else "no EKF_STATUS_REPORT"))
     return out
 
 
@@ -225,7 +313,9 @@ def message_health_rows(s, now: float) -> list[tuple[str, str, str, str]]:
 
     The age is time since a *new* message, taken from mavlink2rest's counter,
     not since the last successful request. A message whose counter has not
-    moved in a minute is a minute stale however many times it has been fetched.
+    moved in a minute is a minute stale however many times it has been
+    fetched -- and saying "network loss" about that would be a guess: the
+    request succeeded, so nothing was lost on the wire.
     """
     rows = []
     for name in sorted(s.messages):

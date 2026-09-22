@@ -154,20 +154,46 @@ def test_ek3_gps_type_is_absent_on_4_5_7_and_is_not_a_fault():
     assert finding.param not in {f.param for f in res.changes()}
 
 
-def test_position_delta_blocks_a_geographic_position():
-    """The root cause of the 18 September dive with no coordinates.
+def test_position_delta_is_relative_aiding_not_an_absence_of_coordinates():
+    """The wording this had first was too strong, and the review was right.
 
     ArduPilot routes VISION_POSITION_DELTA to `writeBodyFrameOdom`, so EKF3
-    can only reach relative aiding: `readyToUseExtNav` needs `extNavDataToFuse`,
-    which only `writeExtNavData` fills.
+    reaches relative rather than absolute aiding. But `getLLH` returns the
+    origin plus the relative offset whenever `horiz_pos_rel` is set, so with a
+    confirmed origin that is a perfectly usable dead-reckoned position. It is
+    an advisory, not a blocker: making it a blocker would refuse a
+    configuration this fleet has flown.
     """
     res = PR.check(PR.DVL_ONLY, EBM_E_2026_09_18, dvl_reachable=True,
                    dvl_message_type="POSITION_DELTA", origin_set=True)
-    assert not res.matches
-    blocking = " ".join(res.note_blockers)
-    assert "POSITION_DELTA" in blocking and "relative aiding" in blocking
-    # No parameter is wrong -- which is exactly why this was so hard to see.
+    note = " ".join(x for _s, x in res.notes)
+    assert "POSITION_DELTA" in note and "relative aiding" in note
+    assert "dead-reckoned and usable" in note
     assert not res.blockers
+    assert not res.note_blockers
+    assert res.matches
+
+
+def test_the_missing_origin_is_the_blocker_whatever_the_message_type():
+    """What actually left the 18 September dive with no coordinates."""
+    for mt in ("POSITION_DELTA", "POSITION_ESTIMATE"):
+        res = PR.check(PR.DVL_ONLY, EBM_E_2026_09_18, dvl_reachable=True,
+                       dvl_message_type=mt, origin_set=False)
+        assert not res.matches, mt
+        assert any("no origin" in x for x in res.note_blockers), mt
+
+
+def test_speed_estimate_blocks_only_where_position_is_wanted_from_the_dvl():
+    """In the acoustic profile the DVL supplies velocity and nothing else, so
+    a velocity-only message is a legitimate choice there."""
+    dvl_only = PR.check(PR.DVL_ONLY, EBM_E_2026_09_18, dvl_reachable=True,
+                        dvl_message_type="SPEED_ESTIMATE", origin_set=True)
+    assert dvl_only.note_blockers
+    acoustic_params = dict(EBM_E_2026_09_18, EK3_SRC1_POSXY=3.0)
+    acoustic = PR.check(PR.ACOUSTIC_DVL, acoustic_params, dvl_reachable=True,
+                        dvl_message_type="SPEED_ESTIMATE", origin_set=True,
+                        vessel_feeding=True)
+    assert not acoustic.note_blockers
 
 
 def test_a_missing_origin_blocks_even_when_everything_else_is_right():
@@ -435,7 +461,7 @@ def _snapshot(**kw):
     return s
 
 
-def test_the_matrix_separates_available_from_used():
+def test_the_matrix_separates_receiving_valid_and_fused():
     """The 18 September state, as the panel would have shown it: the DVL
     delivering perfectly and the estimator not using it for position."""
     from rov_flight_ops.gui.navstatus import matrix_rows
@@ -447,10 +473,18 @@ def test_the_matrix_separates_available_from_used():
              "const_pos_mode": M.good(False), "flags": M.good("EKF_ATTITUDE")}
     rows = matrix_rows(s, time.monotonic())
 
-    dvl = rows["dvl"]
-    assert dvl.marks[1][0] == "✓"            # available
-    assert dvl.marks[2][0] == "✗"            # not used for position
-    assert "body-frame odometry" in dvl.detail
+    # Position and velocity are separate rows now: in the acoustic profile the
+    # DVL supplies velocity while position comes from the acoustics, and one
+    # DVL row could not say that.
+    pos = rows["dvl_position"]
+    assert pos.marks[1][0] == "✓"            # receiving
+    assert pos.marks[2][0] == "✓"            # the measurement is valid
+    assert pos.marks[3][0] == "◐"            # relative aiding, not absolute
+    assert "relative aiding" in pos.detail
+    assert "body-frame odometry" in pos.basis
+
+    vel = rows["dvl_velocity"]
+    assert vel.marks[3][0] == "✓"            # velocity really is fused
 
     ekf = rows["ekf"]
     assert "relative" in ekf.detail and "dead-reckoned" in ekf.detail

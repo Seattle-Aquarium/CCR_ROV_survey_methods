@@ -491,11 +491,250 @@ def _nav_page(app):
     return page
 
 
-def test_the_page_starts_with_no_numbers_on_it(app):
-    """Never initialise instruments to healthy-looking zero values.
+def _demo_plan(page):
+    """A plan with one of every kind of feature, adopted by the page.
 
-    Built and drawn with a collector that has never heard from anything: every
-    primary row must read the no-value mark, not 0.00.
+    Returns a callable that puts the page's own plan back.
+    """
+    from rov_flight_ops.nav import plan as P
+
+    before = (page.plan, page.history, page.plan_path)
+    a = P.Anchor(47.6075661, -122.3438752)
+    fresh = P.Plan(name="Panel test", site=page.site["key"])
+    fresh.add(P.Line(anchor=a, name="Line 1", points=[(0.0, 0.0), (30.0, 0.0)]))
+    fresh.add(P.Line(anchor=a, name="Polyline 1",
+                     points=[(0.0, 0.0), (10.0, 5.0), (20.0, 0.0)]))
+    fresh.add(P.Rect(anchor=a, name="Rect 1", centre=(0.0, 0.0),
+                     length_m=30.0, width_m=20.0, rotation_deg=37.0))
+    fresh.add(P.Grid(anchor=a, name="Grid 1", centre=(0.0, 0.0),
+                     length_m=30.0, width_m=20.0, rotation_deg=37.0,
+                     spacing_m=2.0))
+    fresh.add(P.Circle(anchor=a, name="Circle 1", centre=(0.0, 0.0),
+                       radius_m=12.0))
+    fresh.add(P.Polygon(anchor=a, name="Polygon 1",
+                        points=[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]))
+    page._adopt(fresh)
+
+    def restore():
+        page.plan, page.history, page.plan_path = before
+        if page.editor is not None:
+            page.editor.plan, page.editor.selected_id = before[0], None
+        page.plan_panel.refresh()
+    return restore
+
+
+class _FakeCanvas:
+    """Records what would have been drawn. No window, no pixels of its own."""
+
+    def __init__(self):
+        self.texts: list[str] = []
+
+    def create_text(self, _x, _y, text="", **_kw):
+        self.texts.append(text)
+
+    def __getattr__(self, _name):          # create_line, create_oval, ...
+        return lambda *a, **k: None
+
+
+class _FakeMap:
+    """Just enough map for the editor: a projection at a chosen scale."""
+
+    def __init__(self, anchor, metres_per_pixel: float):
+        self.canvas = _FakeCanvas()
+        self.centre = (anchor.lat, anchor.lon)
+        self._a, self._mpp = anchor, metres_per_pixel
+
+    def xy(self, lat, lon):
+        east, north = self._a.to_local(lat, lon)
+        return (400 + east / self._mpp, 300 - north / self._mpp)
+
+    def draw(self):
+        pass
+
+
+@pytest.mark.parametrize(
+    "metres_per_pixel, wants_labels",
+    [(2.0, False),      # a 30 m edge is 15 px: nothing legible fits
+     (0.4, False),      # 75 px: the edges fit, the centre block does not
+     (0.1, True)])      # 300 px: everything fits
+def test_dimensions_are_left_off_when_they_cannot_fit(metres_per_pixel,
+                                                      wants_labels):
+    """A 30 by 20 m box seen from far enough away has a few dozen pixels of
+    edge, and five labels drawn into that space are a smudge rather than a
+    diagram -- one that hides the shape it is describing.
+
+    So the labels are gated on screen length. This is the one place in the
+    plan where pixels decide anything: what the numbers *are* still comes
+    from the geometry, and the inspector shows them at any zoom.
+    """
+    from rov_flight_ops.gui import navdraw
+    from rov_flight_ops.nav import plan as P
+
+    a = P.Anchor(47.6075661, -122.3438752)
+    grid = P.Grid(anchor=a, name="EBM box", centre=(0.0, 0.0), length_m=30.0,
+                  width_m=20.0, rotation_deg=37.0, spacing_m=2.0)
+    fake = _FakeMap(a, metres_per_pixel)
+    ed = navdraw.PlanEditor(fake)
+    pts = [fake.xy(lat, lon) for lat, lon in grid.geo_points()]
+    ed._draw_dimensions(grid, pts)
+    drawn = fake.canvas.texts
+
+    if wants_labels:
+        # Two long edges and two short ones, each with its own dimension.
+        assert drawn.count("30.0 m") == 2, drawn
+        assert drawn.count("20.0 m") == 2, drawn
+        assert any("600 m²" in x and "10 lanes @ 2 m" in x
+                   for x in drawn), drawn
+    elif metres_per_pixel == 2.0:
+        assert drawn == [], drawn
+    else:
+        # Only the 30 m edges are long enough to carry a label -- and they
+        # must carry *their own* 30, which is what caught the two dimensions
+        # being drawn on the wrong pair of edges. The block in the middle
+        # would land on top of the shape, so it is left out.
+        assert drawn.count("30.0 m") == 2, drawn
+        assert "20.0 m" not in drawn, drawn
+        assert not any("m²" in x for x in drawn), drawn
+
+
+def test_a_grid_needs_more_room_for_its_block_than_a_rectangle():
+    """A rectangle's centre block is two lines and a grid's is three, so one
+    threshold for both is wrong for one of them. At a scale where the
+    rectangle can say what it is, the grid cannot yet."""
+    from rov_flight_ops.gui import navdraw
+    from rov_flight_ops.nav import plan as P
+
+    a = P.Anchor(47.6075661, -122.3438752)
+    shape = dict(anchor=a, centre=(0.0, 0.0), length_m=30.0, width_m=20.0,
+                 rotation_deg=0.0)
+    # 0.22 m per pixel: the 20 m edge is 91 px -- over two lines, under three.
+    drawn = {}
+    for name, feature in (("rect", P.Rect(**shape)),
+                          ("grid", P.Grid(spacing_m=2.0, **shape))):
+        fake = _FakeMap(a, 0.22)
+        ed = navdraw.PlanEditor(fake)
+        pts = [fake.xy(lat, lon) for lat, lon in feature.geo_points()]
+        ed._draw_dimensions(feature, pts)
+        drawn[name] = fake.canvas.texts
+
+    assert any("m²" in x for x in drawn["rect"]), drawn["rect"]
+    assert not any("m²" in x for x in drawn["grid"]), drawn["grid"]
+    # Both still carry their edge dimensions; only the block is held back.
+    for name in ("rect", "grid"):
+        assert drawn[name].count("30.0 m") == 2, (name, drawn[name])
+
+
+def _matrix_detail(page, key: str):
+    return page.matrix._cells[key][4]
+
+
+def test_a_detail_too_long_for_its_column_ends_in_an_ellipsis(app):
+    """A sentence cut off mid-word reads as a rendering fault, which on a
+    panel built to be believed is expensive.
+
+    This also guards the way it first went wrong: `cget("font")` on a CTkLabel
+    returns an unscaled spec tuple with no `measure`, the AttributeError went
+    into a bare except, and nothing was ever elided while every test passed.
+    """
+    from rov_flight_ops.gui.navpage import _elide, _measurer
+
+    page = _nav_page(app)
+    app.update()
+    label = _matrix_detail(page, "dvl_position")
+    long_text = ("relative aiding, and no confirmed origin to reference it "
+                 "against, so there is no latitude and longitude")
+
+    # The measurement has to come from the font actually being drawn with.
+    measure = _measurer(label).measure
+    assert measure(long_text) > 200
+
+    _elide(label, long_text, 200)
+    shown = label.cget("text")
+    assert shown != long_text, "nothing was elided"
+    assert shown.endswith("…"), shown
+    assert long_text.startswith(shown[:-1].rstrip()), shown
+    assert measure(shown) <= 200
+
+    # It keeps the whole sentence, for the drawer and for a later re-fit.
+    assert label._full == long_text
+
+    # Room enough, and it is left exactly alone.
+    _elide(label, long_text, measure(long_text) + 40)
+    assert label.cget("text") == long_text
+
+
+def test_the_detail_column_is_given_a_width_of_its_own(app):
+    """Without one the column cannot be narrower than its longest sentence,
+    the row runs off the side of the panel, and the frame cuts it."""
+    page = _nav_page(app)
+    app.update()
+    page.matrix._refit()
+    app.update()
+    assert page.matrix._detail_px >= 120
+    for key in ("dvl_position", "ekf", "acoustic"):
+        assert _matrix_detail(page, key).cget("width") == page.matrix._detail_px
+
+
+def test_the_plan_panel_lists_every_kind_of_feature(app):
+    """A panel refresh with features actually on the plan.
+
+    Every earlier test refreshed this panel with an empty plan, so the whole
+    per-feature branch of `_refresh_list` -- including the glyph lookup --
+    never ran, and a wrong module name in it passed six hundred tests. The
+    point of this test is to make the list draw real rows.
+    """
+    page = _nav_page(app)
+    restore = _demo_plan(page)
+    try:
+        page.plan_panel.refresh()
+        app.update()
+        assert len(page.plan_panel._rows) == 6
+        for f in page.plan.features:
+            row = page.plan_panel._rows[f.id]
+            text = row._name.cget("text")
+            assert text.endswith(f.name), text
+            # A glyph, not the fallback bullet: every kind we draw has one.
+            assert not text.startswith("•"), f"{f.kind} has no glyph"
+    finally:
+        restore()
+
+
+def test_every_feature_kind_the_editor_can_draw_has_a_glyph(app):
+    """The palette and the list are keyed differently on purpose -- the
+    polyline tool makes a line -- so each map is checked against what it is
+    for rather than against the other."""
+    from rov_flight_ops.gui import navdraw, navplanpanel
+
+    assert set(navdraw.KIND_GLYPH) == {"line", "rect", "grid", "circle",
+                                       "polygon"}
+    assert set(navplanpanel.GLYPH) == set(navdraw.TOOLS)
+    del app
+
+
+def test_selecting_a_feature_fills_the_inspector(app):
+    """The other half of the panel an empty plan never exercised: the
+    inspector builds a different set of fields for each kind."""
+    page = _nav_page(app)
+    restore = _demo_plan(page)
+    try:
+        for f in page.plan.features:
+            page.select(f.id)
+            app.update()
+            assert page.plan_panel.title.cget("text").endswith(f.name)
+            summary = page.plan_panel.summary.cget("text")
+            assert summary, f"{f.kind} shows no measurements"
+            if f.kind in ("rect", "grid", "circle", "polygon"):
+                assert "m²" in summary, summary
+    finally:
+        restore()
+
+
+def test_the_page_claims_no_position_before_it_has_one(app):
+    """Nothing is initialised to a healthy-looking value.
+
+    The flight HUDs are gone from this chapter, so what matters here is the
+    position readout and the strip: with a collector that has never heard from
+    anything, neither may claim a fix.
     """
     from rov_flight_ops.nav.replay import ReplayCollector
 
@@ -505,12 +744,23 @@ def test_the_page_starts_with_no_numbers_on_it(app):
         page.collector = ReplayCollector([], label="nothing")
         page._render()
         app.update()
-        for hud in (page.flight_hud, page.power_hud):
-            for row in hud._rows:
-                assert row.value.cget("text") == M.NO_VALUE, row.name.cget("text")
         assert page.position_label.cget("text").startswith(M.NO_VALUE)
+        assert page.strip_home._value.cget("text") == M.NO_VALUE
     finally:
         page.collector = previous
+
+
+def test_the_flight_huds_are_gone_but_their_telemetry_is_not(app):
+    """Altitude, velocity, depth and power lost their gauges in this chapter;
+    the collector still gathers them, because navigation, the logs and replay
+    all still need them."""
+    page = _nav_page(app)
+    assert not hasattr(page, "flight_hud")
+    assert not hasattr(page, "power_hud")
+    s = M.NavSnapshot()
+    for field in ("altitude", "depth", "speed", "voltage", "current",
+                  "watts", "energy_wh"):
+        assert hasattr(s, field), field
 
 
 def test_the_page_survives_a_snapshot_with_nothing_in_it(app):
@@ -546,36 +796,40 @@ def test_writes_are_locked_at_startup_and_in_replay(app):
         page.collector = previous
 
 
-def test_the_page_lays_out_at_every_supported_viewport(app):
-    """The HUDs stay side by side down to the documented minimum, and the
-    workspace never loses its floor without the HUDs giving up height first."""
-    import customtkinter as ctk
+def test_the_map_keeps_the_larger_share_of_the_page(app):
+    """The layout contract, asserted from the grid rather than from pixels.
+
+    The session window is withdrawn, so measuring a child's width there
+    returns 1 and proves nothing. The contract that matters is the one in the
+    grid: the map column carries more weight than the side column, and both
+    are real columns rather than one squeezing the other out.
+    """
+    from rov_flight_ops.gui import navpage as NP
 
     page = _nav_page(app)
-    before = app.geometry()
+    assert NP.MAP_WEIGHT > NP.SIDE_WEIGHT
+    assert NP.MAP_WEIGHT / (NP.MAP_WEIGHT + NP.SIDE_WEIGHT) >= 0.6, (
+        "the map should keep about two thirds of the page")
+    info = page.grid_columnconfigure(0)
+    assert int(info["weight"]) == NP.MAP_WEIGHT
+
+
+def test_a_narrow_page_puts_the_side_column_under_the_map(app):
+    """The compact fallback: below the threshold the matrix and the plan
+    inspector go under the map rather than being squeezed beside it."""
+    page = _nav_page(app)
+    was_narrow = page._narrow
     try:
-        results = {}
-        for geom in ("1920x1080", "1600x900", "1366x768", "1280x800"):
-            app.geometry(geom)
-            for _ in range(30):
-                app.update()
-                time.sleep(0.005)
-            scaling = ctk.ScalingTracker.get_widget_scaling(page) or 1.0
-            results[geom] = {
-                "narrow": page._narrow,
-                "hud_layout": page.flight_hud._layout,
-                "workspace": page.workspace.winfo_height() / scaling,
-            }
-        for geom, r in results.items():
-            # Whatever the arrangement, the workspace keeps enough height for
-            # the profile controls and several matrix rows.
-            assert r["workspace"] > 150, (geom, r)
-            assert r["hud_layout"] in ("row", "column")
+        page._narrow = False
+        page._on_resize_to(900.0)
+        assert page._narrow is True
+        assert int(page.side_col.grid_info()["row"]) == 1
+
+        page._on_resize_to(1600.0)
+        assert page._narrow is False
+        assert int(page.side_col.grid_info()["column"]) == 1
     finally:
-        app.geometry(before)
-        for _ in range(20):
-            app.update()
-            time.sleep(0.005)
+        page._narrow = was_narrow
 
 
 def test_stopping_the_page_does_not_block_the_window(app):
@@ -916,42 +1170,37 @@ def test_a_stale_vessel_gives_no_bearing_at_all(app):
         page.profile_key = before
 
 
-def test_dvl_only_relabels_the_readout_to_the_start(app):
-    """Same arithmetic, a completely different claim -- so it never keeps the
-    vessel's label."""
-    from rov_flight_ops.nav import origin as O
-
+def test_dvl_only_measures_back_to_the_launch_site(app):
+    """Same arithmetic as the vessel bearing, a completely different claim,
+    so it never keeps the vessel's label."""
     page = _nav_page(app)
-    before_profile, before_origin = page.profile_key, page.origin_state
+    before_profile, before_site = page.profile_key, page.site
     try:
         page.profile_key = "dvl"
-        page.origin_state = O.OriginState(active=True, active_lat=47.62714,
-                                          active_lon=-122.39396)
+        page.site = {"key": "t", "name": "Test", "short": "Test site",
+                     "lat": 47.62714, "lon": -122.39396, "zoom": 18}
         s = M.NavSnapshot()
         s.rov_fix = _fix(47.62691, -122.39018, kind="dead")
         title, value, note = _home(page, s)
-        assert title == "TO START"
+        assert title == "TO SITE"
         assert "275°T" in value
-        assert "drift" in note, "the dead-reckoning caveat is not shown"
+        assert "dead-reckoned" in note, "the drift caveat is not shown"
     finally:
-        page.profile_key, page.origin_state = before_profile, before_origin
+        page.profile_key, page.site = before_profile, before_site
 
 
-def test_no_confirmed_origin_means_no_bearing_to_the_start(app):
-    from rov_flight_ops.nav import origin as O
-
+def test_the_site_bearing_needs_a_usable_rov_position(app):
     page = _nav_page(app)
-    before_profile, before_origin = page.profile_key, page.origin_state
+    before = page.profile_key
     try:
         page.profile_key = "dvl"
-        page.origin_state = O.OriginState(active=False)
         s = M.NavSnapshot()
-        s.rov_fix = _fix(47.62691, -122.39018, kind="dead")
+        s.rov_fix = _fix(47.62691, -122.39018, quality=Quality.STALE)
         title, value, note = _home(page, s)
-        assert title == "TO START" and value == M.NO_VALUE
-        assert "no confirmed origin" in note
+        assert title == "TO SITE" and value == M.NO_VALUE
+        assert "no usable ROV position" in note
     finally:
-        page.profile_key, page.origin_state = before_profile, before_origin
+        page.profile_key = before
 
 
 def test_coincident_positions_say_at_target_rather_than_spinning(app):
@@ -981,3 +1230,34 @@ def test_no_usable_rov_position_gives_no_bearing(app):
         assert value == M.NO_VALUE and "no usable ROV position" in note
     finally:
         page.profile_key = before_profile
+
+
+# --------------------------------------------------------------------------
+#  Every module actually imports
+# --------------------------------------------------------------------------
+
+
+def test_every_navigation_module_imports():
+    """Including the ones only imported lazily, inside a button's callback.
+
+    `navdialogs` is imported when a drawer is opened, so nothing in the suite
+    loaded it -- and it sat in the repository for a session with a real NUL
+    byte in it where the source should have had an escape. It imported
+    nowhere, and the first person to press Details would have found out.
+    """
+    import importlib
+
+    for name in ("bundled", "collector", "extensions", "geo", "guidance",
+                 "mav2rest", "model", "offline", "origin", "plan", "power",
+                 "profiles", "replay", "session", "tiles", "waypoints"):
+        importlib.import_module(f"rov_flight_ops.nav.{name}")
+    for name in ("navdialogs", "navdraw", "navgauges", "navmap", "navpage",
+                 "navplanpanel", "navstatus"):
+        importlib.import_module(f"rov_flight_ops.gui.{name}")
+
+
+def test_no_source_file_contains_a_null_byte():
+    """A NUL in a .py file is a SyntaxError at import, and greps right past."""
+    root = Path(__file__).resolve().parents[1] / "rov_flight_ops"
+    bad = [p for p in root.rglob("*.py") if bytes([0]) in p.read_bytes()]
+    assert not bad, [str(p) for p in bad]
