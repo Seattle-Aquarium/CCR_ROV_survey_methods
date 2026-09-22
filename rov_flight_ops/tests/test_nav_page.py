@@ -779,6 +779,111 @@ def test_the_page_survives_a_snapshot_with_nothing_in_it(app):
         page.collector = previous
 
 
+class _Posted(Exception):
+    """Raised by the stub in place of any HTTP the program tries to do."""
+
+
+def _no_http(monkeypatch):
+    """Make every outbound POST and GET fail loudly instead of happening.
+
+    Stronger than watching a vehicle mock: it asserts nothing *left the
+    program*. A test that only checks "the ROV did not change" cannot tell a
+    write that was never attempted from one that was attempted and refused.
+    """
+    from rov_flight_ops.nav import mav2rest
+
+    calls = []
+
+    def boom(*a, **k):
+        calls.append(a[0] if a else "?")
+        raise _Posted(f"the program tried to reach the vehicle: {a[:1]}")
+
+    for name in ("_post", "_get"):
+        if hasattr(mav2rest, name):
+            monkeypatch.setattr(mav2rest, name, boom)
+    return calls
+
+
+def test_choosing_a_start_site_writes_nothing_to_the_vehicle(app, monkeypatch):
+    """The claim the Start dialog is built around, and the one that lets an
+    operator set a dive up on the train.
+
+    Selecting OTS, typing a custom start and switching profile are all local:
+    the map moves, the coordinates are staged, and the vehicle is not told
+    anything. Initialising it is a separate step behind the write interlock.
+    """
+    from rov_flight_ops.gui import navdialogs
+    from rov_flight_ops.nav import bundled
+
+    page = _nav_page(app)
+    before_site, before_profile = page.site, page.profile_key
+    calls = _no_http(monkeypatch)
+    dlg = None
+    try:
+        dlg = navdialogs.StartDialog(page)
+        app.update()
+
+        dlg._pick_ots()
+        app.update()
+        assert page.site["lat"] == pytest.approx(bundled.PIER59["lat"])
+        assert "nothing has been sent to the vehicle" in \
+            dlg.site_label.cget("text").lower()
+
+        monkeypatch.setattr(
+            navdialogs.ctk, "CTkInputDialog",
+            lambda *a, **k: type("D", (), {"get_input": lambda _s:
+                                           "47.60, -122.34"})())
+        dlg._pick_custom()
+        app.update()
+        assert page.site["key"] == "custom"
+
+        for key in ("acoustic", "dvl"):
+            dlg.mode_var.set(key)
+            dlg._mode_changed()
+            app.update()
+
+        assert calls == [], f"the program reached the vehicle: {calls}"
+        assert page.writes_unlocked is False
+    finally:
+        if dlg is not None:
+            dlg.destroy()
+        page.site, page.profile_key = before_site, before_profile
+        page.map.site = before_site
+        app.update()
+
+
+def test_the_start_dialog_says_which_step_touches_the_vehicle(app,
+                                                              monkeypatch):
+    """Three cards, and exactly one of them is a write. An operator who cannot
+    tell which is which will either avoid the dialog or trust it too far."""
+    from rov_flight_ops.gui import navdialogs
+
+    page = _nav_page(app)
+    _no_http(monkeypatch)
+    dlg = None
+    try:
+        dlg = navdialogs.StartDialog(page)
+        app.update()
+        texts = []
+
+        def walk(w):
+            try:
+                texts.append(str(w.cget("text")))
+            except Exception:
+                pass
+            for kid in w.winfo_children():
+                walk(kid)
+
+        walk(dlg)
+        blob = " ".join(texts).lower()
+        assert "nothing is sent to the vehicle by choosing a site" in blob
+        assert "the only step here that touches the rov" in blob
+    finally:
+        if dlg is not None:
+            dlg.destroy()
+        app.update()
+
+
 def test_writes_are_locked_at_startup_and_in_replay(app):
     """A program that remembers permission to write to a vehicle is a program
     that writes to a vehicle somebody did not expect."""

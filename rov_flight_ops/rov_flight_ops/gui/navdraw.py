@@ -143,8 +143,14 @@ class PlanEditor:
     def drawing(self) -> bool:
         return self.tool != "pan"
 
-    def cancel_draft(self) -> None:
-        """Escape: abandon what is being drawn, keep everything saved."""
+    def cancel_draft(self, why: str = "Cancelled.") -> None:
+        """Escape: abandon what is being drawn, keep everything saved.
+
+        `why` because the caller often knows something the operator needs --
+        "too small to survey" is not the same message as "cancelled", and an
+        earlier version set the explanation and then had it overwritten here,
+        so a refused box looked like one the operator had abandoned.
+        """
         had = bool(self._draft)
         self._draft = []
         self._draft_anchor = None
@@ -152,7 +158,7 @@ class PlanEditor:
         self._grab = None
         self._rotating = False
         if had:
-            self.status = "Cancelled."
+            self.status = why
             self.map.draw()
 
     def select(self, feature_id: str | None) -> None:
@@ -265,19 +271,30 @@ class PlanEditor:
                 return True
             a, b = self._draft[0], moved
             if abs(a[0] - b[0]) < P.MIN_RECT_M or abs(a[1] - b[1]) < P.MIN_RECT_M:
-                self.status = (f"Too small — a survey box is at least "
-                               f"{P.MIN_RECT_M} m each way.")
-                self.cancel_draft()
+                self.cancel_draft(f"Too small — a survey box is at least "
+                                  f"{P.MIN_RECT_M} m each way.")
                 return True
             self._commit()
             return True
         return False
 
+    #: The fewest points each free-form tool can be finished with. A polygon
+    #: of two points encloses nothing, and `_commit` would quietly drop it --
+    #: which lost the operator both clicks and told them it had worked.
+    MIN_POINTS = {"polyline": 2, "polygon": 3}
+
     def finish(self) -> bool:
         """Enter or a double-click: close a polyline or polygon."""
-        if self.tool in ("polyline", "polygon") and len(self._draft) >= 2:
+        need = self.MIN_POINTS.get(self.tool)
+        if need is None:
+            return False
+        if len(self._draft) >= need:
             self._commit()
             return True
+        if self._draft:
+            self.status = (f"A {self.tool} needs at least {need} points — "
+                           f"keep clicking, or press Escape.")
+            self.map.draw()
         return False
 
     def _snap(self, anchor: P.Anchor, pt, event):
