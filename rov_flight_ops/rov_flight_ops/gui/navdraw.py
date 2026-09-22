@@ -36,6 +36,17 @@ GRAB_PX = 14
 #: A drag shorter than this is a click, not a drag.
 CLICK_PX = 4
 
+#: How far outside the canvas a feature may reach and still be drawn. A
+#: little, so a shape half off the edge keeps its visible half; nothing is
+#: gained by drawing the forty boxes that are a kilometre away.
+VIEW_MARGIN_PX = 80
+
+#: Below this many pixels between neighbouring lanes, individual lanes are a
+#: solid block rather than a diagram. The box is drawn with a count instead --
+#: which is the information at that scale anyway, and turns forty grids from
+#: about a second of canvas work into a few milliseconds.
+LANE_MIN_PX = 5
+
 #: An edge shorter than this on screen cannot carry its dimension legibly, so
 #: the label is left off rather than stacked on its neighbours. Zooming in
 #: brings it back and the inspector has the number either way. Without this a
@@ -118,6 +129,10 @@ class PlanEditor:
         self.grid_axis = "length"
 
         self.status = ""
+
+        #: How many features the last `draw` actually put
+        #: on the canvas, after culling.
+        self.drawn = 0
 
     # ------------------------------------------------------------------
     #  tools
@@ -501,17 +516,29 @@ class PlanEditor:
         """
         if self.plan is None:
             return
+        try:
+            view = (self.map.canvas.winfo_width(),
+                    self.map.canvas.winfo_height())
+        except Exception:
+            view = (0, 0)
+        self.drawn = 0
         for f in self.plan.features:
-            if not f.hidden:
-                self._draw_feature(f, selected=f.id == self.selected_id)
+            if f.hidden:
+                continue
+            if self._draw_feature(f, selected=f.id == self.selected_id,
+                                  view=view):
+                self.drawn += 1
         self._draw_draft()
 
-    def _draw_feature(self, f, *, selected: bool) -> None:
+    def _draw_feature(self, f, *, selected: bool, view=(0, 0)) -> bool:
+        """Draw one feature. False when it was skipped as off-screen."""
         c = self.map.canvas
         pts = [self.map.xy(la, lo) for la, lo in f.geo_points()]
         pts = [p for p in pts if p]
         if len(pts) < 2:
-            return
+            return False
+        if not _on_screen(pts, view):
+            return False
         colour = _hex(T.ACCENT if selected else T.HEADING)
         width = 3 if selected else 2
 
@@ -551,6 +578,26 @@ class PlanEditor:
         flat = [v for p in corner_pts for v in p]
         c.create_polygon(*flat, outline=colour, fill="", width=3 if selected else 2,
                          dash=(6, 3))
+
+        # How far apart the lanes would be on screen. Below a few pixels they
+        # are a filled rectangle, not a plan, and drawing them costs five
+        # canvas items each for a picture nobody can read.
+        # `corners()` runs (-hw,-hl), (-hw,hl), (hw,hl), (hw,-hl), so edge
+        # 0->1 spans the *length* and edge 1->2 the width. Lanes are spaced
+        # across the width when they run along the length, and vice versa --
+        # measuring the other edge gives a confident wrong answer, which is
+        # exactly what the dimension labels did before they were fixed.
+        across = (_px(corner_pts[1], corner_pts[2])
+                  if g.lane_axis == "length"
+                  else _px(corner_pts[0], corner_pts[1]))
+        n = max(1, g.lane_count())
+        if across / n < LANE_MIN_PX and not selected:
+            cx = sum(p[0] for p in corner_pts[:4]) / 4
+            cy = sum(p[1] for p in corner_pts[:4]) / 4
+            c.create_text(cx, cy, text=f"{n} lanes", fill=colour,
+                          font=T.FONT_SMALL)
+            return
+
         lanes = g.lanes() + g.second_pass_lanes()
         for lane in lanes:
             a = self._to_screen(g.anchor, *lane.start)
@@ -724,6 +771,23 @@ def _sp(m: dict) -> str:
     if abs(eff - (want or 0)) < 0.005:
         return f"{want:g} m"
     return f"{eff:.2f} m (asked {want:g})"
+
+
+def _on_screen(pts, view) -> bool:
+    """Is any part of this shape's bounding box within the canvas?
+
+    A plan spread over a site has most of itself off the edge at survey zoom,
+    and drawing what cannot be seen is the single largest cost in a redraw.
+    A zero-sized view means "not laid out yet", where drawing everything is
+    the safe answer.
+    """
+    w, h = view
+    if w <= 1 or h <= 1:
+        return True
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    return not (max(xs) < -VIEW_MARGIN_PX or min(xs) > w + VIEW_MARGIN_PX
+                or max(ys) < -VIEW_MARGIN_PX or min(ys) > h + VIEW_MARGIN_PX)
 
 
 def _px(a, b) -> float:

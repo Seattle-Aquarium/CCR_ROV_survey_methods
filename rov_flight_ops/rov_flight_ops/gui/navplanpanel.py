@@ -26,6 +26,25 @@ GLYPH = {"pan": "✋", "line": "╱", "polyline": "⌁", "rect": "▭",
          "grid": "▦", "circle": "◯", "polygon": "⬠"}
 
 
+def _set(widget, **kw) -> None:
+    """`configure`, but only for the values that actually changed.
+
+    CustomTkinter redraws a widget -- and, for a frame, its children -- on
+    every `configure`, whatever was passed. On a panel refreshed at telemetry
+    rate that turns an unchanged list into the most expensive thing on the
+    page, so the comparison is worth the lines.
+    """
+    changed = {}
+    for key, value in kw.items():
+        try:
+            if widget.cget(key) != value:
+                changed[key] = value
+        except Exception:
+            changed[key] = value
+    if changed:
+        widget.configure(**changed)
+
+
 class PlanPanel(ctk.CTkFrame):
     """Tools on top, then the feature list, then the inspector."""
 
@@ -106,15 +125,15 @@ class PlanPanel(ctk.CTkFrame):
         ed = self.page.editor
         for tool, b in self.tool_buttons.items():
             on = ed is not None and ed.tool == tool
-            b.configure(border_color=T.ACCENT if on else T.BORDER,
-                        border_width=2 if on else 1,
-                        text_color=T.ACCENT if on else T.TEXT)
-        self.hint.configure(text=(ed.status if ed else "")[:64])
+            _set(b, border_color=T.ACCENT if on else T.BORDER,
+                 border_width=2 if on else 1,
+                 text_color=T.ACCENT if on else T.TEXT)
+        _set(self.hint, text=(ed.status if ed else "")[:64])
         hist = self.page.history
-        self.undo_btn.configure(state="normal" if hist and hist.can_undo
-                                else "disabled")
-        self.redo_btn.configure(state="normal" if hist and hist.can_redo
-                                else "disabled")
+        _set(self.undo_btn, state="normal" if hist and hist.can_undo
+             else "disabled")
+        _set(self.redo_btn, state="normal" if hist and hist.can_redo
+             else "disabled")
         self._refresh_list()
         self._refresh_inspector()
 
@@ -125,10 +144,15 @@ class PlanPanel(ctk.CTkFrame):
             for fid, row in self._rows.items():
                 f = plan.get(fid)
                 on = self.page.editor and self.page.editor.selected_id == fid
-                row.configure(fg_color=T.SURFACE if on else "transparent")
-                row._name.configure(
-                    text=f"{navdraw.KIND_GLYPH.get(f.kind, '•')} {f.name}",
-                    text_color=T.TEXT_MUTED if f.hidden else T.TEXT)
+                # Only when it has actually changed. `CTkFrame.configure`
+                # redraws the frame *and* every CustomTkinter child that
+                # inherits its background, so reconfiguring forty unchanged
+                # rows on every tick cost about 150 ms a redraw -- more than
+                # everything on the map put together.
+                _set(row, fg_color=T.SURFACE if on else "transparent")
+                _set(row._name,
+                     text=f"{navdraw.KIND_GLYPH.get(f.kind, '•')} {f.name}",
+                     text_color=T.TEXT_MUTED if f.hidden else T.TEXT)
             return
         for row in self._rows.values():
             row.destroy()
@@ -167,12 +191,12 @@ class PlanPanel(ctk.CTkFrame):
             if f is not None:
                 self._build_fields(f)
         if f is None:
-            self.title.configure(text="Nothing selected")
-            self.summary.configure(text="Pick a tool above, or click a feature "
-                                        "on the map.")
+            _set(self.title, text="Nothing selected")
+            _set(self.summary, text="Pick a tool above, or click a feature "
+                                    "on the map.")
             return
-        self.title.configure(text=f.name or f.kind)
-        self.summary.configure(text=navdraw._describe(f, f.measurements()))
+        _set(self.title, text=f.name or f.kind)
+        _set(self.summary, text=navdraw._describe(f, f.measurements()))
 
     # ------------------------------------------------------------------
     #  the editable fields, per kind

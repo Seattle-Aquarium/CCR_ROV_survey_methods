@@ -675,6 +675,84 @@ def test_the_detail_column_is_given_a_width_of_its_own(app):
         assert _matrix_detail(page, key).cget("width") == page.matrix._detail_px
 
 
+def _count_configures(widget) -> list:
+    """Record every `configure` on a widget and its descendants."""
+    calls = []
+
+    def wrap(w):
+        original = w.configure
+
+        def counting(*a, **kw):
+            if kw or a:
+                calls.append((w, kw))
+            return original(*a, **kw)
+
+        w.configure = counting
+        for kid in w.winfo_children():
+            wrap(kid)
+
+    wrap(widget)
+    return calls
+
+
+def test_refreshing_an_unchanged_plan_panel_reconfigures_nothing(app):
+    """CustomTkinter redraws a widget -- and, for a frame, every child that
+    inherits its background -- on any `configure`, whatever was passed.
+
+    Reconfiguring forty unchanged rows on every telemetry tick made the
+    feature list the most expensive thing on the page: a redraw with forty
+    grids measured 710 ms, against 57 ms once the no-op configures were
+    skipped. The ordinary case more than halved too.
+    """
+    page = _nav_page(app)
+    restore = _demo_plan(page)
+    try:
+        page.plan_panel.refresh()
+        app.update()
+
+        calls = _count_configures(page.plan_panel)
+        for _ in range(5):
+            page.plan_panel.refresh()
+        app.update()
+        assert calls == [], f"{len(calls)} no-op configure(s): {calls[:3]}"
+
+        # And a real change still gets through.
+        page.plan.features[0].name = "Renamed"
+        page.plan_panel.refresh()
+        app.update()
+        assert calls, "a genuine change was skipped"
+    finally:
+        restore()
+
+
+def test_a_shape_outside_the_canvas_is_not_drawn():
+    """Most of a site-wide plan is off the edge at survey zoom, and drawing
+    what cannot be seen was the largest avoidable cost on the map.
+
+    Tested on the predicate rather than through the page: a withdrawn test
+    window reports a one-pixel canvas, which is no viewport to cull against.
+    """
+    from rov_flight_ops.gui.navdraw import VIEW_MARGIN_PX, _on_screen
+
+    view = (900, 600)
+    middle = [(100.0, 100.0), (300.0, 400.0)]
+    assert _on_screen(middle, view)
+
+    # Straddling an edge keeps its visible half.
+    assert _on_screen([(-200.0, 100.0), (50.0, 200.0)], view)
+    assert _on_screen([(800.0, 100.0), (1200.0, 200.0)], view)
+
+    far = VIEW_MARGIN_PX + 50
+    assert not _on_screen([(-far - 400, 10.0), (-far - 10.0, 90.0)], view)
+    assert not _on_screen([(900.0 + far, 10.0), (2000.0, 90.0)], view)
+    assert not _on_screen([(10.0, -far - 300), (90.0, -far - 10.0)], view)
+    assert not _on_screen([(10.0, 600.0 + far), (90.0, 2000.0)], view)
+
+    # A view that has not been laid out yet draws everything, rather than
+    # culling the whole plan on the strength of a one-pixel canvas.
+    assert _on_screen([(5000.0, 5000.0), (5100.0, 5100.0)], (1, 1))
+
+
 def test_the_plan_panel_lists_every_kind_of_feature(app):
     """A panel refresh with features actually on the plan.
 
@@ -789,13 +867,22 @@ def _no_http(monkeypatch):
     Stronger than watching a vehicle mock: it asserts nothing *left the
     program*. A test that only checks "the ROV did not change" cannot tell a
     write that was never attempted from one that was attempted and refused.
+
+    Only calls on the main thread are recorded. A collector left running by an
+    earlier test polls from its own thread, and counting that would make this
+    test fail for something it is not about -- while still failing correctly if
+    the dialog itself reached the vehicle, which it does on this thread.
     """
+    import threading
+
     from rov_flight_ops.nav import mav2rest
 
+    main = threading.main_thread()
     calls = []
 
     def boom(*a, **k):
-        calls.append(a[0] if a else "?")
+        if threading.current_thread() is main:
+            calls.append(a[0] if a else "?")
         raise _Posted(f"the program tried to reach the vehicle: {a[:1]}")
 
     for name in ("_post", "_get"):

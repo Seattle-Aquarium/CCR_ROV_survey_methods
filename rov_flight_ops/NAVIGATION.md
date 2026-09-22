@@ -20,6 +20,8 @@ confirm a specific change.
 - [The map](#the-map)
 - [The survey plan](#the-survey-plan)
 - [Following a line](#following-a-line)
+- [How much the position is worth](#how-much-the-position-is-worth)
+- [When something goes wrong](#when-something-goes-wrong)
 - [Waypoints](#waypoints)
 - [Energy, and where the flight gauges went](#energy-and-where-the-flight-gauges-went)
 - [What each number is measured from](#what-each-number-is-measured-from)
@@ -29,6 +31,7 @@ confirm a specific change.
 - [Compatibility: what works on the installed stack](#compatibility-what-works-on-the-installed-stack)
 - [Bench validation checklist](#bench-validation-checklist)
 - [Requirement checklist](#requirement-checklist)
+- [An operator's first run](#an-operators-first-run)
 
 ---
 
@@ -526,6 +529,145 @@ tether, obstacles or current.
 
 ---
 
+## How much the position is worth
+
+A latitude and a longitude tell you where the vehicle is. They do not tell you
+how much that claim is worth, and those are different questions that the same
+two numbers answer identically whether the acoustics are correcting the
+estimator or stopped four minutes ago.
+
+So **the track is coloured by what each position was resting on**, and the line
+under the coordinates says it in words.
+
+| On the map | Means |
+|---|---|
+| **green** | acoustically aided — an absolute position with a recent fix behind it |
+| **blue** | dead-reckoned — relative aiding from a confirmed origin. The shape is right; the whole thing drifts |
+| **coral** | degraded — aiding is claimed but something behind it is stale or invalid |
+| **coral, dashed** | no aiding at all — constant-position mode |
+| **grey, dotted** | not established |
+
+Each point keeps the verdict it was recorded with. A track recoloured from the
+*present* state would quietly relabel history: an hour of good acoustic work
+would turn amber the moment the acoustics dropped out at the end of the dive.
+
+The legend under the map lists only the states this dive actually reached.
+
+### Received is not accepted
+
+The acoustic readout says *acoustic fix received 2 s ago — received, not
+confirmed accepted by the estimator*, and it means exactly that. Nothing in
+MAVLink reports that the estimator took a particular `GPS_INPUT` and used it,
+so the stronger claim is not available and is not made.
+
+This matters because **the absolute-position flag stays true long after the
+corrections stop.** The estimator does not fall over; it coasts. In the
+acoustic profile a position with no recent fix behind it is therefore coloured
+**degraded**, with the age on the readout, because that gap is precisely where
+an operator carries on trusting a fix that has been drifting for minutes. The
+test is not applied to a DVL-only dive, where there are no acoustics to be
+stale.
+
+An acoustic solution the extension reports as invalid (fix type 0) does not
+reset the clock. It arrived; it is not a fix.
+
+### Position jumps
+
+A discontinuity breaks the track, and is also kept — with what the position
+rested on either side, and how far it moved in how long. The strip says
+*1 position jump(s), newest: 12:59:17 — position jumped 14 m in 0.4 s, relative
+to none*.
+
+A jump is an observation. What caused it is a separate question, and this
+page does not guess at it.
+
+### What is *not* drawn
+
+No accuracy circle, ever, unless something actually estimated one. A corridor
+width is a number you chose; it is not a statement about how well the vehicle
+knows where it is, and drawing a tidy ring around a dead-reckoned position
+would be the most confident lie on the page.
+
+---
+
+## When something goes wrong
+
+**Health… → Diagnosis.** There is no "repair navigation" button and there will
+not be one.
+
+What you get is the observations, with what is still working stated alongside
+what is not, because that is what decides whether the dive continues:
+
+```
+absolute aiding, but the last acoustic fix was 12 s ago
+
+WHAT WAS MEASURED
+----------------------------------------------------------------------
+  . DVL measurements remain available
+  . vessel position and heading are fresh
+  ! acoustic fixes stopped 12 s ago
+
+POSSIBILITIES, NOT CONCLUSIONS
+----------------------------------------------------------------------
+  acoustic_stale: something between the topside and the estimator, rather
+  than the vessel's own GNSS, which is still fresh
+```
+
+**Observation and suspected cause are separated deliberately.** Everything
+under *what was measured* is a measurement. A possibility appears only when
+something actually supports one — the acoustic gap gets a suggestion here
+because the vessel's own GNSS is still fresh, and gets none when the vessel is
+stale too, since then it could be anywhere in the chain.
+
+Underneath are specific places to go: *inspect the acoustic status*, *review
+DVL-only readiness*, *recheck the required telemetry*, *open the DVL
+extension*, *set the origin*, *save a diagnostic snapshot*. Each one takes you
+somewhere or tells you where to look. **None of them does anything to the
+vehicle** — no origin reset, no extension restart, no reboot, no firmware.
+A warning a program can clear by itself is a warning it should not have raised.
+
+Lost GGA, lost HDT, lost acoustic fixes and a lost DVL produce four different
+diagnoses, which is the whole point of not having one "navigation degraded"
+banner.
+
+### What changed?
+
+**Health… → What changed?** Pick a recorded degradation and see everything
+else the session wrote within sixty seconds before and thirty after, grouped
+as message, quality, configuration, restart, laptop and plan.
+
+Its entire value is that **it does not answer the question**. Every line gives
+how far it was from the moment and nothing else, and the summary ends
+*Proximity in time is not a cause*. Two things happening eleven seconds apart
+is a fact about their timing; treating it as a cause is how a dive gets
+abandoned for the wrong reason.
+
+An empty window says so, and says what that does and does not rule out: it
+rules out everything the session log watches, and nothing it does not.
+
+Alignment is on the monotonic clock. A laptop that has just synchronised can
+move its wall clock backwards by seconds, which would silently reorder the
+very events being examined.
+
+### Save a diagnostic snapshot
+
+One JSON file beside the flight, worth opening a week later: the findings, the
+bounded window either side, the parameters **with their age and where they came
+from**, the message-health streams, the link, the plan, and a manifest with the
+commit and the environment.
+
+It starts no collectors. Everything in it is already being written — the
+session log a line at a time, the parameters on their own thread — because this
+gets pressed when something has already gone wrong, and a snapshot that
+collected its own data would be slowest on the laptop that was already
+struggling. Saving never raises, for the same reason.
+
+**Parameters carry their age** because a value read twenty minutes ago is
+evidence about twenty minutes ago. Rereading a file is not a fresh measurement
+of what the vehicle is doing now.
+
+---
+
 ## Waypoints
 
 **＋ Create waypoint** captures the ROV's position **at the instant you press
@@ -829,6 +971,16 @@ With Nereo on the bench, disarmed, tether connected. Tick these before flying.
 | Origin: mechanism detection, staging order, saved ≠ active | **done** — tested |
 | Versioned session log, manifest, append-only events | **done** — tested |
 | Replay, synthetic faults, speed-independent energy, no vehicle writes | **done** — tested |
+| Bundled, licensed Pier 59 basemap in the repository | **done** — 600 KiB, manifest with checksums and licence, tested from a clean cache |
+| Interactive plan: measured lines, rotated boxes, grids, circles, polygons | **done** — tested, including 600 m² verified three independent ways |
+| Documented edge-offset rule; non-divisible spacing handled | **done** — tested; 2 m in a 5 m width gives three lanes at 1.5 m |
+| Coverage refused without a stated swath width | **done** — tested |
+| Live guidance: cross-track by travel direction, projected progress | **done** — tested against synthetic paths, including stale position and jumps |
+| OTS / custom start writes nothing to the vehicle | **done** — tested by making every HTTP call raise |
+| Track coloured by navigation state, stamped at record time | **done** — tested, including distinctness in both appearance modes |
+| Guided diagnosis, observation separated from suspected cause | **done** — tested; no action this program performs itself |
+| "What changed?" without inferring causality | **done** — tested; the words because/caused/due to appear nowhere in its output |
+| Diagnostic snapshot with bounded history and parameter provenance | **done** — tested; starts no collectors |
 | No vehicle writes from replay, panel opening or reconnect | **done** — enforced structurally and tested |
 | Bounded queues, no GUI-thread blocking, clean stop | **done** — the window never joins a worker |
 | Compact fallback for small windows, minimum viewport recorded | **done** — see below |
@@ -837,43 +989,41 @@ With Nereo on the bench, disarmed, tether connected. Tick these before flying.
 
 ### Measured cost
 
-A 20-minute soak with the page replaying a looped 30-minute dive, on the
-development machine (Windows 11, 20 logical cores, 150% display scaling,
-1920×1080 window), running the real `mainloop()` rather than a driven update
-loop. "Tick lateness" is how late the page's own 250 ms timer actually fires,
-which is the number that means *did the UI stall*.
+Measured on the development laptop at 150% Windows scaling, 1920x1080, with
+the window visible and the map on the bundled Pier 59 chart. Each figure is
+the median and the 95th percentile of forty full `_render` cycles, including
+`app.update()`, so it is what the operator's frame actually costs and not what
+one function costs.
 
-| | at 1× (a real flight's rate) | at 4× |
+| Case | median | p95 |
 |---|---|---|
-| CPU, mean | **17.9%** of one core (~0.9% of the machine) | 18% |
-| Memory, start → end | 170 → 224 MiB | 170 → 224 MiB |
-| Memory growth, second half | **+0.6 MiB** — it plateaus | −4 MiB |
-| Tick lateness, median | **21 ms** | 21 ms |
-| Tick lateness, p99 | 27 ms | 30 ms |
-| Tick lateness, worst | 64 ms | 71 ms |
-| Ticks over 500 ms late | **0** | 0 |
-| Threads, start → end | 52 → 44 (they retire) | 53 → 43 |
+| 500 track points | 18 ms | 36 ms |
+| 2,000 track points | 22 ms | 42 ms |
+| 8,000 track points | 40 ms | 84 ms |
+| 8,000 points + 40 grids (400 lanes) | 59 ms | 118 ms |
+| the same, with trust colouring off | 44 ms | 88 ms |
 
-Memory settles at about 220 MiB and stops; threads go down rather than up; the
-page holds its 250 ms cadence with a worst case of 64 ms late across 2,224
-ticks. CPU is flat between 1× and 4× because the cost is the redraw, not the
-polling.
+Colouring the track by navigation state costs about 15% on the heaviest case
+and is not measurable on a normal one, because the extra work is splitting a
+polyline into runs rather than drawing anything more.
 
-**It was three times worse before it was measured.** The first soak found 47%
-of a core and a median tick 143 ms late, which is a visibly sluggish page. A
-profile found three things, none of which would have been guessed:
+**The measurement found something worth having.** The heaviest case was
+originally **710 ms median, 872 ms at p95** -- unusable -- and profiling put
+almost none of it on the map. CustomTkinter redraws a widget, and for a frame
+every child that inherits its background, on *any* `configure` call, whatever
+was passed. The plan panel was reconfiguring all forty of its unchanged
+feature rows on every telemetry tick. Skipping the no-op configures took the
+heaviest case from 710 ms to 59 ms, and more than halved the ordinary
+500-point redraw, which had been paying the same cost unnoticed.
 
-* `xy()` asked Tk for the canvas size on **every plotted point** — 1,262 Tk
-  round-trips per redraw for a number that cannot change during one. The
-  projection origin is now computed once per draw.
-* every label on the page was reconfigured every tick, including the eight
-  matrix rows in nine that had not changed. CustomTkinter's `configure` reads
-  the current value back out of Tk first, so this cost about 46 ms a tick.
-  Labels now compare before they set.
-* every visible tile was converted into a fresh `PhotoImage` on every redraw,
-  and every *absent* tile was looked for on disk again each time.
+Two other bounds were added at the same time: a feature whose bounding box is
+off the canvas is not drawn at all, and a grid whose lanes would be less than
+five pixels apart draws its outline and a lane count instead of several
+hundred canvas items nobody can resolve.
 
-Together those took Tk round-trips per redraw from 386,000 to 28,000.
+Earlier, from the first version of the chapter: a redraw was taking 386,000 Tk
+round trips because the tile grid was rebuilt from scratch each time and every
+*absent* tile was looked for on disk again. That is now 28,000.
 
 ### Minimum practical viewport
 
@@ -897,3 +1047,61 @@ a **uniform** grid group with floors of 260 and 240 logical pixels — without
 `uniform` Tk gives each row its requested height first and splits only the
 remainder, and the plan panel asks for far more than a matrix of labels does,
 which left the readiness card one row tall.
+
+---
+
+## An operator's first run
+
+Start to finish on a laptop that has only ever cloned the repository, with no
+network and no vehicle.
+
+**1. Launch, offline.** Open the program and go to **2 Navigation**. The map
+comes up on Pier 59 over the bundled chart. Nothing was downloaded: the pack is
+in `assets/maps/pier59/` and is about 600 KiB. Press **Offline…** to see what
+each layer holds; the two Pier 59 layers say *ships with the program*.
+
+**2. Look at the site.** Switch the layer to **Pier 59 imagery (offline)** to
+see the pier from above, and back to the chart to plan on. Zoom past z16 on the
+imagery and it goes blocky rather than blank — that is the enlargement, and it
+says so.
+
+**3. Draw the survey.** Pick the **rectangle** tool and drag a box over the
+survey area. The edges carry their length and width in metres while you drag.
+Type exact numbers into the inspector — 30 by 20, rotated 37 — and the box on
+the map follows. Switch it to a **survey grid** and set the lane spacing to 2 m:
+ten lanes appear, inset a metre from each edge, with their travel order and
+turn legs drawn.
+
+Add a **line** for the approach: click the start, click the end, then type
+"30.0 m at 125°T" in the inspector to make it exact.
+
+**Save as…** puts the plan beside the flight; it autosaves anyway.
+
+**4. Pick a lane.** Select lane 3 and press **Fly this line**. With no vehicle
+the strip says *no usable ROV position*, which is correct — it will not invent
+guidance from a position it does not have.
+
+**5. Set the dive up.** Press **Start…**. Choose **OTS — Pier 59** or type a
+custom start. The map recentres and the coordinates are staged. **Nothing has
+been sent to the vehicle**: step 3 of that dialog is the only thing that
+touches the ROV, and it is behind the write interlock and refused while armed.
+
+**6. On the boat.** Connect. Watch the readiness matrix fill in: *configured*,
+*receiving*, *valid*, *fused*, four different questions. Set the origin from
+**Start… → step 3**, review the proposed writes, tick **Allow writes**, apply,
+and let it read back. Without an origin there are no coordinates.
+
+**7. Fly.** Follow the lane; the strip gives cross-track, distance along and
+distance to run. Press **＋ Waypoint** for anything worth coming back to — it
+captures the position at the press, then asks for a name.
+
+**8. When it goes wrong.** Open **Health… → Diagnosis**. Read what was
+measured before reading what it might mean. If something degraded, **What
+changed?** shows everything the session recorded around it — without telling
+you which caused which. Press **Save a diagnostic snapshot** before changing
+anything, so the state that produced the problem is on disk.
+
+**9. Afterwards.** The plan, the waypoints, the track and any snapshots are all
+in the flight folder. **Replay** will play the session back, and cannot send a
+vehicle anything.
+
