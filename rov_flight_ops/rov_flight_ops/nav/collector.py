@@ -374,9 +374,10 @@ class NavCollector:
 
         got = {**prev.messages, **self.mav.health}
         s.messages = dict(got)
-        any_fresh = any(x.fresh for x in list(fast.values()) + list(slow.values()))
-        self._link.connected = any_fresh or any(
-            not x.error for x in fast.values())
+        read = list(fast.values()) + list(slow.values())
+        any_fresh = any(x.fresh for x in read)
+        if read:
+            self._link.connected = any_fresh or any(not x.error for x in read)
         if any_fresh:
             self._link.last_ok_age = 0.0
         elif self._link.last_ok_age is not None:
@@ -468,6 +469,8 @@ class NavCollector:
         `alt` (MSL, which is meaningless with no origin) and it is not the
         NED origin's z.
         """
+        if not fast:
+            return prev.depth
         g = fast.get("GLOBAL_POSITION_INT")
         if g is None or not g.fresh:
             return prev.depth
@@ -496,6 +499,8 @@ class NavCollector:
         autopilot's echo at 1/1 -- which is why it is a named fallback rather
         than merged in.
         """
+        if not fast and not slow:
+            return prev.altitude
         rf = fast.get("RANGEFINDER")
         if rf is not None and rf.fresh:
             d = rf.num("distance")
@@ -572,6 +577,8 @@ class NavCollector:
         is a hard zero presented as a measured speed, which is what reading the
         DVL's own report directly would give.
         """
+        if not fast:
+            return prev.speed
         lp = fast.get("LOCAL_POSITION_NED")
         if lp is not None and lp.fresh:
             vx, vy = lp.num("vx"), lp.num("vy")
@@ -668,7 +675,21 @@ class NavCollector:
            origin this program has read back from the vehicle.
         3. Nothing. The map shows a local-metre view and says so, rather than
            claiming a geographic position it does not have.
+
+        **A cycle that did not read the fast group does not age it.** The two
+        groups run on different cadences, and a slow-only cycle has not looked
+        at the position at all -- concluding from that that it has gone stale
+        would blink the map to "last known" every couple of seconds on a
+        perfectly healthy vehicle. The same applies to the vessel, which is
+        read on the extension cadence.
         """
+        if not fast:
+            s.local_ned = prev.local_ned
+            s.rov_fix = prev.rov_fix
+            s.vessel_fix = prev.vessel_fix
+            s.vessel_heading = prev.vessel_heading
+            return
+
         lp = fast.get("LOCAL_POSITION_NED")
         if lp is not None and lp.fresh:
             n, e, d = lp.num("x"), lp.num("y"), lp.num("z")

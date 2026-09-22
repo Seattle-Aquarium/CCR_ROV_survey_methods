@@ -304,3 +304,35 @@ def test_stopping_is_immediate_and_reports_whether_it_finished():
     assert c._stop.is_set()
     # And a caller that genuinely wants to wait can.
     c.stop(timeout=5.0)
+
+
+def test_a_slow_only_cycle_does_not_age_what_it_did_not_read(vehicle):
+    """The fast and slow groups are read on different cadences.
+
+    A cycle where only the slow group is due must not conclude that the
+    position, the altitude or anything else in the fast group has gone stale
+    -- it did not look at them. Timing jitter makes slow-only cycles rare and
+    not impossible, and the symptom would be the map blinking to "last known"
+    every couple of seconds on a perfectly healthy vehicle.
+    """
+    addr, _srv = vehicle
+    host, port = addr.split(":")
+    c = _wired(host, int(port))
+    _pump(c, cycles=2)
+    good = c.snapshot()
+    assert good.rov_fix is not None and good.rov_fix.quality is Quality.OK
+    assert good.altitude.quality is Quality.OK
+
+    # Only the slow group is due.
+    now = time.monotonic() + 100
+    c._next["fast"] = now + 10
+    c._next["ext"] = now + 10
+    c._next["param"] = now + 10
+    c._next["slow"] = 0.0
+    c._cycle(now)
+
+    after = c.snapshot()
+    assert after.rov_fix is not None
+    assert after.rov_fix.quality is Quality.OK, "the fix was aged unread"
+    assert after.altitude.quality is Quality.OK, "the altitude was aged unread"
+    assert after.rov_fix.lat == pytest.approx(good.rov_fix.lat)
