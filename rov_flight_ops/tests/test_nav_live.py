@@ -336,3 +336,43 @@ def test_a_slow_only_cycle_does_not_age_what_it_did_not_read(vehicle):
     assert after.rov_fix.quality is Quality.OK, "the fix was aged unread"
     assert after.altitude.quality is Quality.OK, "the altitude was aged unread"
     assert after.rov_fix.lat == pytest.approx(good.rov_fix.lat)
+
+
+def test_a_slow_parameter_read_does_not_hold_the_poll_cadence(vehicle):
+    """Parameters come from the head of a dataflash log over File Browser --
+    a third of a second against a healthy vehicle and seconds against a busy
+    one. On the collector's own thread that would freeze the 4 Hz instruments
+    for its whole duration, every two minutes."""
+    addr, _srv = vehicle
+    host, port = addr.split(":")
+    c = _wired(host, int(port))
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_reader():
+        started.set()
+        release.wait(5.0)
+        return {"EK3_SRC1_POSXY": 6.0}
+
+    c.set_parameter_reader(slow_reader)
+    try:
+        began = time.monotonic()
+        c._next = {k: 0.0 for k in c._next}
+        c._cycle(time.monotonic())
+        took = time.monotonic() - began
+        assert started.wait(2.0), "the parameter read never started"
+        assert took < 1.0, f"the cycle waited {took:.1f} s for the parameters"
+        # And a second cycle does not start a competing reader.
+        c._next["param"] = 0.0
+        c._cycle(time.monotonic())
+        release.set()
+        for _ in range(50):
+            if c.params:
+                break
+            time.sleep(0.05)
+        assert c.params.get("EK3_SRC1_POSXY") == 6.0
+    finally:
+        release.set()
+        if c._param_thread is not None:
+            c._param_thread.join(3.0)

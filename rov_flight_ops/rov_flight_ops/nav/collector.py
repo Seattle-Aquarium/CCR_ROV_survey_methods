@@ -143,6 +143,8 @@ class NavCollector:
         self.params: dict[str, float] = {}
         self.params_mono: float | None = None
         self._read_params = None
+        #: The in-flight parameter read, so two never overlap.
+        self._param_thread: threading.Thread | None = None
         #: Origin known to the collector, for the NED projection. Set only
         #: from a confirmed origin -- never from a saved parameter.
         self._origin: tuple[float, float] | None = None
@@ -339,12 +341,35 @@ class NavCollector:
                 log.debug("vessel status read failed: %s", ex)
 
     def _refresh_params(self) -> None:
+        """Re-read the parameters, on a thread of their own.
+
+        Not on the collector's thread. Reading them means fetching the head of
+        the autopilot's newest dataflash log over File Browser -- a third of a
+        second against a healthy vehicle, and seconds against a busy or
+        half-answering one. Doing that inside the poll cycle would hold the
+        4 Hz instruments for its whole duration, every two minutes, which is
+        exactly the sort of periodic hitch that gets reported as "the page
+        freezes" and is miserable to track down.
+
+        One at a time: if the previous read has not finished, this one is
+        skipped rather than queued. A vehicle slow enough to overlap a
+        two-minute cadence does not need two readers fighting over it.
+        """
+        worker = self._param_thread
+        if worker is not None and worker.is_alive():
+            log.debug("parameter refresh skipped: the previous one is running")
+            return
+        self._param_thread = threading.Thread(
+            target=self._read_params_worker, name="nav-params", daemon=True)
+        self._param_thread.start()
+
+    def _read_params_worker(self) -> None:
         try:
             got = self._read_params()
         except Exception as ex:
             log.warning("parameter refresh failed: %s", ex)
             return
-        if not got:
+        if not got or self._stop.is_set():
             return
         if self.params:
             moved = {k: (self.params.get(k), v) for k, v in got.items()
