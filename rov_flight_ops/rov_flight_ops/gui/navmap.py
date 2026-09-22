@@ -49,7 +49,12 @@ MIN_SEGMENT_PX = 2.0
 MAX_DRAWN_POINTS = 4000
 
 #: Zoom limits. Beyond 19 no source has tiles; below 3 the survey is a dot.
-MIN_ZOOM, MAX_ZOOM = 3, 19
+#: The chart pack stops at z19, but `TileCache` enlarges past a layer's top
+#: zoom, so the map is no longer limited to where the tiles stop. Two
+#: doublings further is 0.05 m per pixel: enough to place a vertex to a tenth
+#: of a metre, which is the scale these plans are actually drawn at. The
+#: basemap says "enlarged, not sharper" up there, and it means it.
+MIN_ZOOM, MAX_ZOOM = 3, 21
 
 #: A colour ramp for seabed depth, shallow to deep. Deliberately not a
 #: rainbow: a sequential ramp is read correctly by people who see colour
@@ -118,6 +123,11 @@ class MapCanvas(ctk.CTkFrame):
         #: or zooming brings in new ones.
         self._photos: dict[tuple, object] = {}
         self._images: list = []          # what this draw is showing
+        #: The plan editor. Set by the page; None means no plan is loaded.
+        self.editor = None
+        #: The site marker -- a fixed launch reference, never a vehicle and
+        #: never a vessel.
+        self.site = None
         self._drag_from: tuple[int, int] | None = None
         self._drag_centre: tuple[float, float] | None = None
         self._pixel_bounds: tuple[float, float] | None = None
@@ -127,11 +137,12 @@ class MapCanvas(ctk.CTkFrame):
         c = self.canvas
         c.bind("<ButtonPress-1>", self._press)
         c.bind("<B1-Motion>", self._drag)
+        c.bind("<Motion>", self._hover)
         c.bind("<ButtonRelease-1>", self._release)
         c.bind("<MouseWheel>", self._wheel)
         c.bind("<Button-4>", lambda e: self._zoom_by(1, e))
         c.bind("<Button-5>", lambda e: self._zoom_by(-1, e))
-        c.bind("<Double-Button-1>", lambda e: self._zoom_by(1, e))
+        c.bind("<Double-Button-1>", self._double)
 
     # ------------------------------------------------------------------
     #  view
@@ -181,10 +192,25 @@ class MapCanvas(ctk.CTkFrame):
         self.draw()
 
     def _press(self, e) -> None:
+        # The editor gets first refusal: an armed tool, or a grab on a handle
+        # of the selection, must not also pan the map underneath it.
+        if self.editor is not None and self.editor.press(e):
+            self._drag_from = None
+            return
         self._drag_from = (e.x, e.y)
         self._drag_centre = self.centre
 
+    def _hover(self, e) -> None:
+        """Pointer moved with no button down: live dimensions while drawing."""
+        if self.editor is not None and (self.editor.drawing
+                                        or self.editor._grab is not None):
+            self.editor.motion(e)
+
     def _drag(self, e) -> None:
+        if self.editor is not None and (self.editor._grab is not None
+                                        or self.editor.drawing):
+            self.editor.motion(e)
+            return
         if self._drag_from is None or self._drag_centre is None:
             return
         # Panning is an explicit instruction to look somewhere: following is
@@ -199,8 +225,17 @@ class MapCanvas(ctk.CTkFrame):
         self.centre = geo.tile_xy_to_latlon(cx % n, cy, self.zoom)
         self.draw()
 
-    def _release(self, _e) -> None:
+    def _release(self, e) -> None:
+        if self.editor is not None and self.editor.release(e):
+            self._drag_from = None
+            return
         self._drag_from = None
+
+    def _double(self, e) -> None:
+        """Finish an open polyline, or zoom in when nothing is being drawn."""
+        if self.editor is not None and self.editor.finish():
+            return
+        self._zoom_by(1, e)
 
     def _wheel(self, e) -> None:
         self._zoom_by(1 if e.delta > 0 else -1, e)
@@ -318,6 +353,9 @@ class MapCanvas(ctk.CTkFrame):
             self._draw_track(self.rov_track, _hex(T.ACCENT), width=3,
                              depth_coloured=self.colour_by_depth)
             self._draw_markers()
+            self._draw_site()
+            if self.editor is not None:
+                self.editor.draw()
             self._draw_vessel()
             self._draw_rov()
             self._draw_scale(w, h)
@@ -540,6 +578,28 @@ class MapCanvas(ctk.CTkFrame):
                                              fill=_hex(T.SURFACE), width=2)
             self.canvas.create_text(x + 11, y, text=m.label, anchor="w",
                                     fill=_hex(T.TEXT), font=T.FONT_SMALL)
+
+    def _draw_site(self) -> None:
+        """The launch site: a fixed reference, deliberately unlike everything
+        that moves.
+
+        Not a boat, not the vehicle, not the EKF origin. An operator glancing
+        at the map must be able to tell "where we go in" from "where the ROV
+        is" without reading a label.
+        """
+        if not self.site:
+            return
+        at = self.xy(self.site["lat"], self.site["lon"])
+        if at is None:
+            return
+        x, y = at
+        c = self.canvas
+        col = _hex(T.HEADING)
+        c.create_oval(x - 11, y - 11, x + 11, y + 11, outline=col, width=2)
+        c.create_line(x - 5, y, x + 5, y, fill=col, width=2)
+        c.create_line(x, y - 5, x, y + 5, fill=col, width=2)
+        c.create_text(x + 15, y, text=self.site.get("short", "site"),
+                      anchor="w", fill=col, font=T.FONT_SMALL)
 
     def _draw_vessel(self) -> None:
         f = self.vessel_fix

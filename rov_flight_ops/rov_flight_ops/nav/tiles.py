@@ -79,6 +79,11 @@ MEMORY_TILES = 320
 #: Tiles are 256 px square in every source here.
 TILE_PX = 256
 
+#: How many doublings past a layer's top zoom are still worth showing. Three
+#: is an eight-fold enlargement: still recognisably the same shoreline. Beyond
+#: that a tile is a handful of coloured squares and a blank grid is honester.
+MAX_OVERZOOM = 3
+
 
 @dataclass(frozen=True)
 class TileSource:
@@ -257,8 +262,10 @@ class TileCache:
         the instant it opens rather than after a round of HTTP.
         """
         src = SOURCES.get(key)
-        if src is None or not (src.min_zoom <= z <= src.max_zoom):
+        if src is None or z < src.min_zoom:
             return None
+        if z > src.max_zoom:
+            return self._overzoom(key, src, z, x, y)
         n = 1 << z
         if not (0 <= y < n):
             return None
@@ -294,6 +301,53 @@ class TileCache:
         if self.online:
             self._enqueue(ident)
         return None
+
+    def _overzoom(self, key: str, src, z: int, x: int, y: int):
+        """A tile past a layer's top zoom, made by enlarging its ancestor.
+
+        `bundled.coverage` tells the operator the view is "enlarged, not
+        sharper" beyond the pack's detail, and this is what makes that true
+        rather than a caption on a blank grid. The imagery layer stops at
+        z16; a 30 m survey box is 75 pixels across at z16 and 600 at z19, so
+        without this the operator has to choose between seeing the site and
+        seeing the plan.
+
+        Nearest-neighbour on purpose. Smooth interpolation would invent edges
+        that look like resolution the pack does not have, and on a chart that
+        is the difference between a blurred label and a plausible wrong one.
+        Blocky pixels say "enlarged" without anyone having to read the note.
+        """
+        depth = z - src.max_zoom
+        if depth > MAX_OVERZOOM:
+            return None                      # past this it is a colour wash
+        n = 1 << z
+        if not (0 <= y < n):
+            return None
+        x %= n
+
+        ident = (key, z, x, y)
+        with self._lock:
+            hit = self._mem.get(ident)
+        if hit is not None:
+            return hit
+
+        parent = self.get(key, src.max_zoom, x >> depth, y >> depth)
+        if parent is None:
+            return None
+        try:
+            from PIL import Image
+
+            step = 1 << depth
+            sx, sy = x - ((x >> depth) << depth), y - ((y >> depth) << depth)
+            side = TILE_PX / step
+            crop = parent.crop((round(sx * side), round(sy * side),
+                                round((sx + 1) * side), round((sy + 1) * side)))
+            img = crop.resize((TILE_PX, TILE_PX), Image.NEAREST)
+        except Exception as ex:
+            log.debug("over-zoom %s failed: %s", ident, ex)
+            return None
+        self._remember(ident, img)
+        return img
 
     def _from_bundle(self, ident: tuple):
         key, z, x, y = ident
