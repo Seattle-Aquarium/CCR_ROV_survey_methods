@@ -110,10 +110,19 @@ class MapCanvas(ctk.CTkFrame):
         self.local_track: list[tuple[float, float]] = []
         self.status_note = ""
 
-        self._images: list = []          # Tk images must outlive the draw
+        #: Tk images must outlive the draw that used them, and building one
+        #: from a decoded tile is not free -- a profile found `_draw_tiles`
+        #: taking 23 ms of a 38 ms map redraw, almost all of it converting
+        #: the same forty tiles into PhotoImages two and a half times a
+        #: second. They are keyed by tile identity and reused; only panning
+        #: or zooming brings in new ones.
+        self._photos: dict[tuple, object] = {}
+        self._images: list = []          # what this draw is showing
         self._drag_from: tuple[int, int] | None = None
         self._drag_centre: tuple[float, float] | None = None
         self._pixel_bounds: tuple[float, float] | None = None
+        #: Set for the length of one draw; see `_origin_px`.
+        self._origin_cache: tuple[float, float, int, int] | None = None
 
         c = self.canvas
         c.bind("<ButtonPress-1>", self._press)
@@ -224,6 +233,20 @@ class MapCanvas(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _origin_px(self) -> tuple[float, float, int, int] | None:
+        """The pixel origin of the current view, cached for the whole draw.
+
+        `xy` calls this once per plotted point, and it used to ask Tk for the
+        canvas size every time -- two round-trips into the interpreter per
+        track point. A profile found it at 1,262 calls per redraw and the
+        single largest cost on the page, which is an absurd price for a
+        number that cannot change in the middle of a draw.
+
+        `draw` fills the cache at the top and clears it at the end, so
+        anything called outside a draw (a click, a hit test) still measures
+        the canvas properly.
+        """
+        if self._origin_cache is not None:
+            return self._origin_cache
         try:
             w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
         except tkinter.TclError:
@@ -284,18 +307,23 @@ class MapCanvas(ctk.CTkFrame):
             self._draw_local(w, h)
             return
 
-        drew_tiles = self._draw_tiles(w, h) if self.show_tiles else 0
-        self._draw_grid(w, h, faint=drew_tiles > 0)
-        self._draw_planned()
-        self._draw_track(self.vessel_track, _hex(T.WARN), width=2,
-                         dash=(4, 3))
-        self._draw_track(self.rov_track, _hex(T.ACCENT), width=3,
-                         depth_coloured=self.colour_by_depth)
-        self._draw_markers()
-        self._draw_vessel()
-        self._draw_rov()
-        self._draw_scale(w, h)
-        self._draw_attribution(w, h, drew_tiles)
+        self._origin_cache = None
+        self._origin_cache = self._origin_px()
+        try:
+            drew_tiles = self._draw_tiles(w, h) if self.show_tiles else 0
+            self._draw_grid(w, h, faint=drew_tiles > 0)
+            self._draw_planned()
+            self._draw_track(self.vessel_track, _hex(T.WARN), width=2,
+                             dash=(4, 3))
+            self._draw_track(self.rov_track, _hex(T.ACCENT), width=3,
+                             depth_coloured=self.colour_by_depth)
+            self._draw_markers()
+            self._draw_vessel()
+            self._draw_rov()
+            self._draw_scale(w, h)
+            self._draw_attribution(w, h, drew_tiles)
+        finally:
+            self._origin_cache = None
 
     # -- layers -------------------------------------------------------------
 
@@ -316,19 +344,45 @@ class MapCanvas(ctk.CTkFrame):
                 for ty in range(y0, y1 + 1):
                     if not (0 <= ty < n):
                         continue
-                    img = self.cache.get(key, self.zoom, tx, ty)
-                    if img is None:
-                        continue
-                    try:
-                        photo = ImageTk.PhotoImage(img)
-                    except Exception:
-                        continue
+                    ident = (key, self.zoom, tx % n, ty)
+                    photo = self._photos.get(ident)
+                    if photo is None:
+                        img = self.cache.get(key, self.zoom, tx, ty)
+                        if img is None:
+                            continue
+                        try:
+                            photo = ImageTk.PhotoImage(img)
+                        except Exception:
+                            continue
+                        self._photos[ident] = photo
                     self._images.append(photo)
                     self.canvas.create_image(
                         tx * TILE_PX - ox, ty * TILE_PX - oy,
                         image=photo, anchor="nw")
                     drawn += 1
+        self._trim_photos()
         return drawn
+
+    #: Built PhotoImages kept between draws. A 1920-wide map pane is about
+    #: forty tiles per layer; this holds several screens of panning before the
+    #: oldest go.
+    PHOTO_MAX = 240
+
+    def _trim_photos(self) -> None:
+        """Drop the least recently drawn images once there are too many.
+
+        Bounded because a survey day of panning would otherwise accumulate
+        every tile ever shown as a live Tk image, which is memory Tk does not
+        give back until the image is deleted.
+        """
+        if len(self._photos) <= self.PHOTO_MAX:
+            return
+        showing = set(id(x) for x in self._images)
+        for ident in list(self._photos):
+            if len(self._photos) <= self.PHOTO_MAX:
+                break
+            if id(self._photos[ident]) not in showing:
+                del self._photos[ident]
 
     def _draw_grid(self, w: int, h: int, *, faint: bool) -> None:
         """A metre grid with a round spacing, over or instead of the tiles."""
@@ -679,6 +733,11 @@ class MapCanvas(ctk.CTkFrame):
 
     def refresh_theme(self) -> None:
         self.draw()
+
+    def forget_images(self) -> None:
+        """Drop the cached Tk images. For a theme change or a shutdown."""
+        self._photos.clear()
+        self._images = []
 
 
 def format_position(fix: Fix | None, *, now: float | None = None) -> str:

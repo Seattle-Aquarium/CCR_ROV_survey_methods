@@ -90,6 +90,36 @@ WORKSPACE_MIN_PX = 230
 MAP_WEIGHT, HUD_WEIGHT = 47, 53
 
 
+
+def _set_label(widget, *, text=None, text_color=None, font=None) -> None:
+    """Configure a label only when something has actually changed.
+
+    CustomTkinter's `configure` is not cheap: it reads the current values back
+    out of Tk before applying, and a profile of this page found ~96 label
+    configures per redraw costing about 46 ms -- more than the map. Most of
+    them set a label to exactly what it already said, because a flight mode,
+    a source name and eight of the nine matrix rows do not change from one
+    quarter-second to the next.
+
+    Comparing first turns those into a dictionary lookup. The values are
+    cached on the widget rather than read back from it for the same reason:
+    reading them back is the expensive half.
+    """
+    cache = getattr(widget, "_nav_cache", None)
+    if cache is None:
+        cache = widget._nav_cache = {}
+    changes = {}
+    if text is not None and cache.get("text") != text:
+        changes["text"] = text
+    if text_color is not None and cache.get("text_color") != text_color:
+        changes["text_color"] = text_color
+    if font is not None and cache.get("font") != font:
+        changes["font"] = font
+    if changes:
+        cache.update(changes)
+        widget.configure(**changes)
+
+
 class NavigationPage(ctk.CTkFrame):
     """The whole chapter. Owns the collector, the log and the map."""
 
@@ -482,10 +512,10 @@ class NavigationPage(ctk.CTkFrame):
                 if len(m.depth_points) > 20_000:
                     del m.depth_points[:5_000]
         m.draw()
-        self.position_label.configure(
-            text=format_position(s.rov_fix, now=now),
-            text_color=(T.TEXT if s.rov_fix and s.rov_fix.quality is Quality.OK
-                        else T.WARN))
+        _set_label(self.position_label,
+                   text=format_position(s.rov_fix, now=now),
+                   text_color=(T.TEXT if s.rov_fix
+                               and s.rov_fix.quality is Quality.OK else T.WARN))
 
     def _render_strip(self, s, now: float) -> None:
         prof = PR.PROFILES[self.profile_key]
@@ -574,7 +604,7 @@ class NavigationPage(ctk.CTkFrame):
             bits.insert(0, "REPLAY — not a live vehicle")
         colour = (T.WARN if (s.link.problem or not s.link.connected
                              or s.link.mode == "replay") else T.TEXT_MUTED)
-        self.foot_label.configure(text="  ·  ".join(bits), text_color=colour)
+        _set_label(self.foot_label, text="  ·  ".join(bits), text_color=colour)
         can = self._can_write()
         self.apply_button.configure(
             state="normal" if can else "disabled",
@@ -779,9 +809,8 @@ class NavigationPage(ctk.CTkFrame):
             vessel_feeding=_vessel_feeding(s))
         self.origin_state = O.detect(params, active=self.origin_state.active)
         if self.check is not None:
-            self.check_label.configure(
-                text=self.check.summary(),
-                text_color=T.OK if self.check.matches else T.WARN)
+            _set_label(self.check_label, text=self.check.summary(),
+                       text_color=T.OK if self.check.matches else T.WARN)
             if self.session is not None:
                 self.session.event("profile_check", {
                     "profile": self.profile_key,
@@ -986,7 +1015,7 @@ class _HudRow(ctk.CTkFrame):
 
     def set(self, name: str, value: str, unit: str = "", tone=None,
             hint: str = "", compact: bool = False) -> None:
-        self.name.configure(text=name)
+        _set_label(self.name, text=name)
         text = value or NO_VALUE
         # Long values shrink rather than clip. A flight mode truncated to
         # "Depth I" is not a flight mode, and nothing on the page says it was
@@ -996,12 +1025,12 @@ class _HudRow(ctk.CTkFrame):
         want = self._base * self._scale * max(0.5, long_factor)
         if abs(want - self._shown) > 0.02:
             self._shown = want
-            self.value.configure(font=T.scale_font(T.FONT_TITLE, want))
-        self.value.configure(text=text, text_color=tone or T.TEXT)
-        self.unit.configure(text=unit)
+            _set_label(self.value, font=T.scale_font(T.FONT_TITLE, want))
+        _set_label(self.value, text=text, text_color=tone or T.TEXT)
+        _set_label(self.unit, text=unit)
         # When the space runs out the hint is what goes. The value never is:
         # a number clipped to "0.3" is worse than no hint, and it is silent.
-        self.hint.configure(text="" if compact else (hint or "")[:52])
+        _set_label(self.hint, text="" if compact else (hint or "")[:52])
 
 
 class _StripCell(ctk.CTkFrame):
@@ -1021,11 +1050,11 @@ class _StripCell(ctk.CTkFrame):
         self._note.grid(row=2, column=0, sticky="ew")
 
     def title(self, text: str) -> None:
-        self._title.configure(text=text)
+        _set_label(self._title, text=text)
 
     def set(self, value: str, note: str = "", tone=None) -> None:
-        self._value.configure(text=value, text_color=tone or T.TEXT)
-        self._note.configure(text=(note or "")[:78])
+        _set_label(self._value, text=value, text_color=tone or T.TEXT)
+        _set_label(self._note, text=(note or "")[:78])
 
 
 class _SensorMatrix(ctk.CTkScrollableFrame):
@@ -1084,8 +1113,8 @@ class _SensorMatrix(ctk.CTkScrollableFrame):
             if cells is None:
                 continue
             for lab, (text, tone) in zip(cells[:3], row.marks, strict=False):
-                lab.configure(text=text, text_color=tone)
-            cells[3].configure(text=row.detail)
+                _set_label(lab, text=text, text_color=tone)
+            _set_label(cells[3], text=row.detail)
 
 
 def _tone(r: Reading):

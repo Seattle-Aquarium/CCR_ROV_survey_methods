@@ -629,8 +629,48 @@ With Nereo on the bench, disarmed, tether connected. Tick these before flying.
 | No vehicle writes from replay, panel opening or reconnect | **done** — enforced structurally and tested |
 | Bounded queues, no GUI-thread blocking, clean stop | **done** — the window never joins a worker |
 | Compact fallback for small windows, minimum viewport recorded | **done** — see below |
-| Hour-long soak with measurements | **done** — see `docs/` results below |
+| Hour-long soak with measurements | **done** — see below |
 | **Live-vehicle validation** | **pending** — nothing here has touched an ROV |
+
+### Measured cost
+
+A 20-minute soak with the page replaying a looped 30-minute dive, on the
+development machine (Windows 11, 20 logical cores, 150% display scaling,
+1920×1080 window), running the real `mainloop()` rather than a driven update
+loop. "Tick lateness" is how late the page's own 250 ms timer actually fires,
+which is the number that means *did the UI stall*.
+
+| | at 1× (a real flight's rate) | at 4× |
+|---|---|---|
+| CPU, mean | **17.9%** of one core (~0.9% of the machine) | 18% |
+| Memory, start → end | 170 → 224 MiB | 170 → 224 MiB |
+| Memory growth, second half | **+0.6 MiB** — it plateaus | −4 MiB |
+| Tick lateness, median | **21 ms** | 21 ms |
+| Tick lateness, p99 | 27 ms | 30 ms |
+| Tick lateness, worst | 64 ms | 71 ms |
+| Ticks over 500 ms late | **0** | 0 |
+| Threads, start → end | 52 → 44 (they retire) | 53 → 43 |
+
+Memory settles at about 220 MiB and stops; threads go down rather than up; the
+page holds its 250 ms cadence with a worst case of 64 ms late across 2,224
+ticks. CPU is flat between 1× and 4× because the cost is the redraw, not the
+polling.
+
+**It was three times worse before it was measured.** The first soak found 47%
+of a core and a median tick 143 ms late, which is a visibly sluggish page. A
+profile found three things, none of which would have been guessed:
+
+* `xy()` asked Tk for the canvas size on **every plotted point** — 1,262 Tk
+  round-trips per redraw for a number that cannot change during one. The
+  projection origin is now computed once per draw.
+* every label on the page was reconfigured every tick, including the eight
+  matrix rows in nine that had not changed. CustomTkinter's `configure` reads
+  the current value back out of Tk first, so this cost about 46 ms a tick.
+  Labels now compare before they set.
+* every visible tile was converted into a fresh `PhotoImage` on every redraw,
+  and every *absent* tile was looked for on disk again each time.
+
+Together those took Tk round-trips per redraw from 386,000 to 28,000.
 
 ### Minimum practical viewport
 
