@@ -753,6 +753,63 @@ def test_a_shape_outside_the_canvas_is_not_drawn():
     assert _on_screen([(5000.0, 5000.0), (5100.0, 5100.0)], (1, 1))
 
 
+def test_the_readout_under_the_map_takes_only_the_height_it_needs(app):
+    """An empty CTkFrame asks for its default 200 logical pixels.
+
+    The track-colour legend has no chips in it until there is a track, which
+    is exactly the state the program opens in at the dock -- and that phantom
+    request left a third of a metre of blank screen between the map and the
+    guidance strip on a tall window, with the map shrunk to pay for it.
+    """
+    page = _nav_page(app)
+    readout = page.position_label.master
+    app.update_idletasks()
+
+    one_row = page.position_label.winfo_reqheight()
+    assert one_row > 0
+    # Two rows plus padding at the very most -- not two hundred pixels of
+    # nothing.
+    assert readout.winfo_reqheight() <= one_row * 2 + 20, (
+        readout.winfo_reqheight(), one_row)
+    assert page.trust_legend.winfo_reqheight() <= one_row, (
+        "the empty legend is asking for space it does not need")
+
+
+def test_the_trust_line_is_hidden_until_it_has_something_to_say(app):
+    """"unknown — no position" under "— no position" is the same sentence
+    twice, and an empty label still occupies a row."""
+    from rov_flight_ops.nav.replay import ReplayCollector
+
+    page = _nav_page(app)
+    previous = page.collector
+    try:
+        page.collector = ReplayCollector([], label="nothing")
+        page._render()
+        app.update()
+        # `grid_info()` rather than `winfo_ismapped()`: the latter is an int
+        # and is 0 for every widget in a withdrawn test window, so it would
+        # pass whatever the code did.
+        assert page.trust_label.grid_info() == {}, "the row is still taking space"
+        assert page._trust_shown is False
+
+        # With a position it comes back, and says what the position rests on.
+        s = M.NavSnapshot()
+        now = time.monotonic()
+        s.rov_fix = _fix(47.6075, -122.3438, kind="dead")
+        s.ekf = {"horiz_pos_abs": M.good(0.0, recv_mono=now),
+                 "horiz_pos_rel": M.good(1.0, recv_mono=now),
+                 "const_pos_mode": M.good(0.0, recv_mono=now)}
+        page._render_trust(s, now)
+        app.update()
+        assert page._trust_shown is True
+        assert page.trust_label.grid_info() != {}
+        assert "dead-reckoned" in page.trust_label.cget("text")
+    finally:
+        page.collector = previous
+        page._render()
+        app.update()
+
+
 def test_the_plan_panel_lists_every_kind_of_feature(app):
     """A panel refresh with features actually on the plan.
 

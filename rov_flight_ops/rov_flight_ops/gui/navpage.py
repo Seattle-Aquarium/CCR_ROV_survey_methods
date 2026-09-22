@@ -214,13 +214,24 @@ class NavigationPage(ctk.CTkFrame):
 
         #: What the track's colours mean, built from the track itself so it
         #: never lists a state the dive did not reach.
-        self.trust_legend = ctk.CTkFrame(readout, fg_color="transparent")
+        #:
+        #: `height=0` matters: an empty CTkFrame asks for its default 200
+        #: logical pixels, and before the first fix this one has no chips in
+        #: it at all -- which left a third of a metre of blank screen under
+        #: the map on a tall window. It grows with its chips.
+        self.trust_legend = ctk.CTkFrame(readout, fg_color="transparent",
+                                         width=0, height=0)
         self.trust_legend.grid(row=0, column=1, sticky="e")
         self._legend_shown: list = []
 
         self.trust_label = label(readout, "", muted=True)
         self.trust_label.configure(anchor="w")
         self.trust_label.grid(row=1, column=0, columnspan=2, sticky="ew")
+        #: Hidden until there is something to say. An empty label still
+        #: occupies a row, and "unknown — no position" under "— no position"
+        #: is the same sentence twice.
+        self.trust_label.grid_remove()
+        self._trust_shown = False
 
         self._build_strip(col, row=3)
 
@@ -792,17 +803,31 @@ class NavigationPage(ctk.CTkFrame):
         how much that claim is worth.
         """
         state, note = TR.track_state(s, now, profile_key=self.profile_key)
-        words = navmap.TRUST_WORDS.get(state, state)
-        line = f"{words} — {note}"
-        if self.profile_key == "acoustic":
-            line += "  ·  " + TR.acoustic_line(s, now)
         jumps = getattr(self.collector, "jumps", None)
-        if jumps:
-            line += f"  ·  {len(jumps)} position jump(s), newest: {jumps[-1].line()}"
-        _set_label(self.trust_label, text=line[:190],
-                   text_color=(T.TEXT_MUTED if state in (TR.ABSOLUTE,
-                                                         TR.RELATIVE)
-                               else T.WARN))
+
+        if s.rov_fix is None and not jumps:
+            # The position readout above already says there is no position;
+            # repeating it in different words helps nobody.
+            line = ""
+        else:
+            line = f"{navmap.TRUST_WORDS.get(state, state)} — {note}"
+            if self.profile_key == "acoustic":
+                line += "  ·  " + TR.acoustic_line(s, now)
+            if jumps:
+                line += (f"  ·  {len(jumps)} position jump(s), newest: "
+                         f"{jumps[-1].line()}")
+
+        if bool(line) != self._trust_shown:
+            self._trust_shown = bool(line)
+            if line:
+                self.trust_label.grid()
+            else:
+                self.trust_label.grid_remove()
+        if line:
+            _set_label(self.trust_label, text=line[:190],
+                       text_color=(T.TEXT_MUTED if state in (TR.ABSOLUTE,
+                                                             TR.RELATIVE)
+                                   else T.WARN))
 
         styles = self.map.trust_styles()
         if [x[0] for x in styles] == self._legend_shown:
