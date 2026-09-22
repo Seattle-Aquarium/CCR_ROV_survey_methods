@@ -866,3 +866,118 @@ def test_an_over_range_reading_keeps_its_true_value(app):
         assert "OVER" in texts
     finally:
         holder.destroy()
+
+
+# --------------------------------------------------------------------------
+#  The return bearing
+# --------------------------------------------------------------------------
+
+
+def _home(page, snapshot):
+    page._render_home(snapshot, time.monotonic())
+    return (page.strip_home._title.cget("text"),
+            page.strip_home._value.cget("text"),
+            page.strip_home._note.cget("text"))
+
+
+def test_the_bearing_is_to_the_vessel_in_the_acoustic_profile(app):
+    page = _nav_page(app)
+    before = page.profile_key
+    try:
+        page.profile_key = "acoustic"
+        s = M.NavSnapshot()
+        s.rov_fix = _fix(47.62691, -122.39018)
+        # 285 m roughly west-north-west, which is where the vessel sits.
+        s.vessel_fix = _fix(47.62714, -122.39396, kind="vessel")
+        title, value, _note = _home(page, s)
+        assert title == "TO VESSEL"
+        assert "°T" in value and "m" in value
+        assert "275°T" in value          # checked against the geodesic
+        assert "286 m" in value or "285 m" in value
+    finally:
+        page.profile_key = before
+
+
+def test_a_stale_vessel_gives_no_bearing_at_all(app):
+    """No fresh-target claim from stale data."""
+    page = _nav_page(app)
+    before = page.profile_key
+    try:
+        page.profile_key = "acoustic"
+        s = M.NavSnapshot()
+        s.rov_fix = _fix(47.62691, -122.39018)
+        s.vessel_fix = _fix(47.62714, -122.39396, kind="vessel",
+                            quality=Quality.STALE)
+        title, value, note = _home(page, s)
+        assert title == "TO VESSEL"
+        assert value == M.NO_VALUE
+        assert "stale" in note
+    finally:
+        page.profile_key = before
+
+
+def test_dvl_only_relabels_the_readout_to_the_start(app):
+    """Same arithmetic, a completely different claim -- so it never keeps the
+    vessel's label."""
+    from rov_flight_ops.nav import origin as O
+
+    page = _nav_page(app)
+    before_profile, before_origin = page.profile_key, page.origin_state
+    try:
+        page.profile_key = "dvl"
+        page.origin_state = O.OriginState(active=True, active_lat=47.62714,
+                                          active_lon=-122.39396)
+        s = M.NavSnapshot()
+        s.rov_fix = _fix(47.62691, -122.39018, kind="dead")
+        title, value, note = _home(page, s)
+        assert title == "TO START"
+        assert "275°T" in value
+        assert "drift" in note, "the dead-reckoning caveat is not shown"
+    finally:
+        page.profile_key, page.origin_state = before_profile, before_origin
+
+
+def test_no_confirmed_origin_means_no_bearing_to_the_start(app):
+    from rov_flight_ops.nav import origin as O
+
+    page = _nav_page(app)
+    before_profile, before_origin = page.profile_key, page.origin_state
+    try:
+        page.profile_key = "dvl"
+        page.origin_state = O.OriginState(active=False)
+        s = M.NavSnapshot()
+        s.rov_fix = _fix(47.62691, -122.39018, kind="dead")
+        title, value, note = _home(page, s)
+        assert title == "TO START" and value == M.NO_VALUE
+        assert "no confirmed origin" in note
+    finally:
+        page.profile_key, page.origin_state = before_profile, before_origin
+
+
+def test_coincident_positions_say_at_target_rather_than_spinning(app):
+    page = _nav_page(app)
+    before_profile = page.profile_key
+    try:
+        page.profile_key = "acoustic"
+        s = M.NavSnapshot()
+        s.rov_fix = _fix(47.62691, -122.39018)
+        s.vessel_fix = _fix(47.62691, -122.39018, kind="vessel")
+        _title, value, note = _home(page, s)
+        assert "at/near target" in value
+        assert "too close" in note
+    finally:
+        page.profile_key = before_profile
+
+
+def test_no_usable_rov_position_gives_no_bearing(app):
+    page = _nav_page(app)
+    before_profile = page.profile_key
+    try:
+        page.profile_key = "acoustic"
+        s = M.NavSnapshot()
+        s.rov_fix = _fix(47.62691, -122.39018, quality=Quality.STALE)
+        s.vessel_fix = _fix(47.62714, -122.39396, kind="vessel")
+        _title, value, note = _home(page, s)
+        assert value == M.NO_VALUE and "no usable ROV position" in note
+    finally:
+        page.profile_key = before_profile
