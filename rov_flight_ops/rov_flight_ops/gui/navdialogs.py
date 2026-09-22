@@ -23,8 +23,11 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from ..nav import bundled, geo, offline, tiles
+from ..nav import changed as CH
+from ..nav import diagnose as DG
 from ..nav import origin as O
 from ..nav import profiles as PR
+from ..nav import session as SESS
 from . import theme as T
 from .navstatus import message_health_rows
 from .widgets import Card, button, entry, label, output_box, say
@@ -59,13 +62,145 @@ class DetailsDrawer(_Drawer):
 
     def __init__(self, page, snapshot, check, origin_state):
         super().__init__(page, "Navigation details")
+        self.page = page
+        self.snapshot = snapshot
         tabs = ctk.CTkTabview(self, fg_color=T.SURFACE)
         tabs.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
+        # Diagnosis first: it is the tab an operator opens this for.
+        self._diagnosis_tab(tabs.add("Diagnosis"), snapshot)
+        self._changed_tab(tabs.add("What changed?"))
         self._profile_tab(tabs.add("Profile check"), check)
         self._messages_tab(tabs.add("Message health"), snapshot)
         self._params_tab(tabs.add("Parameters"), snapshot)
         self._origin_tab(tabs.add("Origin"), origin_state)
+
+    # -- diagnosis --------------------------------------------------------
+
+    def _diagnosis_tab(self, tab, snapshot) -> None:
+        """Observations, then what to look at. Never a repair button."""
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(1, weight=1)
+
+        page = self.page
+        if snapshot is None:
+            say(output_box(tab, wrap="word"), "Nothing has been read yet.")
+            return
+        now = time.monotonic()
+        report = DG.diagnose(
+            snapshot, now, profile_key=page.profile_key,
+            origin_confirmed=bool(getattr(page.origin_state, "confirmed",
+                                          False)))
+
+        head = ctk.CTkLabel(
+            tab, text=report.headline, font=T.FONT_H2, anchor="w",
+            text_color=(T.WARN if report.severity == DG.PROBLEM
+                        else T.HEADING))
+        head.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 2))
+
+        box = output_box(tab, wrap="word", muted=False)
+        box.grid(row=1, column=0, sticky="nsew", padx=8)
+        box.configure(height=300)
+
+        mark = {DG.PROBLEM: "!", DG.ADVISORY: "-", DG.INFO: "."}
+        lines = ["WHAT WAS MEASURED", "-" * 70]
+        lines += [f"  {mark.get(f.severity, '-')} {f.observed}"
+                  for f in report.findings] or ["  nothing to report"]
+        suspects = [f for f in report.findings if f.suspected]
+        if suspects:
+            lines += ["", "POSSIBILITIES, NOT CONCLUSIONS", "-" * 70]
+            lines += [f"  {f.key}: {f.suspected}" for f in suspects]
+        lines += ["", "These are observations. Where a possible cause is "
+                      "offered it is a suggestion for what to look at next, "
+                      "not a diagnosis, and nothing here has been done to "
+                      "the vehicle."]
+        say(box, "\n".join(lines))
+
+        row = ctk.CTkFrame(tab, fg_color="transparent")
+        row.grid(row=2, column=0, sticky="ew", padx=8, pady=8)
+        for i, action in enumerate(report.actions()):
+            button(row, action.label,
+                   lambda a=action: self._do_action(a), "ghost",
+                   width=210).grid(row=i // 3, column=i % 3, padx=(0, 6),
+                                   pady=(0, 4), sticky="w")
+
+    def _do_action(self, action) -> None:
+        """Take the operator somewhere. Never touch the vehicle."""
+        page = self.page
+        if action.target == "snapshot":
+            page.save_diagnostic_snapshot()
+            return
+        if action.target == "start":
+            StartDialog(page)
+            return
+        where = action.where or "the relevant page"
+        messagebox.showinfo(
+            action.label,
+            f"{action.label}\n\n{where}\n\n"
+            f"This program does not open or change that for you: on a live "
+            f"vehicle the difference between looking and acting matters more "
+            f"than the saved click.")
+
+    # -- what changed? ----------------------------------------------------
+
+    def _changed_tab(self, tab) -> None:
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(2, weight=1)
+        page = self.page
+
+        events = []
+        path = getattr(page.session, "events_path", None) if page.session \
+            else None
+        if path is not None:
+            try:
+                events = SESS.read_events(path() if callable(path) else path)
+            except Exception:
+                events = []
+
+        moments = CH.degradations(events)
+        label(tab, "Pick a recorded degradation and see what else the session "
+                   "wrote around it.", muted=True).grid(
+            row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
+
+        self._changed_box = output_box(tab, wrap="none", muted=False)
+        self._changed_box.grid(row=2, column=0, sticky="nsew", padx=8,
+                               pady=(4, 8))
+        self._changed_box.configure(height=360)
+
+        if not moments:
+            say(self._changed_box,
+                "No degradation has been recorded in this session.")
+            return
+
+
+        choices = [f"{r.get('t', '?')}  {r.get('kind')}" for r in moments]
+        self._moments = moments
+        picker = ctk.CTkOptionMenu(
+            tab, values=choices[-40:], width=380, font=T.FONT_SMALL,
+            command=lambda text: self._show_window(text, events))
+        picker.grid(row=1, column=0, sticky="w", padx=8)
+        picker.set(choices[-1])
+        self._show_window(choices[-1], events)
+
+    def _show_window(self, text: str, events: list) -> None:
+        chosen = None
+        for r in self._moments:
+            if f"{r.get('t', '?')}  {r.get('kind')}" == text:
+                chosen = r
+                break
+        if chosen is None:
+            say(self._changed_box, "That moment is no longer in the log.")
+            return
+        win = CH.around(events, float(chosen["mono"]))
+        lines = [f"AROUND  {chosen.get('t')}   {chosen.get('kind')}",
+                 "-" * 74, win.summary()]
+        if win.note:
+            lines.append(win.note)
+        lines.append("")
+        lines += [a.line() for a in win.rows]
+        lines += ["", "Events are listed by how far they were from the "
+                      "moment. Nothing here says one caused another."]
+        say(self._changed_box, "\n".join(lines))
 
     def _profile_tab(self, tab, check) -> None:
         box = output_box(tab, wrap="none", muted=False)

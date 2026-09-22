@@ -884,6 +884,119 @@ def test_the_start_dialog_says_which_step_touches_the_vehicle(app,
         app.update()
 
 
+def _drawer_text(widget) -> str:
+    """Everything readable in a drawer, including text-box contents."""
+    out = []
+
+    def walk(w):
+        try:
+            out.append(str(w.cget("text")))
+        except Exception:
+            pass
+        try:
+            if w.winfo_class() in ("Text", "CTkTextbox"):
+                out.append(w.get("1.0", "end"))
+        except Exception:
+            pass
+        for kid in w.winfo_children():
+            walk(kid)
+
+    walk(widget)
+    return " ".join(out)
+
+
+def test_the_health_drawer_leads_with_observations_and_offers_no_repair(
+        app, monkeypatch):
+    """The diagnosis tab is the one an operator opens this for, and the one
+    place a "repair navigation" button would be most tempting to add."""
+    from rov_flight_ops.gui import navdialogs
+    from rov_flight_ops.nav import model as MM
+
+    page = _nav_page(app)
+    _no_http(monkeypatch)
+    previous = page.collector
+    dlg = None
+    try:
+        now = time.monotonic()
+        s = MM.NavSnapshot()
+        s.link = MM.LinkState(mode="live", connected=True, host="1.2.3.4")
+        s.rov_fix = _fix(47.6075, -122.3438)
+        s.ekf = {"horiz_pos_abs": MM.good(1.0, recv_mono=now),
+                 "horiz_pos_rel": MM.good(1.0, recv_mono=now),
+                 "const_pos_mode": MM.good(0.0, recv_mono=now)}
+        s.dvl = {"bottom_lock": MM.good(1.0, recv_mono=now)}
+        s.ugps = {"fix": MM.good("fix type 3", recv_mono=now - 40.0)}
+        s.vessel = {"position": MM.good((47.6, -122.3), recv_mono=now),
+                    "heading": MM.good(180.0, recv_mono=now)}
+
+        class Fake:
+            mav = None
+            allow_writes = False
+            rov_track = []
+            vessel_track = []
+            jumps = []
+            params = {}
+            params_mono = None
+            profile_key = "acoustic"
+
+            def snapshot(self):
+                return s
+
+        page.collector = Fake()
+        before_profile = page.profile_key
+        page.profile_key = "acoustic"
+        dlg = navdialogs.DetailsDrawer(page, s, page.check, page.origin_state)
+        app.update()
+
+        text = _drawer_text(dlg).lower()
+        # The observations, including what is still working.
+        assert "acoustic fixes stopped" in text
+        assert "dvl measurements remain available" in text
+        assert "vessel position and heading are fresh" in text
+        # The line between observation and guess, stated on the page.
+        assert "possibilities, not conclusions" in text
+        assert "not a diagnosis" in text
+        # And nothing that offers to put it right.
+        for banned in ("repair navigation", "reset the origin",
+                       "restart the extension", "reboot"):
+            assert banned not in text, banned
+    finally:
+        if dlg is not None:
+            dlg.destroy()
+        page.collector = previous
+        page.profile_key = before_profile
+        app.update()
+
+
+def test_saving_a_snapshot_needs_a_flight_folder_and_writes_one_file(
+        app, tmp_path, monkeypatch):
+    from rov_flight_ops.gui import navpage as NP
+
+    page = _nav_page(app)
+    said = []
+    monkeypatch.setattr(NP.messagebox, "showinfo",
+                        lambda *a, **k: said.append(a))
+    monkeypatch.setattr(NP.messagebox, "showwarning",
+                        lambda *a, **k: said.append(a))
+    before = getattr(page.app, "flight_dir", None)
+    try:
+        page.app.flight_dir = None
+        assert page.save_diagnostic_snapshot() is None
+        assert said, "the operator was told nothing"
+
+        page.app.flight_dir = tmp_path
+        path = page.save_diagnostic_snapshot()
+        assert path is not None and path.is_file()
+
+        import json
+        bundle = json.loads(path.read_text(encoding="utf-8"))
+        assert bundle["schema"] >= 1
+        assert "not a diagnosis" in bundle["verdict"]["caveat"]
+        assert "parameters_age_s" in bundle["configuration"]
+    finally:
+        page.app.flight_dir = before
+
+
 def test_writes_are_locked_at_startup_and_in_replay(app):
     """A program that remembers permission to write to a vehicle is a program
     that writes to a vehicle somebody did not expect."""

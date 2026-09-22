@@ -1117,6 +1117,50 @@ class NavigationPage(ctk.CTkFrame):
         DetailsDrawer(self, self.collector.snapshot() if self.collector else None,
                       self.check, self.origin_state)
 
+    def save_diagnostic_snapshot(self):
+        """Write everything needed to work out what happened, later.
+
+        Reuses the session log and the parameters already being read; it
+        starts nothing and asks the vehicle for nothing, because this gets
+        pressed when something has already gone wrong.
+        """
+        from ..nav import snapshot as SNAP
+
+        folder = getattr(self.app, "flight_dir", None)
+        if folder is None:
+            messagebox.showinfo(
+                "Diagnostic snapshot",
+                "Choose a flight folder on 1 Monitoring first — the snapshot "
+                "is saved beside the flight it describes.")
+            return None
+        s = self.collector.snapshot() if self.collector else M.NavSnapshot()
+        events = []
+        if self.session is not None:
+            try:
+                events = SESS.read_events(self.session.events_path)
+            except Exception:
+                events = []
+        bundle = SNAP.build(
+            s, time.monotonic(), profile_key=self.profile_key,
+            origin_confirmed=bool(getattr(self.origin_state, "confirmed",
+                                          False)),
+            events=events, params_age_s=s.params_age, site=dict(self.site),
+            jumps=list(getattr(self.collector, "jumps", []) or []),
+            plan_summary={"name": self.plan.name,
+                          "features": len(self.plan.features),
+                          "revision": self.plan.revision})
+        path = SNAP.save(bundle, folder)
+        if path is None:
+            messagebox.showwarning(
+                "Diagnostic snapshot",
+                "The snapshot could not be written. The diagnostics log has "
+                "the reason.")
+            return None
+        if self.session is not None:
+            self.session.event("diagnostic_snapshot", {"file": path.name})
+        messagebox.showinfo("Diagnostic snapshot", f"Saved {path.name}")
+        return path
+
     def _open_origin(self) -> None:
         from .navdialogs import OriginDialog
         OriginDialog(self)
