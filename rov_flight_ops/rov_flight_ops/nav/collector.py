@@ -43,6 +43,7 @@ from dataclasses import dataclass, replace
 from . import extensions as E
 from . import mav2rest, power
 from . import model as M
+from . import trust as TR
 from .model import Fix, LinkState, NavSnapshot, Quality, Reading, Source
 
 log = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ BACKOFF_MAX_S = 15.0
 #: How much track the collector keeps in memory. At 4 Hz this is about forty
 #: minutes of ROV positions; the *log* keeps every sample, so this bound
 #: costs nothing but the tail of the drawn breadcrumb.
+JUMPS_MAX = 40
 TRACK_MAX = 10_000
 
 #: A position more than this far from the previous one, in the time between
@@ -100,6 +102,37 @@ class TrackPoint:
     wall: float
     segment: int
     kind: str = "ekf"
+    #: What the position was resting on when it was recorded: one of
+    #: `trust.STATES`. Stored per point rather than derived at draw time
+    #: because the estimator's state at 10:04 is not recoverable from a
+    #: snapshot taken at 10:31, and a track recoloured by the *present* state
+    #: would quietly relabel history.
+    trust: str = "unknown"
+
+
+@dataclass
+class Jump:
+    """A position discontinuity, and what the position rested on either side.
+
+    Recorded rather than inferred later: by the time an operator asks "what
+    happened at 10:04", the estimator has moved on and the evidence is gone.
+    """
+
+    mono: float
+    wall: float
+    metres: float
+    seconds: float
+    segment: int
+    from_trust: str = "unknown"
+    to_trust: str = "unknown"
+
+    def line(self) -> str:
+        when = time.strftime("%H:%M:%S", time.localtime(self.wall))
+        move = f"{self.metres:.0f} m in {self.seconds:.1f} s"
+        if self.from_trust == self.to_trust:
+            return f"{when} — position jumped {move} ({self.from_trust})"
+        return (f"{when} — position jumped {move}, "
+                f"{self.from_trust} to {self.to_trust}")
 
 
 class NavCollector:
@@ -124,6 +157,13 @@ class NavCollector:
         self._vessel_reader = E.VesselReader()
         self.energy = power.EnergyMeter()
 
+        #: Which navigation profile the operator has chosen. The collector
+        #: does not decide it and never acts on it -- it is here only so a
+        #: track point can record what the position rested on, and in the
+        #: acoustic profile that includes whether an acoustic fix was recent.
+        #: Set by the page; "" means do not make that distinction.
+        self.profile_key = ""
+
         #: The newest snapshot. One reference, swapped whole.
         self._snapshot = NavSnapshot()
         self._link = LinkState(mode="off", host=host)
@@ -134,6 +174,9 @@ class NavCollector:
 
         #: The drawn track. Deques so the bound is free.
         self.rov_track: deque[TrackPoint] = deque(maxlen=TRACK_MAX)
+        #: Position jumps, newest last. Bounded, like everything else that
+        #: grows with flight time.
+        self.jumps: list[Jump] = []
         self.vessel_track: deque[TrackPoint] = deque(maxlen=TRACK_MAX)
         self._segment = 0
         self._last_rov: TrackPoint | None = None
@@ -756,8 +799,12 @@ class NavCollector:
                           note="dead-reckoned from the confirmed EKF origin")
 
         if fix is not None:
-            self._add_rov_point(fix, now)
             s.rov_fix = fix
+            # After `s.rov_fix` is set, so the judgement is made about the
+            # position actually being recorded.
+            self._add_rov_point(fix, now,
+                                TR.track_state(s, now,
+                                               profile_key=self.profile_key)[0])
         elif prev.rov_fix is not None:
             # Keep the last position, clearly marked. A vanished marker tells
             # the operator nothing; a stale one tells them where it was.
@@ -778,7 +825,8 @@ class NavCollector:
                                    note="no current vessel position")
         s.vessel_heading = E.vessel_readings(v).get("heading", M.unknown)
 
-    def _add_rov_point(self, fix: Fix, now: float) -> None:
+    def _add_rov_point(self, fix: Fix, now: float,
+                       trust: str = "unknown") -> None:
         last = self._last_rov
         if last is not None:
             from . import geo
@@ -788,8 +836,18 @@ class NavCollector:
                 self._break_track(
                     f"position jumped {d:.0f} m in {gap:.1f} s")
                 fix = replace(fix, segment=self._segment)
+                # Kept for the map and for "What changed?", with what the
+                # position was resting on either side of the jump. A jump is
+                # an observation; what caused it is a separate question.
+                self.jumps.append(Jump(
+                    mono=fix.recv_mono or now, wall=time.time(),
+                    metres=d, seconds=gap, segment=self._segment,
+                    from_trust=last.trust, to_trust=trust))
+                while len(self.jumps) > JUMPS_MAX:
+                    self.jumps.pop(0)
         p = TrackPoint(fix.lat, fix.lon, fix.recv_mono or now,
-                       fix.recv_time or time.time(), fix.segment, fix.kind)
+                       fix.recv_time or time.time(), fix.segment, fix.kind,
+                       trust)
         self.rov_track.append(p)
         self._last_rov = p
         self._emit("rov_fix", fix.to_json())

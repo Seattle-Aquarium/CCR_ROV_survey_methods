@@ -47,9 +47,10 @@ from ..nav import plan as P
 from ..nav import profiles as PR
 from ..nav import replay as RP
 from ..nav import session as SESS
+from ..nav import trust as TR
 from ..nav.collector import NavCollector
 from ..nav.model import NO_VALUE, Quality
-from . import navdraw
+from . import navdraw, navmap
 from . import theme as T
 from .navmap import MapCanvas, Marker, format_position
 from .navplanpanel import PlanPanel
@@ -203,9 +204,23 @@ class NavigationPage(ctk.CTkFrame):
         self.map = MapCanvas(col, cache=self.tile_cache)
         self.map.grid(row=1, column=0, sticky="nsew")
 
-        self.position_label = label(col, f"{NO_VALUE}  no position", muted=True)
+        readout = ctk.CTkFrame(col, fg_color="transparent")
+        readout.grid(row=2, column=0, sticky="ew", pady=(3, 3))
+        readout.grid_columnconfigure(0, weight=1)
+        self.position_label = label(readout, f"{NO_VALUE}  no position",
+                                    muted=True)
         self.position_label.configure(font=T.FONT_MONO, anchor="w")
-        self.position_label.grid(row=2, column=0, sticky="ew", pady=(3, 3))
+        self.position_label.grid(row=0, column=0, sticky="ew")
+
+        #: What the track's colours mean, built from the track itself so it
+        #: never lists a state the dive did not reach.
+        self.trust_legend = ctk.CTkFrame(readout, fg_color="transparent")
+        self.trust_legend.grid(row=0, column=1, sticky="e")
+        self._legend_shown: list = []
+
+        self.trust_label = label(readout, "", muted=True)
+        self.trust_label.configure(anchor="w")
+        self.trust_label.grid(row=1, column=0, columnspan=2, sticky="ew")
 
         self._build_strip(col, row=3)
 
@@ -672,6 +687,7 @@ class NavigationPage(ctk.CTkFrame):
         self._open_session("live")
         self.collector = NavCollector(host, allow_writes=False,
                                       on_event=self._collector_event)
+        self._sync_profile_to_collector()
         try:
             from .. import blueos
             self.collector.set_parameter_reader(
@@ -766,6 +782,39 @@ class NavigationPage(ctk.CTkFrame):
                    text=format_position(s.rov_fix, now=now),
                    text_color=(T.TEXT if s.rov_fix
                                and s.rov_fix.quality is Quality.OK else T.WARN))
+        self._render_trust(s, now)
+
+    def _render_trust(self, s, now: float) -> None:
+        """What the position rests on, in one line, plus the track's key.
+
+        Separate from the coordinates on purpose: an operator who reads a
+        latitude and a longitude has been told where the vehicle is, and not
+        how much that claim is worth.
+        """
+        state, note = TR.track_state(s, now, profile_key=self.profile_key)
+        words = navmap.TRUST_WORDS.get(state, state)
+        line = f"{words} — {note}"
+        if self.profile_key == "acoustic":
+            line += "  ·  " + TR.acoustic_line(s, now)
+        jumps = getattr(self.collector, "jumps", None)
+        if jumps:
+            line += f"  ·  {len(jumps)} position jump(s), newest: {jumps[-1].line()}"
+        _set_label(self.trust_label, text=line[:190],
+                   text_color=(T.TEXT_MUTED if state in (TR.ABSOLUTE,
+                                                         TR.RELATIVE)
+                               else T.WARN))
+
+        styles = self.map.trust_styles()
+        if [x[0] for x in styles] == self._legend_shown:
+            return
+        self._legend_shown = [x[0] for x in styles]
+        for kid in self.trust_legend.winfo_children():
+            kid.destroy()
+        for i, (_state, text, colour, dash) in enumerate(styles):
+            chip = ctk.CTkLabel(self.trust_legend,
+                                text=("- - " if dash else "— ") + text,
+                                font=T.FONT_SMALL, text_color=colour)
+            chip.grid(row=0, column=i, padx=(8, 0))
 
     def _render_guidance(self, s, now: float) -> None:
         got = self._following_line()
@@ -918,10 +967,18 @@ class NavigationPage(ctk.CTkFrame):
             if p.label == label_text:
                 if k != self.profile_key:
                     self.profile_key = k
+                    self._sync_profile_to_collector()
                     if self.session is not None:
                         self.session.event("profile_selected", {"profile": k})
                     self._revalidate()
                 return
+
+    def _sync_profile_to_collector(self) -> None:
+        """The collector tags each track point with what it rested on, and in
+        the acoustic profile that judgement needs to know the profile."""
+        c = self.collector
+        if c is not None and hasattr(c, "profile_key"):
+            c.profile_key = self.profile_key
 
     def _toggle_unlock(self) -> None:
         want = self.unlock_var.get()

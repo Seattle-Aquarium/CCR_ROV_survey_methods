@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from ..nav import trust
 from ..nav.model import Quality
 from . import theme as T
 
@@ -92,30 +93,10 @@ def _cfg(params: dict, name: str, want: float) -> tuple:
     return YES if abs(v - want) < 1e-6 else NO
 
 
-def aiding_mode(s) -> tuple[str, str]:
-    """(mode, sentence) from the estimator's own flags.
-
-    Three states worth telling apart, and the middle one is the one that was
-    being misreported:
-
-    ``absolute``  the estimator has an absolute horizontal position.
-    ``relative``  it has a relative one. With a confirmed origin that still
-                  yields a usable dead-reckoned latitude and longitude --
-                  `getLLH` returns origin + offset when `horiz_pos_rel` is
-                  set -- so this is a working state, not a fault.
-    ``none``      constant-position mode: no horizontal aiding at all.
-    """
-    abs_ = s.ekf.get("horiz_pos_abs")
-    rel = s.ekf.get("horiz_pos_rel")
-    const = s.ekf.get("const_pos_mode")
-    if const is not None and const.number():
-        return "none", "constant position mode — no horizontal aiding at all"
-    if abs_ is not None and abs_.number():
-        return "absolute", "absolute horizontal position"
-    if rel is not None and rel.number():
-        return "relative", ("relative horizontal position — dead-reckoned, "
-                            "and a usable fix when the origin is confirmed")
-    return "unknown", "no EKF_STATUS_REPORT to judge from"
+#: Re-exported, not reimplemented. The map colours its track from the same
+#: judgement this table prints, and two copies of "what is the aiding mode"
+#: drifting apart is what made 18 September hard to read.
+aiding_mode = trust.aiding_mode
 
 
 def matrix_rows(s, now: float) -> dict[str, Row]:

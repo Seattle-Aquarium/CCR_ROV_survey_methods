@@ -35,7 +35,9 @@ from dataclasses import dataclass
 
 import customtkinter as ctk
 
+from .. import brand
 from ..nav import geo, tiles
+from ..nav import trust as TR
 from ..nav.model import NO_VALUE, Fix, Quality
 from . import theme as T
 
@@ -49,6 +51,53 @@ MIN_SEGMENT_PX = 2.0
 MAX_DRAWN_POINTS = 4000
 
 #: Zoom limits. Beyond 19 no source has tiles; below 3 the survey is a dot.
+#: A colour per navigation state, for the track: (light, dark).
+#:
+#: Taken from the brand palette directly rather than through the semantic
+#: roles, because the roles collide where this needs them not to. `ok` and
+#: `accent` are both Algae in dark mode, so "acoustically aided" and
+#: "dead-reckoned" drew as the same green -- exactly the distinction the
+#: colouring exists to make. `warn` and `error` are both Coral in both modes.
+#: Picking from the palette keeps the Aquarium's colours without inheriting a
+#: collision that was harmless everywhere else.
+#:
+#: Green is aided, blue is dead-reckoned, coral is trouble. "No aiding" shares
+#: coral with "degraded" and is separated by a dash instead, which is apter --
+#: a track with no horizontal aiding is not a measured path -- and more robust
+#: on a Rugged screen in daylight, which loses saturation before it loses
+#: pattern.
+TRUST_COLOURS = {
+    TR.ABSOLUTE: ("#00795A", brand.ALGAE),        # Algae, darkened for white
+    TR.RELATIVE: (brand.MEDITERRANEAN, brand.SEAFOAM),
+    TR.DEGRADED: ("#B4472F", brand.CORAL),
+    TR.NO_AIDING: ("#B4472F", brand.CORAL),       # + a dash, see TRUST_DASH
+    TR.UNKNOWN: T.TEXT_MUTED,
+}
+
+#: Dash pattern per state, or None for a solid line.
+TRUST_DASH = {
+    TR.NO_AIDING: (2, 4),
+    TR.UNKNOWN: (1, 5),
+}
+
+def trust_dash(state: str):
+    return TRUST_DASH.get(state)
+
+
+#: What each colour means, in words, for the legend and the guide.
+TRUST_WORDS = {
+    TR.ABSOLUTE: "acoustically aided",
+    TR.RELATIVE: "dead-reckoned",
+    TR.DEGRADED: "degraded",
+    TR.NO_AIDING: "no aiding",
+    TR.UNKNOWN: "unknown",
+}
+
+
+def trust_colour(state: str) -> str:
+    return _hex(TRUST_COLOURS.get(state, T.TEXT_MUTED))
+
+
 #: The chart pack stops at z19, but `TileCache` enlarges past a layer's top
 #: zoom, so the map is no longer limited to where the tiles stop. Two
 #: doublings further is 0.05 m per pixel: enough to place a vertex to a tenth
@@ -94,6 +143,10 @@ class MapCanvas(ctk.CTkFrame):
         self.follow = True
         self.show_tiles = True
         self.colour_by_depth = False
+        #: Colour the ROV track by what each position rested on. On by
+        #: default: a single-coloured track implies one level of confidence
+        #: across a dive that did not have one.
+        self.colour_by_trust = True
 
         #: What is drawn. Set by the page from the collector's state.
         self.rov_track: list = []
@@ -351,7 +404,8 @@ class MapCanvas(ctk.CTkFrame):
             self._draw_track(self.vessel_track, _hex(T.WARN), width=2,
                              dash=(4, 3))
             self._draw_track(self.rov_track, _hex(T.ACCENT), width=3,
-                             depth_coloured=self.colour_by_depth)
+                             depth_coloured=self.colour_by_depth,
+                             by_trust=self.colour_by_trust)
             self._draw_markers()
             self._draw_site()
             if self.editor is not None:
@@ -461,12 +515,18 @@ class MapCanvas(ctk.CTkFrame):
                                 fill=_hex(T.TEXT_MUTED), font=T.FONT_SMALL)
 
     def _draw_track(self, points, colour: str, *, width: int = 2,
-                    dash=None, depth_coloured: bool = False) -> None:
+                    dash=None, depth_coloured: bool = False,
+                    by_trust: bool = False) -> None:
         """One track, per segment, decimated to the pixel.
 
         Segments are drawn as separate polylines and never joined. The
         decimation is by screen distance so that an hour of a hovering vehicle
         costs the same as a minute of a moving one.
+
+        With `by_trust`, a segment is further split into runs of points that
+        rested on the same thing, and each run takes its own colour. The runs
+        share their boundary point so the line stays continuous: a gap would
+        read as a break in the track, which means something else entirely.
         """
         if not points:
             return
@@ -476,7 +536,8 @@ class MapCanvas(ctk.CTkFrame):
 
         for seg in sorted(by_segment):
             pts = by_segment[seg]
-            coords: list[float] = []
+            drawn: list[tuple[float, float]] = []
+            states: list[str] = []
             last: tuple[float, float] | None = None
             for p in pts:
                 at = self.xy(p.lat, p.lon)
@@ -484,19 +545,60 @@ class MapCanvas(ctk.CTkFrame):
                     continue
                 if last is not None and math.dist(at, last) < MIN_SEGMENT_PX:
                     continue
-                coords.extend(at)
+                drawn.append(at)
+                states.append(getattr(p, "trust", TR.UNKNOWN))
                 last = at
-                if len(coords) >= MAX_DRAWN_POINTS * 2:
+                if len(drawn) >= MAX_DRAWN_POINTS:
                     break
-            if len(coords) >= 4:
-                kw = {"fill": colour, "width": width, "capstyle": "round",
-                      "joinstyle": "round"}
-                if dash:
-                    kw["dash"] = dash
-                self.canvas.create_line(*coords, **kw)
+            if len(drawn) < 2:
+                continue
+
+            kw = {"width": width, "capstyle": "round", "joinstyle": "round"}
+            if dash:
+                kw["dash"] = dash
+            if not by_trust:
+                flat = [v for at in drawn for v in at]
+                self.canvas.create_line(*flat, fill=colour, **kw)
+                continue
+
+            start = 0
+            for i in range(1, len(drawn) + 1):
+                if i < len(drawn) and states[i] == states[start]:
+                    continue
+                # Include the next point so consecutive runs meet.
+                run = drawn[start:min(i + 1, len(drawn))]
+                if len(run) >= 2:
+                    flat = [v for at in run for v in at]
+                    run_kw = dict(kw)
+                    pattern = trust_dash(states[start])
+                    if pattern:
+                        run_kw["dash"] = pattern
+                    self.canvas.create_line(
+                        *flat, fill=trust_colour(states[start]), **run_kw)
+                start = i
 
         if depth_coloured and self.depth_points:
             self._draw_depth_dots()
+
+    def trust_legend(self) -> list[tuple[str, str]]:
+        """(state, colour) for each state actually present in the track.
+
+        Only what is on screen: a legend listing states that did not happen
+        invites an operator to look for them.
+        """
+        seen = []
+        for p in self.rov_track:
+            st = getattr(p, "trust", TR.UNKNOWN)
+            if st not in seen:
+                seen.append(st)
+        order = {s: i for i, s in enumerate(TR.STATES)}
+        seen.sort(key=lambda s: order.get(s, 99))
+        return [(s, trust_colour(s)) for s in seen]
+
+    def trust_styles(self) -> list[tuple[str, str, str, tuple | None]]:
+        """(state, words, colour, dash) for each state present in the track."""
+        return [(s, TRUST_WORDS.get(s, s), c, trust_dash(s))
+                for s, c in self.trust_legend()]
 
     def _draw_depth_dots(self) -> None:
         """The seabed depth the vehicle measured, as coloured dots.
