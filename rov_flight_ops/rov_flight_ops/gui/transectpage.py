@@ -253,7 +253,7 @@ class TransectPage(ctk.CTkFrame):
         else:
             messagebox.showinfo(APP_NAME, "Nothing has been written yet.")
 
-    def _origin_fallback(self) -> "binlog.OriginFix | None":
+    def _origin_fallback(self) -> binlog.OriginFix | None:
         """The dive's own ORIGIN_LAT/ORIGIN_LON, for when nothing else has one.
 
         Read from whichever .BIN under this flight folder has it, newest

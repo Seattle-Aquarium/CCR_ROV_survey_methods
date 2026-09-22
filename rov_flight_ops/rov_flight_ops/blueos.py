@@ -1872,7 +1872,7 @@ _TETHER_KEYS = {
 
 
 def _tether_get(host: str, kind: str, paths: tuple[str, ...], *,
-                 timeout: float) -> "Answer | None":
+                 timeout: float) -> Answer | None:
     """The first JSON answer among `paths`, tried across both known ports.
 
     `kind` ("rate" or "devices") keeps the two routes' cached (port, path)

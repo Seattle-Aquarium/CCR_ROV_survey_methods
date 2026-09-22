@@ -572,7 +572,10 @@ def _summarise_vehicle(day: S.FlightDay, report: DayReport) -> None:
                 throttled = True
         tx_col = session.columns.get("tether_tx_mbps") or []
         rx_col = session.columns.get("tether_rx_mbps") or []
-        for tx, rx in zip(tx_col, rx_col):
+        # strict=False: the two columns come from the same rows but a
+        # truncated recording can leave one a sample short, and a
+        # report is not worth raising over.
+        for tx, rx in zip(tx_col, rx_col, strict=False):
             tx_ok = isinstance(tx, (int, float))
             rx_ok = isinstance(rx, (int, float))
             if tx_ok:
