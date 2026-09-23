@@ -26,8 +26,9 @@ Three mechanisms can own the origin, and they are not synonyms:
 
 ===================  ========================================================
 `ORIGIN_LAT/LON/ALT`  created by a Lua applet whose `PARAM_TABLE_PREFIX` is
-                      ``ORIGIN_``. This fleet's variant, in the repository at
-                      ``lua_scripts/ahrs-set-origin-ORIGIN_.lua``.
+                      ``ORIGIN_``. This fleet set these by hand in September
+                      2026; no such applet ships here any more, so a vehicle
+                      still holding them has a family nothing reads.
 `AHRS_ORIG_LAT/...`   created by ArduPilot's published applet
                       ``ahrs-set-origin.lua``. The short ``ORIG`` is
                       significant and is not a typo for either of the others.
@@ -88,8 +89,9 @@ FAMILIES = {
 }
 
 FAMILY_NOTE = {
-    "ORIGIN_": ("created by a Lua applet using the ORIGIN_ prefix "
-                "(lua_scripts/ahrs-set-origin-ORIGIN_.lua in this repository)"),
+    "ORIGIN_": ("a Lua applet using the ORIGIN_ prefix — no such applet "
+                "ships in this repository, so unless one was installed by "
+                "hand nothing reads these"),
     "AHRS_ORIG_": ("created by ArduPilot's published ahrs-set-origin.lua "
                    "applet — install this repository's fixed copy, not master"),
     "AHRS_ORIGIN_": ("native firmware origin persistence, ArduPilot 4.7 and "

@@ -199,16 +199,16 @@ at their defaults the script goes straight on and calls `ahrs:set_origin()`
 with 0, 0, 0 — and then returns for good without retrying. The fixed copy calls
 `:get()` first.
 
-Two variants are in `lua_scripts/`:
+One copy is in `lua_scripts/ahrs-set-origin.lua`, creating
+`AHRS_ORIG_LAT/LON/ALT`. Install from there, never from ArduPilot master.
 
-| File | Creates | Use it if |
-|---|---|---|
-| `ahrs-set-origin.lua` | `AHRS_ORIG_LAT/LON/ALT` | you want the upstream names |
-| `ahrs-set-origin-ORIGIN_.lua` | `ORIGIN_LAT/LON/ALT` | you want the names this fleet has been setting |
-
-Either works. The page detects whichever family is present, writes to that one,
-and **warns if more than one exists** — a leftover family from a prefix nobody
-is using reads like configuration and does nothing.
+An `ORIGIN_*` variant used to sit beside it and was removed on
+22 September 2026: this fleet had been setting `ORIGIN_LAT`/`LON` by hand, and
+carrying a second applet only made it easy to end up with two families. The
+page still *detects* `ORIGIN_*`, because a vehicle may still hold those
+parameters — it writes to whichever family is present and **warns if more than
+one exists**, since a family nobody's script reads looks like configuration
+and does nothing.
 
 `SCR_ENABLE` must be 1. The page shows it.
 
