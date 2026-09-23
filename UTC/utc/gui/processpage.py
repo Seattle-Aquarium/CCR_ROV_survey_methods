@@ -15,7 +15,7 @@ disk -- and prints what it found in the same box the run's problems appear in.
 By the time the confirmation dialog opens, its numbers have been on screen
 once already.
 
-**The recipe is not adjustable.** Crop size, colour space and bit depth are
+**The recipe is not adjustable.** Crop size, color space and bit depth are
 fixed by the survey protocol, not by taste, so they are stated rather than
 offered. The only two choices that change the outcome for an operator are
 whether to run Denoise -- the step that claims the screen -- and what to do
@@ -92,7 +92,7 @@ class ProcessPage(ctk.CTkFrame):
                   f"Every frame, identically: crop to {lr.CROP_W}x{lr.CROP_H}, "
                   f"remove chromatic aberration, AI Denoise at "
                   f"{lr.DENOISE_AMOUNT}, export 16-bit ProPhoto RGB TIF. The "
-                  f"sizes and the colour space are the survey protocol, so "
+                  f"sizes and the color space are the survey protocol, so "
                   f"they are not adjustable here.")
         c2.grid(row=1, column=0, sticky="ew", pady=(0, 12))
         c2.body.grid_columnconfigure(0, weight=1)
@@ -476,7 +476,7 @@ class ProcessPage(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _lock_app(self, on: bool) -> None:
-        """Grey out the page rail while Lightroom has the screen.
+        """Gray out the page rail while Lightroom has the screen.
 
         The app already allows only one worker, so this is not about a second
         job -- it is that the batch drives Lightroom's window with synthetic

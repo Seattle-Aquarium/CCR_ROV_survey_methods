@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 SURVEY_ZOOMS = (14, 15, 16, 17, 18, 19)
 
 #: Measured from this program's own cache: raster basemap tiles run 8-30 KiB.
-#: Used only for a labelled estimate shown before a download starts.
+#: Used only for a labeled estimate shown before a download starts.
 TYPICAL_TILE_BYTES = 20 * 1024
 
 
@@ -74,7 +74,7 @@ class PrepareJob:
     already: int = 0
     failed: int = 0
     bytes: int = 0
-    cancelled: bool = False
+    canceled: bool = False
     finished: bool = False
     error: str = ""
     started: float = 0.0
@@ -87,8 +87,8 @@ class PrepareJob:
         label = SOURCES[self.key].label if self.key in SOURCES else self.key
         if self.error:
             return f"{label}: failed — {self.error}"
-        if self.cancelled:
-            return (f"{label}: cancelled after {self.done:,} of "
+        if self.canceled:
+            return (f"{label}: canceled after {self.done:,} of "
                     f"{self.total:,} tiles ({self.fetched:,} downloaded, "
                     f"{self.bytes / 2 ** 20:.1f} MiB kept)")
         if self.finished:
@@ -154,7 +154,7 @@ class OfflinePrepare:
             for z in job.zooms:
                 for x, y in tiles_in_radius(job.lat, job.lon, job.radius_m, z):
                     if self._stop.is_set():
-                        job.cancelled = True
+                        job.canceled = True
                         return
                     path = self.cache.path_for(job.key, z, x, y)
                     try:

@@ -122,7 +122,7 @@ class Probe:
     answers: list[Answer] = field(default_factory=list)
     range_supported: bool | None = None
     #: What the vehicle calls itself. The address is not an identity: two
-    #: vehicles on this programme's network both answer to `blueos`.
+    #: vehicles on this program's network both answer to `blueos`.
     name: str = ""
     skew: float | None = None
     notes: list[str] = field(default_factory=list)
@@ -220,7 +220,7 @@ def find_vehicles(hosts: Iterable[str] = DEFAULT_HOSTS,
     """Every candidate address that answers, as (address, vehicle name).
 
     All of them, not the first, because more than one vehicle can answer at
-    once. On this programme's own network the tethered ROV and a fixed camera
+    once. On this program's own network the tethered ROV and a fixed camera
     both call themselves `blueos`, so picking the first responder chose the
     camera -- and the recordings it offered looked perfectly plausible.
 
@@ -390,7 +390,7 @@ def _first_string(body: str, keys: tuple[str, ...]) -> str:
 #  before the dive: is the vehicle fit to fly?
 # --------------------------------------------------------------------------
 
-#: Roughly what a dive writes per second, measured from this programme's own
+#: Roughly what a dive writes per second, measured from this program's own
 #: recordings: 4.73 GB over 56m49s and 5.30 GB over 67m32s, both about
 #: 1.4 MB/s. Used to turn free space into the only number that matters on a
 #: deck -- how many more minutes can be recorded.
@@ -598,7 +598,7 @@ def read_platform(host: str, sink: list | None = None) -> Platform:
 
     ``FrequencyCapping`` is the Pi capping its clock because it is hot;
     ``UnderVoltage`` is the supply sagging. They look alike in a CPU graph and
-    mean entirely different things, so they are reported apart. This programme
+    mean entirely different things, so they are reported apart. This program
     has seen the first and not the second.
     """
     out = Platform()
@@ -688,7 +688,7 @@ SKEW_ALARM_S = 120.0
 def vehicle_name(host: str) -> str:
     """What the vehicle calls itself.
 
-    Worth showing before anything else. Two vehicles on this programme's own
+    Worth showing before anything else. Two vehicles on this program's own
     network both answer to the hostname `blueos` -- the ROV on the tether and
     a fixed camera on the wifi -- so the address is not an identity and the
     name is the only thing that distinguishes them.
@@ -787,8 +787,8 @@ def save_snapshot(flight_dir: Path, host: str | None = None, *,
                   planned_seconds: float = 0.0) -> Path:
     """Record what the vehicle *was*, beside the flight it flew.
 
-    Versions, parameters and the Pi's state at dive time. Behaviour has
-    already changed underneath this programme twice -- the recorder's repair
+    Versions, parameters and the Pi's state at dive time. Behavior has
+    already changed underneath this program twice -- the recorder's repair
     sweep rewriting old files, and a BlueOS beta -- and tying a data anomaly
     to a version change is straightforward with this and close to impossible
     without it. Written into the flight's own ``logs`` folder, so it travels
@@ -925,7 +925,7 @@ def file_token(host: str, timeout: float = 6.0) -> str:
 
     The vehicle's File Browser is configured without authentication, so a GET
     to /api/login returns a token to anybody who can reach the port. That is
-    BlueOS's decision, not this programme's; what this programme controls is
+    BlueOS's decision, not this program's; what this program controls is
     that it only ever reads.
     """
     a = _get(_base(host, FILE_BROWSER_PORT) + "/api/login", timeout=timeout)
@@ -1041,7 +1041,7 @@ def read_temperature(host: str) -> tuple[float | None, float | None]:
 
     The Pi caps its own clock at about 80C. It sits in a sealed tube with no
     airflow, so this is the number behind the FrequencyCapping events that
-    turned up in this programme's September recordings.
+    turned up in this program's September recordings.
     """
     a = _get(_base(host, LINUX2REST_PORT) + "/system/temperature", timeout=8)
     if not a.ok:
@@ -1251,7 +1251,7 @@ def parameter_history(host: str, token: str = "", *,
 
     The question this exists for is "what did we change, and when?". Answered
     against the logs the vehicle already holds, so it works retrospectively --
-    including for flights that happened before this programme existed.
+    including for flights that happened before this program existed.
     """
     token = token or file_token(host)
     logs = list_dataflash(host, token)[:limit]
@@ -1275,7 +1275,7 @@ def read_versions(host: str) -> dict:
     """Every version that could explain a change in the data.
 
     BlueOS, ArduSub, the flight controller, and each installed extension with
-    its tag. Behaviour has shifted underneath this programme more than once,
+    its tag. Behavior has shifted underneath this program more than once,
     and a version recorded at the time turns "why does August look different?"
     from an argument into a lookup.
     """
@@ -1339,7 +1339,7 @@ def read_versions(host: str) -> dict:
 # Arming is read from the HEARTBEAT that mavlink2rest already holds. Bit 7 of
 # `base_mode` is MAV_MODE_FLAG_SAFETY_ARMED, and it is the only honest marker
 # of when a flight began: the pilot's own action, recorded by the autopilot,
-# rather than somebody remembering to press a button in this programme.
+# rather than somebody remembering to press a button in this program.
 #
 # The parameters are then read the same way the rest of this module reads
 # them -- out of the autopilot's own dataflash log -- but *whole* rather than
@@ -1720,7 +1720,7 @@ def read_tether(host: str, timeout: float = 1.5) -> dict:
     Returns {} when the extension is not installed or not running, which is
     not a failure -- it is a vehicle without that extension. When it does
     answer, the body is kept verbatim under `raw` beside any rate that could
-    be recognised, because a key this does not know yet is still evidence
+    be recognized, because a key this does not know yet is still evidence
     once a person reads the file.
     """
     known = _TETHER_FOUND.get(host, "unknown")

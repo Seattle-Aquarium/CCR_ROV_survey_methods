@@ -242,7 +242,7 @@ _PREF_DISABLED_IDS = "AgSdkPluginLoader_disabledPluginIDs"
 
 
 def _pref_block(text: str, key: str) -> str:
-    """The serialised list stored under `key`, or "" if it is not there.
+    """The serialized list stored under `key`, or "" if it is not there.
 
     The list ends with a closing brace at the start of a line. Terminating on
     the first ``",`` instead looks right and is not: every entry is written

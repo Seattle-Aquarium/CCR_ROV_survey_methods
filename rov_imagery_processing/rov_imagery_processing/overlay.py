@@ -197,19 +197,19 @@ class OverlaySequence:
     footer_size: tuple[int, int] | None
 
 
-class _Cancelled(Exception):
+class _Canceled(Exception):
     """Internal: the operator pressed Stop. Re-raised as CancelledError."""
 
 
-def _raise_cancelled():
+def _raise_canceled():
     from .ffmpeg_tools import CancelledError
-    raise CancelledError("cancelled")
+    raise CancelledError("canceled")
 
 
 def _render_serial(out_dir, cfg, m, fsize, n, frame_of, progress, cancel) -> None:
     for k in range(n):
         if cancel is not None and cancel.is_set():
-            _raise_cancelled()
+            _raise_canceled()
         _render_frames((out_dir, cfg, m, fsize, [frame_of(k)]))
         if progress and (k % max(1, n // 40) == 0):
             progress(k / n, f"overlays {k}/{n}")
@@ -249,7 +249,7 @@ def _render_parallel(out_dir, cfg, m, fsize, n, frame_of, nw,
                     if progress:
                         progress(done / n, f"overlays {done}/{n} on {nw} cores")
                 if cancel is not None and cancel.is_set():
-                    raise _Cancelled
+                    raise _Canceled
         except BaseException:
             for fut in pending:
                 fut.cancel()
@@ -365,8 +365,8 @@ def render_sequence(
         try:
             _render_parallel(out_dir, cfg, m, fsize, n, _frame, nw,
                              progress, cancel)
-        except _Cancelled:
-            _raise_cancelled()
+        except _Canceled:
+            _raise_canceled()
         except Exception as ex:                      # pragma: no cover
             # A pool that will not start is not a reason to fail the run --
             # fall back to the single-process path and say so.

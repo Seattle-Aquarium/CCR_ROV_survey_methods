@@ -78,7 +78,7 @@ class ClipFormat:
     crf: int = 20
     preset: str = "medium"
     fps: int | None = None
-    #: GIF only. Fewer colours shrink the file a lot and cost little on
+    #: GIF only. Fewer colors shrink the file a lot and cost little on
     #: underwater footage, which is mostly greens and blues anyway.
     max_colors: int = 128
 
@@ -96,7 +96,7 @@ CLIP_FORMATS: dict[str, ClipFormat] = {
     "720p": ClipFormat(
         "720p", "720p", "smaller, still sharp", 720, crf=21),
     "social": ClipFormat(
-        "social", "Social", "1080p, web-optimised — safe on any platform",
+        "social", "Social", "1080p, web-optimized — safe on any platform",
         1080, crf=23, preset="slow"),
     # 480x270 at 10 fps. Measured on a 15 s underwater clip: 640px/12fps came
     # out at 31 MB, this at 12 MB. GIF stores every frame whole, so size grows
@@ -245,7 +245,7 @@ def _gif(src: Path, start: float, dur: float, out: Path, fmt: ClipFormat,
          scratch: Path, cancel=None) -> None:
     """Two passes: build a palette from this clip, then map onto it.
 
-    A single pass uses a fixed 256-colour web palette and underwater footage --
+    A single pass uses a fixed 256-color web palette and underwater footage --
     all greens and blues -- bands horribly under it.
     """
     scratch.mkdir(parents=True, exist_ok=True)
@@ -298,7 +298,7 @@ def make_clip(
 
     for i, fmt in enumerate(chosen):
         if cancel is not None and cancel.is_set():
-            raise ff.CancelledError("cancelled")
+            raise ff.CancelledError("canceled")
         out = out_dir / clip_name(source.path, start_s, end_s, fmt, label)
         if out.exists() and not overwrite:
             rep.outputs.append(ClipOutput(fmt.key, out))

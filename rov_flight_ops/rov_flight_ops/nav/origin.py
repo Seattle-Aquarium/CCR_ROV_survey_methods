@@ -143,10 +143,10 @@ def validate(lat, lon, alt=0.0) -> tuple[float, float, float]:
 
 #: Parameters are float32 in ArduPilot's storage. At Seattle's latitude a
 #: float32 degree holds about 1 m of longitude — fine for an origin, and not
-#: fine to describe as centimetre accurate. Reported, not hidden.
+#: fine to describe as centimeter accurate. Reported, not hidden.
 FLOAT32_NOTE = (
     "Origin parameters are stored as 32-bit floats, so a typed coordinate "
-    "comes back rounded — about a metre at this latitude. That offsets the "
+    "comes back rounded — about a meter at this latitude. That offsets the "
     "whole track equally and does not affect its shape.")
 
 
@@ -419,7 +419,7 @@ def set_origin_now(mav, lat: float, lon: float, alt_m: float = 0.0,
     immediately. It does **not** persist: a reboot loses it, which is what the
     applet parameters are for.
 
-    Altitude goes in as millimetres above the WGS-84 ellipsoid, and is the one
+    Altitude goes in as millimeters above the WGS-84 ellipsoid, and is the one
     field worth being careful about. The DVL extension's own origin helper
     hard-codes zero here; for a dive that is harmless, because the vertical
     channel comes from the barometer and never from the origin, but it is a

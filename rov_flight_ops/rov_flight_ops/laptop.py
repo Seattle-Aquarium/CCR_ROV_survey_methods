@@ -3,7 +3,7 @@ What the laptop flying the ROV is doing, once a second.
 
 BlueOS records the vehicle. Nothing records the machine on the other end of
 the tether, and that machine is a field laptop in a case, in the sun, running
-a video client -- the two failures this programme has actually had on deck
+a video client -- the two failures this program has actually had on deck
 were a laptop too hot to keep its clock up and a tether link that went quiet.
 Neither leaves a trace in any log that exists today.
 
@@ -73,7 +73,7 @@ PROCESS_REFRESH_S = 10.0
 #: were measured on the station this was written for: the WMI battery query
 #: costs 59 ms and has been seen to take 148, and enumerating adapter stats
 #: costs 19. Folding those into one sample in five would have made that
-#: sample eight times dearer than its neighbours, which is a worse property
+#: sample eight times dearer than its neighbors, which is a worse property
 #: for a fixed-cadence recorder than simply being slower everywhere. On their
 #: own thread they cost the sample nothing at all.
 SLOW_REFRESH_S = 5.0
@@ -605,7 +605,7 @@ class Sampler:
     def _slow_loop(self) -> None:
         """The slow readings, on their own thread.
 
-        COM is initialised here because it is per-thread: the battery query
+        COM is initialized here because it is per-thread: the battery query
         goes through WMI, and a thread that has not called CoInitialize gets a
         failure rather than a reading. That is exactly what happened when this
         moved off the sample path -- the column went blank and the sample got

@@ -440,7 +440,7 @@ MAY_WRITE = {
 def test_only_the_named_modules_ever_send_anything_but_a_get():
     """Read-only everywhere except two files, each allowed one verb.
 
-    The point of counting the words rather than the behaviour is that it
+    The point of counting the words rather than the behavior is that it
     cannot be got round by accident: a new module that starts POSTing to the
     vehicle fails here on the day it is written, not on the day it breaks
     somebody's dive.

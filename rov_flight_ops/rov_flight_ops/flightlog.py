@@ -32,7 +32,7 @@ hidden.
 
 **A dropped request is not a disarm.** `read_arm_state` returns None when it
 cannot tell, and None never ends a flight. The tether drops packets -- this
-programme has measured it doing so -- and a recorder that stopped on one lost
+program has measured it doing so -- and a recorder that stopped on one lost
 GET would stop mid-transect.
 
 **Nothing here can fail a flight.** Every write is best-effort and every read is
@@ -362,7 +362,7 @@ class FlightRecorder:
         self._record: dict = {}
 
         self.status.host = host
-        #: Serialises beginning and ending flights, and who watches.
+        #: Serializes beginning and ending flights, and who watches.
         self._lock = threading.RLock()
         self._watch: _Watch | None = None
         self._session: _Session | None = None

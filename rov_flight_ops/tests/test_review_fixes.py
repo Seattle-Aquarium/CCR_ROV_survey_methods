@@ -2,7 +2,7 @@
 The failure cases from the independent evaluation of 13 September 2026.
 
 Each test here reproduces one scenario the review demonstrated with its own
-fault probes, and holds the repaired behaviour: a delete that cannot establish
+fault probes, and holds the repaired behavior: a delete that cannot establish
 a safe, current state does nothing; C3 imagery never sweeps in files beside
 it; a recording never overwrites another or fails silently; a flight keeps its
 own folder and vehicle; a changed recording is not read from an old cache; an
@@ -360,7 +360,7 @@ def test_two_programs_cannot_extract_one_flight_at_once(tmp_path):
 
 
 # --------------------------------------------------------------------------
-#  F08  mcap end times come from the file, and estimates are labelled
+#  F08  mcap end times come from the file, and estimates are labeled
 # --------------------------------------------------------------------------
 
 

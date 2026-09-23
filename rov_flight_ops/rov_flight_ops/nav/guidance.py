@@ -10,7 +10,7 @@ of them produces a readout that is confidently wrong:
 
 **Left and right are relative to the line, not the bow.** A vehicle crabbing
 sideways down a transect is still on the line. Cross-track offset is signed
-about the line's own direction of travel, so "3 m right" means three metres to
+about the line's own direction of travel, so "3 m right" means three meters to
 the right *of the intended track looking along it*, whichever way the ROV
 happens to be pointing.
 
@@ -69,13 +69,13 @@ class Guidance:
     line_bearing_deg: float | None = None
     line_length_m: float = 0.0
 
-    #: Along the line from its start, metres. Can exceed the length (overrun)
+    #: Along the line from its start, meters. Can exceed the length (overrun)
     #: or go negative (not started).
     along_m: float = 0.0
     remaining_m: float = 0.0
     progress: float = 0.0            # 0..1, clamped
 
-    #: Signed metres from the line: positive is to the right of the direction
+    #: Signed meters from the line: positive is to the right of the direction
     #: of travel.
     cross_track_m: float = 0.0
 
@@ -100,7 +100,7 @@ class Guidance:
 
 def cross_track(anchor: Anchor, start: tuple, end: tuple,
                 lat: float, lon: float) -> tuple[float, float, float]:
-    """(along, cross, line length) in metres, in the line's local frame.
+    """(along, cross, line length) in meters, in the line's local frame.
 
     `cross` is positive to the right of the direction of travel. Computed by
     projecting onto the line in the local east/north frame, which is exact
@@ -198,7 +198,7 @@ class Progress:
 
     furthest_m: float = 0.0
     length_m: float = 0.0
-    #: Real path length travelled while following, for comparison. Wandering
+    #: Real path length traveled while following, for comparison. Wandering
     #: shows up as this being much larger than `furthest_m`.
     path_m: float = 0.0
     samples: int = 0

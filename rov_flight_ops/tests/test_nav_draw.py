@@ -5,7 +5,7 @@ Driven through `PlanEditor` against a stub map, so the interaction is tested
 without a window. The geometry itself lives in `test_nav_plan.py`; this is
 about the pointer -- that pan and draw stay separate modes, that Escape gives
 you back what you had, and that a shape drawn on screen comes out with the
-metres it looked like it had.
+meters it looked like it had.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ navdraw = pytest.importorskip("rov_flight_ops.gui.navdraw")
 #: Pier 59. Everything here is drawn around it.
 LAT, LON = 47.6075661, -122.3438752
 
-#: Metres per pixel for the stub projection. 0.2 is roughly the map at z19.
+#: Meters per pixel for the stub projection. 0.2 is roughly the map at z19.
 MPP = 0.2
 
 
@@ -42,7 +42,7 @@ class _Canvas:
 
 
 class _Map:
-    """A flat projection at a fixed scale, centred on Pier 59.
+    """A flat projection at a fixed scale, centered on Pier 59.
 
     Good enough for the editor, which only ever asks it to turn a pixel into
     a latitude and back. East is +x, north is -y, as on any screen.
@@ -52,7 +52,7 @@ class _Map:
 
     def __init__(self, mpp: float = MPP):
         self.canvas = _Canvas()
-        self.centre = (LAT, LON)
+        self.center = (LAT, LON)
         self._a = P.Anchor(LAT, LON)
         self._mpp = mpp
         self.draws = 0
@@ -126,7 +126,7 @@ def test_an_unknown_tool_is_ignored_rather_than_armed(editor):
 
 
 def test_escape_gives_back_exactly_what_was_there(editor):
-    """A cancelled draft leaves the plan untouched -- not "mostly" untouched,
+    """A canceled draft leaves the plan untouched -- not "mostly" untouched,
     and not with a stub feature to tidy up afterwards."""
     editor.set_tool("line")
     _click(editor, 400, 300)
@@ -152,7 +152,7 @@ def test_switching_tool_abandons_a_half_drawn_shape(editor):
 # --------------------------------------------------------------------------
 
 
-def test_two_clicks_make_a_line_of_the_metres_it_looked_like(editor):
+def test_two_clicks_make_a_line_of_the_meters_it_looked_like(editor):
     """150 pixels at 0.2 m per pixel is 30 m, due east: 30 m on 090 true."""
     editor.set_tool("line")
     _click(editor, 400, 300)
@@ -286,7 +286,7 @@ def test_a_polygon_needs_three_corners_and_keeps_the_work_meanwhile(editor):
     assert poly.measurements()["area_m2"] == pytest.approx(200.0, rel=0.01)
 
 
-def test_a_refused_box_says_why_rather_than_just_cancelled(editor):
+def test_a_refused_box_says_why_rather_than_just_canceled(editor):
     """The explanation used to be set and then overwritten by `cancel_draft`,
     so a box refused for being too small looked like one the operator had
     abandoned on purpose."""
@@ -294,13 +294,13 @@ def test_a_refused_box_says_why_rather_than_just_cancelled(editor):
     _drag(editor, 400, 300, 402, 302)
     assert editor.plan.features == []
     assert "Too small" in editor.status
-    assert editor.status != "Cancelled."
+    assert editor.status != "Canceled."
 
-    # Escape still says "cancelled", because that is what it is.
+    # Escape still says "canceled", because that is what it is.
     editor.set_tool("line")
     _click(editor, 400, 300)
     editor.cancel_draft()
-    assert editor.status == "Cancelled."
+    assert editor.status == "Canceled."
 
 
 # --------------------------------------------------------------------------

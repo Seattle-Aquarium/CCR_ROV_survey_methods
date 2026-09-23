@@ -46,7 +46,7 @@ only shows up when the analysis disagrees with the footage.
 and double-clicks it. No Python, no ffmpeg, no fonts, no timezone database, no
 build step.
 
-The aim is that another organisation can pick this up and *run* the method
+The aim is that another organization can pick this up and *run* the method
 rather than approximate it. What is not automated is written down, and where a
 number is an estimate rather than a measurement, the file says so.
 
@@ -250,7 +250,7 @@ files itself.
 > the vehicle and asserts the method was GET every time; the token File Browser
 > hands out carries create, modify and delete rights, and nothing here uses
 > them. A bug that destroys the only copy of a dive is the one failure this
-> programme must not have.
+> program must not have.
 
 The API is **discovered, not assumed**. BlueOS moves between releases and
 extensions register themselves at runtime, so the probe walks what the vehicle
@@ -295,7 +295,7 @@ what a large one means.
 ### Which recordings, and where they go
 
 Recordings are listed by their **recorded span**, not their modification time,
-and each is labelled with the transects it covers. The span comes from the
+and each is labeled with the transects it covers. The span comes from the
 file's first 96 KiB over an HTTP range request — about 75 ms per file against
 the minutes a full download costs. All 26 recordings on one vehicle resolved
 their spans in half a second, and the estimated end time landed within two
@@ -310,7 +310,7 @@ The destination is checked **before** anything is fetched, and files are
 verified **after** they land:
 
 * **FAT32 cannot hold a recording of 4 GiB or more**, however much room the
-  drive reports free — two of this programme's own recordings are past it
+  drive reports free — two of this program's own recordings are past it
   (4.94 and 4.41 GiB). The failure presents as a permissions problem rather
   than a size one, which is exactly how it turned up in the field.
 * Free space, file system and writability are all settled first, leaving 512 MB
@@ -325,8 +325,8 @@ Dropbox later.
 ### A snapshot of what the vehicle was
 
 **Save a snapshot** writes `logs/vehicle_snapshot.json` into the flight's own
-folder, so it travels with the data. Behaviour has already changed underneath
-this programme twice — the recorder's repair sweep rewriting old files, and a
+folder, so it travels with the data. Behavior has already changed underneath
+this program twice — the recorder's repair sweep rewriting old files, and a
 BlueOS beta — and tying a data anomaly to a version change is straightforward
 with this and close to impossible without it.
 
@@ -367,7 +367,7 @@ be confused.
 
 BlueOS records the vehicle. Nothing recorded the machine on the other end of the
 tether — and that machine is a field laptop in a case, in the sun, running a
-video client. The two topside failures this programme has actually had were a
+video client. The two topside failures this program has actually had were a
 laptop too hot to hold its clock up and a tether link that went quiet, and
 neither left a trace in any log that existed.
 
@@ -383,7 +383,7 @@ missing on exactly the busy days it matters most. The arm bit is read from the
 HEARTBEAT that `mavlink2rest` already holds, so watching it is one small GET
 every two seconds and sends the vehicle nothing.
 
-Two behaviours follow from what actually happens on a boat:
+Two behaviors follow from what actually happens on a boat:
 
 * **A brief disarm does not end a flight.** A surface interval between
   transects, a bump of the switch, a failsafe that trips and clears — ending on
@@ -624,7 +624,7 @@ Point the app at the folder for one dive. The expected layout is:
 ```
 
 Older layouts (`video/`, `downward/video/`, mcaps loose in the root) are
-recognised too. Whatever it finds is listed in the panel — **read it before
+recognized too. Whatever it finds is listed in the panel — **read it before
 running.** Compositing the wrong camera is an expensive mistake to discover an
 hour into an encode, so discovery reports rather than assumes.
 
@@ -654,7 +654,7 @@ to find that out — before imagery is filed and a card is wiped.
 
 <p align="center">
   <img src="docs/img/dive_profile.png" width="900"
-       alt="Dive profile for a real flight: depth against time for the whole recording, with five transect windows shaded and labelled with their durations. Each band sits on a flat bottom stretch." />
+       alt="Dive profile for a real flight: depth against time for the whole recording, with five transect windows shaded and labeled with their durations. Each band sits on a flat bottom stretch." />
 </p>
 
 <p align="center">
@@ -731,9 +731,9 @@ parameter and topside records.
 Drawn with matplotlib into a **vector** PDF, so the text is selectable and the
 figure is sharp at any zoom. Montserrat is embedded from the fonts this
 application already ships, so the sheet reads the same on a machine that has
-never installed it. Colours, weights and hierarchy follow SAQ-001 through
+never installed it. Colors, weights and hierarchy follow SAQ-001 through
 `brand.py`; severity uses Coral rather than red, because the palette has a
-warm accent and the guidelines ask that the brand's own colours do the work.
+warm accent and the guidelines ask that the brand's own colors do the work.
 
 ---
 
@@ -853,7 +853,7 @@ source:
   they are already inside the flight and a second copy is waste.
 
 Which one applies is decided by **where the source sits, not by a toggle**, so
-the safe behaviour cannot be switched off by accident. Frames are filed into
+the safe behavior cannot be switched off by accident. Frames are filed into
 transect folders by their capture time against the survey plan, renamed so a raw
 and its preview stay paired, and stamped with the telemetry banner. See
 [Folder structure](#folder-structure) for the naming and for why `JPG_edited` is
@@ -873,7 +873,7 @@ next run.
 | Denoise | **AI Denoise, amount 50** | The protocol's value; the step that claims the machine. |
 | Export | **16-bit ProPhoto RGB TIF** | Delivery format for downstream analysis. |
 
-The recipe is **not adjustable**. Crop size, colour space and bit depth are set
+The recipe is **not adjustable**. Crop size, color space and bit depth are set
 by the survey protocol rather than by taste, so they are stated rather than
 offered; the only two choices that change the outcome for an operator are
 whether to run Denoise and what to do about TIFs that already exist.
@@ -1008,7 +1008,7 @@ Deliberately a different job from a transect trim, and a different module:
 | encoding | stream copy, never re-encoded | re-encoded, so the cut lands on the frame asked for |
 | lands in | `videos/transects/T*/` | `videos/clips/` |
 
-Any combination of 1080p, 720p, a web-optimised "social" rendition, and an
+Any combination of 1080p, 720p, a web-optimized "social" rendition, and an
 animated GIF. The GIF is 480×270 at 10 fps and costs roughly 0.8 MB per second —
 GIF stores every frame whole, so the tool reports the size afterwards and
 suggests the MP4 instead when it has run away.
@@ -1065,7 +1065,7 @@ of day** (`10:02:27`); anything shorter is an offset into the file (`1:30`,
                 GPR/                sorted raws
                 TIF/                developed 16-bit ProPhoto exports
                 JPG_preview/        sorted previews, banner applied
-                JPG_edited/         your colour-corrected exports
+                JPG_edited/         your color-corrected exports
                 JPG_edited_banner/  generated banner copies
             off_transect/       optional home for frames outside a transect
     videos/
@@ -1194,7 +1194,7 @@ before opening one:
 | `transects/<Transect_ID>.csv` | **Transects** | one transect each | one per second of that transect |
 
 The flight CSV is the diagnostic record of the dive. The transect CSVs are the
-analysis product: georeferenced, tide-standardised, and shaped to drop into the
+analysis product: georeferenced, tide-standardized, and shaped to drop into the
 VIAME and percent-cover joins.
 
 ---
@@ -1202,8 +1202,8 @@ VIAME and percent-cover joins.
 ## The flight telemetry CSV
 
 One row per second across the whole recorded span, so descents, ascents and
-between-transect manoeuvring stay in the record. Rows outside a transect are
-labelled `off_transect`.
+between-transect maneuvering stay in the record. Rows outside a transect are
+labeled `off_transect`.
 
 Columns: UTC and TC-25 time, date, project/site/transect, **power (V × A)**,
 voltage, current, depth, altitude, pressure, water temperature, heading, roll,
@@ -1268,8 +1268,8 @@ between a measurement and an estimate:
 | `DVLlon` | As above. | as above | Computed | — |
 | `GPS_fix_type` | Fix state of the acoustic tracker. `NO_GPS` means the positions are dead reckoning. | `GPS_RAW_INT.fix_type` | Direct | last |
 | `GPS_satellites` | Locator count the tracker reports. | `GPS_RAW_INT.satellites_visible` | Direct | last |
-| `DVLx` | Metres north of the transect start. Re-zeroed at each transect. | `LOCAL_POSITION_NED.x` when recorded — else `VISION_POSITION_DELTA` integrated and rotated by `ATTITUDE.yaw` | Fused / Computed | last |
-| `DVLy` | Metres east of the transect start. | `LOCAL_POSITION_NED.y`, or the same integration | Fused / Computed | last |
+| `DVLx` | Meters north of the transect start. Re-zeroed at each transect. | `LOCAL_POSITION_NED.x` when recorded — else `VISION_POSITION_DELTA` integrated and rotated by `ATTITUDE.yaw` | Fused / Computed | last |
+| `DVLy` | Meters east of the transect start. | `LOCAL_POSITION_NED.y`, or the same integration | Fused / Computed | last |
 | `DVL_source` | Which of the two fed `DVLx`/`DVLy` on this dive. | this tool | Computed | — |
 | `DVL_confidence` | The DVL's own confidence in its bottom lock, as a percentage. | `VISION_POSITION_DELTA.confidence` | Direct | mean |
 
@@ -1281,13 +1281,13 @@ between a measurement and an estimate:
 | `Roll` | Degrees. | `ATTITUDE.roll` → degrees | Fused | mean |
 | `Pitch` | Degrees. | `ATTITUDE.pitch` → degrees | Fused | mean |
 | `Velocity_mps` | Speed over ground. Cleaner than the HUD's figure, which carries filter spikes. | `VISION_POSITION_DELTA` horizontal magnitude ÷ its own `time_delta_usec`; falls back to `VFR_HUD.groundspeed` | Direct | mean |
-| `Distance` | Metres travelled during this second. Sum it for transect length. | change in `DVLx`/`DVLy` from the previous row; steps under 2 cm count as zero | Computed | — |
+| `Distance` | Meters traveled during this second. Sum it for transect length. | change in `DVLx`/`DVLy` from the previous row; steps under 2 cm count as zero | Computed | — |
 
 **Depth**
 
 | Column | What it is | Where it comes from | Origin | Per second |
 | --- | --- | --- | --- | --- |
-| `Depth` | Metres, **negative down**. | first available of `VFR_HUD.alt` (< −0.5), `GLOBAL_POSITION_INT.relative_alt` ÷ 1000, −`LOCAL_POSITION_NED.z`, or derived from `SCALED_PRESSURE2` | Fused | last |
+| `Depth` | Meters, **negative down**. | first available of `VFR_HUD.alt` (< −0.5), `GLOBAL_POSITION_INT.relative_alt` ÷ 1000, −`LOCAL_POSITION_NED.z`, or derived from `SCALED_PRESSURE2` | Fused | last |
 | `Depth_std` | Seabed depth on the MLLW datum, so dives at different tide stages compare. | −`Altitude` + `Depth` + NOAA water level | External / Computed | — |
 | `Depth_Source` | Which of those four answered, row by row. | this tool | Computed | — |
 
@@ -1295,9 +1295,9 @@ between a measurement and an estimate:
 
 | Column | What it is | Where it comes from | Origin | Per second |
 | --- | --- | --- | --- | --- |
-| `Altitude` | Metres above the seabed. Drives `Width` and `Area_m2`. | `RANGEFINDER.distance` — the DVL A50's own range; falls back to `DISTANCE_SENSOR` id 0 ÷ 100 | Direct | mean |
-| `Width` | Metres of seabed across the frame. | `1.10 m × (Altitude ÷ 0.82 m)` — scales linearly with altitude | **Calibrated** | mean of samples |
-| `Area_m2` | Square metres of seabed in the frame, at that instant. | `0.99 m² × (Altitude ÷ 0.82 m)²` — scales with the square of altitude | **Calibrated** | mean of samples |
+| `Altitude` | Meters above the seabed. Drives `Width` and `Area_m2`. | `RANGEFINDER.distance` — the DVL A50's own range; falls back to `DISTANCE_SENSOR` id 0 ÷ 100 | Direct | mean |
+| `Width` | Meters of seabed across the frame. | `1.10 m × (Altitude ÷ 0.82 m)` — scales linearly with altitude | **Calibrated** | mean of samples |
+| `Area_m2` | Square meters of seabed in the frame, at that instant. | `0.99 m² × (Altitude ÷ 0.82 m)²` — scales with the square of altitude | **Calibrated** | mean of samples |
 
 **The water**
 
@@ -1408,7 +1408,7 @@ sounds. A dive is mostly not transect:
 
 85 minutes of recording held about 42 minutes of transect, so the whole-dive
 figures were measuring the surface intervals between them and said nothing about
-the data being analysed.
+the data being analyzed.
 
 ### One judgement is built in
 
@@ -1439,17 +1439,17 @@ one:
 * **The four chapters are drawn, not stacked.** Tk has no rounded rectangle and
   no anti-aliasing, so each button is rendered with Pillow and placed as an
   image. That also buys exact control over type size, hover and the disabled
-  state, and lets the banner's numbered roadmap wear the same colour as the
+  state, and lets the banner's numbered roadmap wear the same color as the
   chapter it points at.
-* **Type colour is measured against its own fill**, so Seafoam takes dark type
-  where Salish takes White. The palette in `theme.CHAPTER_COLOURS` can be
+* **Type color is measured against its own fill**, so Seafoam takes dark type
+  where Salish takes White. The palette in `theme.CHAPTER_COLORS` can be
   swapped without anyone remembering to swap the type with it.
 * **Sizes come from the rendered font, not from constants.** A laptop at 250%
   display scaling gets a rail sized for its own type. An earlier version
   hard-coded a row height and pushed the last chapter off the bottom of the rail
   on exactly such a machine.
 
-Overlay geometry and colours live in `utc/config.py` (`Layout`), and the
+Overlay geometry and colors live in `utc/config.py` (`Layout`), and the
 panel contents in `PANEL_ROWS`.
 
 ---
@@ -1460,7 +1460,7 @@ panel contents in `PANEL_ROWS`.
   on ffmpeg's autorotate is a trap: it rotates the frames fed to the filter graph
   *and* copies the matrix onto the output, so a player rotates the finished
   composite a second time and everything — overlays included — appears upside
-  down. We neutralise the input matrix and apply the rotation ourselves.
+  down. We neutralize the input matrix and apply the rotation ourselves.
 * Video is HEVC Main 10. The pipeline stays 10-bit for 4K and 1080p so the tonal
   range that shooting with Native white balance exists to preserve survives.
 * Light power is **not** on servo 16. `SERVO_OUTPUT_RAW` carries only port 0 (the
@@ -1568,7 +1568,7 @@ Both run in CI on every push and pull request (`.github/workflows/utc-ci.yml`,
 Python 3.11 and 3.13), which also builds the executable.
 
 The suite is hermetic by design — it builds its own mcaps, breaks them the same
-way a real recorder does, and synthesises dataflash messages, so none of it
+way a real recorder does, and synthesizes dataflash messages, so none of it
 needs a flight folder. The files that *do* need real data or a screen
 (`*_live.py`, `debug_*`, the visual renderers, the GUI smoke test) are skipped
 unless `--runlive` is given; collecting them on a machine without the data cost

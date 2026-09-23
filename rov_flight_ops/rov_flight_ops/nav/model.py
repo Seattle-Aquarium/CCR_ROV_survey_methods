@@ -3,7 +3,7 @@ What one reading is, and the five things it can be.
 
 Every number on the Navigation chapter arrives here first. The type exists
 because of one failure mode that field software falls into again and again: a
-gauge initialised to zero looks exactly like a gauge reading zero. An altitude
+gauge initialized to zero looks exactly like a gauge reading zero. An altitude
 of 0.0 m is either "the ROV is on the bottom" or "nothing has ever answered",
 and those must never share a pixel.
 
@@ -14,7 +14,7 @@ that a clock change cannot corrupt) and **whether it means anything**:
 
 =================  ===========================================================
 `UNSUPPORTED`      this vehicle/firmware/extension cannot produce it at all.
-                   Shown greyed with a reason, never as a fault.
+                   Shown grayed with a reason, never as a fault.
 `NEVER_RECEIVED`   it could exist, and nothing has arrived. The start-up state.
 `INVALID`          it arrived and says so -- a sentinel, an out-of-range value,
                    a validity flag that is false, a DVL with no bottom lock.
@@ -301,7 +301,7 @@ def age_out(r: Reading, max_age: float, *, now_mono: float | None = None,
 # --------------------------------------------------------------------------
 
 #: Latitude/longitude within a hundredth of a degree of the null island at
-#: 0 N 0 E. Every part of this stack initialises coordinates to zero -- the
+#: 0 N 0 E. Every part of this stack initializes coordinates to zero -- the
 #: WL UGPS external extension's `/status` returns latitude 0 and longitude 0
 #: before a single GGA sentence has arrived -- and a map that plots it puts
 #: the vessel in the Gulf of Guinea. Rejected wherever coordinates enter.
@@ -347,7 +347,7 @@ class Fix:
     source: Source = UNKNOWN_SOURCE
     recv_mono: float | None = None
     recv_time: float | None = None
-    #: Horizontal uncertainty in metres, only when something actually
+    #: Horizontal uncertainty in meters, only when something actually
     #: estimated one. Never invented to draw a circle.
     accuracy_m: float | None = None
     note: str = ""
@@ -462,7 +462,7 @@ class NavSnapshot:
     rov_fix: Fix | None = None
     vessel_fix: Fix | None = None
     vessel_heading: Reading = unknown       # deg true, from HDT only
-    local_ned: Reading = unknown            # (n, e, d) metres, as a tuple
+    local_ned: Reading = unknown            # (n, e, d) meters, as a tuple
 
     # -- navigation suite ---------------------------------------------------
     dvl: dict[str, Reading] = field(default_factory=dict)

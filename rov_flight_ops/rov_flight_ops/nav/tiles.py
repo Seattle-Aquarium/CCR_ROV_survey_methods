@@ -7,7 +7,7 @@ Three constraints shaped this, and they pull against each other.
 that comes and goes, and the map is not allowed to be the reason the operator
 cannot see where the ROV is. So tiles are cached to disk permanently, the
 cache is consulted first and the network second, and a view with no tiles at
-all still draws -- a metre grid, a scale bar and the tracks, which is most of
+all still draws -- a meter grid, a scale bar and the tracks, which is most of
 what the map is for.
 
 **It has to be polite.** These are other people's tile servers. Tiles are
@@ -27,7 +27,7 @@ survey program and the thing an operator wants behind an ROV track is water
 depth, not street names:
 
 * **Esri World Ocean Base** carries bathymetric shading -- a genuine depth
-  colour gradient, visibly resolving the shelf break in Puget Sound at zoom
+  color gradient, visibly resolving the shelf break in Puget Sound at zoom
   13 and 14. It is the closest thing to the requested depth gradient that is
   available as plain XYZ tiles worldwide.
 * **OpenSeaMap seamarks** overlay buoys, beacons and anchorages, transparently,
@@ -39,8 +39,8 @@ depth, not street names:
 
 The site's own bathymetry is better than any of them and this program already
 has it: depth below the surface minus altitude above the seabed is the seabed
-depth at that position, measured by the vehicle. `MapCanvas` colours the track
-by it. Nothing public resolves Elliott Bay at the metre scale these surveys
+depth at that position, measured by the vehicle. `MapCanvas` colors the track
+by it. Nothing public resolves Elliott Bay at the meter scale these surveys
 work at.
 """
 
@@ -81,7 +81,7 @@ TILE_PX = 256
 
 #: How many doublings past a layer's top zoom are still worth showing. Three
 #: is an eight-fold enlargement: still recognisably the same shoreline. Beyond
-#: that a tile is a handful of coloured squares and a blank grid is honester.
+#: that a tile is a handful of colored squares and a blank grid is honester.
 MAX_OVERZOOM = 3
 
 
@@ -118,7 +118,7 @@ SOURCES: dict[str, TileSource] = {
         "and other contributors",
         max_zoom=16, ext="jpg",
         note="Bathymetric shading — darker is deeper. Resolves the shelf "
-             "break but not metre-scale relief."),
+             "break but not meter-scale relief."),
     "noaa_enc": TileSource(
         "noaa_enc", "NOAA ENC chart",
         "https://tileservice.charts.noaa.gov/tiles/50000_1/{z}/{x}/{y}.png",
@@ -289,7 +289,7 @@ class TileCache:
         # Only go to the disk when it is worth it. A tile that is not there
         # stays not there, and stat-ing forty absent files on every redraw --
         # which is what a first version did, 7,900 times across two minutes of
-        # profiling -- is pure waste on a laptop with a synchronised drive.
+        # profiling -- is pure waste on a laptop with a synchronized drive.
         if ident not in self._missing:
             img = self._load_disk(ident)
             if img is not None:
@@ -312,14 +312,14 @@ class TileCache:
         without this the operator has to choose between seeing the site and
         seeing the plan.
 
-        Nearest-neighbour on purpose. Smooth interpolation would invent edges
+        Nearest-neighbor on purpose. Smooth interpolation would invent edges
         that look like resolution the pack does not have, and on a chart that
         is the difference between a blurred label and a plausible wrong one.
         Blocky pixels say "enlarged" without anyone having to read the note.
         """
         depth = z - src.max_zoom
         if depth > MAX_OVERZOOM:
-            return None                      # past this it is a colour wash
+            return None                      # past this it is a color wash
         n = 1 << z
         if not (0 <= y < n):
             return None

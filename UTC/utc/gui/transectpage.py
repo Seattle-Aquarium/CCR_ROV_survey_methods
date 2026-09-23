@@ -281,7 +281,7 @@ class TransectPage(ctk.CTkFrame):
             reports: list[str] = []
             for i, site in enumerate(sites):
                 if cancel.is_set():
-                    reports.append("Cancelled.")
+                    reports.append("Canceled.")
                     break
                 base = i / len(sites)
                 span = 1.0 / len(sites)

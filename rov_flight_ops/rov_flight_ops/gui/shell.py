@@ -171,12 +171,12 @@ class Lamp(ctk.CTkFrame):
     flattening them would be a lie at exactly the moment it mattered. The
     recorder watches for the ROV to arm and only writes rows once it has, so
     between two transects the monitoring is up and the logging is not. A ring
-    says "on and waiting", a filled dot says "happening now", and grey says
-    neither -- which reads at a glance and survives being colour-blind, a
+    says "on and waiting", a filled dot says "happening now", and gray says
+    neither -- which reads at a glance and survives being color-blind, a
     laptop in daylight, and a screenshot in a report.
     """
 
-    #: dot, colour attribute on the theme.
+    #: dot, color attribute on the theme.
     OFF = ("○", "TEXT_MUTED")
     WAITING = ("○", "ACCENT")
     ON = ("●", "OK")
@@ -197,9 +197,9 @@ class Lamp(ctk.CTkFrame):
         self.refresh_theme()
 
     def refresh_theme(self) -> None:
-        glyph, colour = self._state
+        glyph, color = self._state
         try:
-            self.dot.configure(text=glyph, text_color=getattr(T, colour))
+            self.dot.configure(text=glyph, text_color=getattr(T, color))
             self.caption.configure(
                 text_color=T.TEXT if self._state is not self.OFF
                 else T.TEXT_MUTED)
@@ -240,6 +240,12 @@ class TabStrip(ctk.CTkFrame):
         #: The tab to come back to when the start-up warm-up has been round
         #: them all; None when it is not running.
         self._warm_home: str | None = None
+        #: The pending `after` for the next tab in the warm-up, so a click can
+        #: cancel it.
+        self._warm_after: str | None = None
+        #: Set once somebody has chosen a tab themselves. The warm-up never
+        #: moves them after that.
+        self._chosen = False
         #: A stable identifier per tab, independent of its position and of
         #: its displayed name.
         #:
@@ -272,7 +278,7 @@ class TabStrip(ctk.CTkFrame):
         self._pages[name] = page
         self._keys[name] = key or name.lower().replace(" ", "_")
         if self._current is None:
-            self.select(name, notify=False)
+            self.select(name, notify=False, by_user=False)
         return page
 
     def key_of(self, name: str) -> str:
@@ -292,9 +298,20 @@ class TabStrip(ctk.CTkFrame):
                 return True
         return False
 
-    def select(self, name: str, notify: bool = True) -> None:
+    def select(self, name: str, notify: bool = True, *,
+               by_user: bool = True) -> None:
+        """Show one tab.
+
+        `by_user` marks a real choice -- a click, or a keyboard shortcut. Those
+        stop the start-up warm-up where it stands, because the walk ends by
+        returning to the tab it began on and would otherwise undo the choice a
+        fraction of a second after it was made.
+        """
         if name not in self._pages:
             return
+        if by_user:
+            self._chosen = True
+            self._stop_warm()
         previous = self._current
         self._current = name
         if previous is not None and previous != name:
@@ -336,7 +353,7 @@ class TabStrip(ctk.CTkFrame):
 
     def refresh_theme(self) -> None:
         if self._current:
-            self.select(self._current, notify=False)
+            self.select(self._current, notify=False, by_user=False)
 
     #: How long each tab is left open while it is warmed.
     WARM_HOLD_MS = 55
@@ -367,20 +384,39 @@ class TabStrip(ctk.CTkFrame):
         `refresh` hooks should not be run as though it were.
         """
         names = list(self._pages)
+        if self._chosen:
+            # They are already looking at something they picked. Warming the
+            # rest would walk them off it; the tabs they have not opened can
+            # pay for their own first layout.
+            self._warm_home = None
+            return
         if index == 0:
             if self._warm_home is not None:
                 return                    # one is already going round
             self._warm_home = self._current
         if index >= len(names):
             if self._warm_home is not None:
-                self.select(self._warm_home, notify=False)
+                self.select(self._warm_home, notify=False, by_user=False)
             self._warm_home = None
+            self._warm_after = None
             return
         try:
-            self.select(names[index], notify=False)
-            self.after(self.WARM_HOLD_MS, lambda: self.warm(index + 1))
+            self.select(names[index], notify=False, by_user=False)
+            self._warm_after = self.after(
+                self.WARM_HOLD_MS, lambda: self.warm(index + 1))
         except Exception:
             self._warm_home = None        # the window is closing
+            self._warm_after = None
+
+    def _stop_warm(self) -> None:
+        """Abandon the warm-up without returning to where it started."""
+        if self._warm_after is not None:
+            try:
+                self.after_cancel(self._warm_after)
+            except Exception:
+                pass
+            self._warm_after = None
+        self._warm_home = None
 
 
 class Shell(ctk.CTk):
@@ -432,7 +468,7 @@ class Shell(ctk.CTk):
         self._build_footer()
         self.build_tabs()
         if self.nav.sections:
-            self.nav.select(self.nav.sections[0])
+            self.nav.select(self.nav.sections[0], by_user=False)
             # Once the window is up and before anyone has clicked anything.
             self.after(400, self.nav.warm)
         self.after(DRAIN_EVERY_MS, self._drain)
@@ -482,7 +518,7 @@ class Shell(ctk.CTk):
 
         # bg_color as well as fg_color, and both as the (light, dark) pair.
         # CustomTkinter works a widget's bg_color out from its master, and a
-        # plain Tk canvas can only answer with the one colour it is painted
+        # plain Tk canvas can only answer with the one color it is painted
         # right now -- which at start-up is the dark banner. The frame then
         # held that dark literal for the rest of the session, and at fractional
         # display scaling its rounded fill lands a pixel or two short of its
@@ -641,7 +677,7 @@ class Shell(ctk.CTk):
         """(is the vehicle answering, what the logging lamp should show).
 
         A subclass that has a recorder overrides this. The shell itself has
-        no vehicle, so the lamps stay grey -- which is the truth for the
+        no vehicle, so the lamps stay gray -- which is the truth for the
         imagery program, where there is nothing plugged in at all.
         """
         return False, "off"

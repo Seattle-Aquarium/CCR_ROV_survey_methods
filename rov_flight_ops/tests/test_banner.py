@@ -102,10 +102,10 @@ def test_losing_the_tether_darkens_the_vehicle_lamp_but_not_the_logging_one(app)
 
 def test_a_lamp_has_three_distinguishable_states():
     glyphs = {Lamp.OFF[0], Lamp.WAITING[0], Lamp.ON[0]}
-    colours = {Lamp.OFF[1], Lamp.WAITING[1], Lamp.ON[1]}
-    # Not by colour alone: a laptop in daylight, and being colour-blind, both
+    colors = {Lamp.OFF[1], Lamp.WAITING[1], Lamp.ON[1]}
+    # Not by color alone: a laptop in daylight, and being color-blind, both
     # have to survive this.
-    assert len(glyphs) == 2 and len(colours) == 3
+    assert len(glyphs) == 2 and len(colors) == 3
     assert Lamp.OFF[0] != Lamp.ON[0]
 
 

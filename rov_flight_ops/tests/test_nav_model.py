@@ -106,7 +106,7 @@ def test_null_island_and_out_of_range_coordinates_are_refused(lat, lon, ok):
 
 
 def test_distance_and_bearing_match_a_known_pair():
-    """Checked against geographiclib to under a millimetre when written."""
+    """Checked against geographiclib to under a millimeter when written."""
     d, brg, _ = geo.inverse(47.62691, -122.39018, 47.62713957, -122.39396450)
     assert d == pytest.approx(285.5921, abs=0.001)
     assert brg == pytest.approx(275.129, abs=0.01)

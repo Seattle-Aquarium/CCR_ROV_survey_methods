@@ -207,7 +207,7 @@ def _day_with(tmp_path, **kw):
 
 def test_a_clean_flight_says_the_laptop_kept_up(tmp_path):
     day = _day_with(tmp_path, seconds=600)
-    report = R.analyse(day)
+    report = R.analyze(day)
     titles = [f.title for f in report.findings]
     assert any("laptop kept up" in t for t in titles)
     assert not report.of(R.CRITICAL)
@@ -215,7 +215,7 @@ def test_a_clean_flight_says_the_laptop_kept_up(tmp_path):
 
 def test_outages_are_raised_and_counted(tmp_path):
     day = _day_with(tmp_path, seconds=600, dead=[(100, 200), (400, 430)])
-    report = R.analyse(day)
+    report = R.analyze(day)
     outages = [o for o in report.outages if o.seconds >= 2]
     assert len(outages) == 2
     assert any("went silent" in f.title for f in report.findings)
@@ -223,13 +223,13 @@ def test_outages_are_raised_and_counted(tmp_path):
 
 def test_flying_on_battery_is_noted(tmp_path):
     day = _day_with(tmp_path, seconds=120)
-    report = R.analyse(day)
+    report = R.analyze(day)
     assert any("battery" in f.title.lower() for f in report.findings)
 
 
 def test_an_empty_folder_reports_rather_than_raises(tmp_path):
     (tmp_path / "logs").mkdir()
-    report = R.analyse(S.scan(tmp_path, deep=False))
+    report = R.analyze(S.scan(tmp_path, deep=False))
     assert report.headline
     assert isinstance(report.findings, list)
 
@@ -237,7 +237,7 @@ def test_an_empty_folder_reports_rather_than_raises(tmp_path):
 def test_a_missing_folder_is_a_problem_not_an_exception(tmp_path):
     day = S.scan(tmp_path / "nope", deep=False)
     assert day.problems
-    assert R.analyse(day).headline
+    assert R.analyze(day).headline
 
 
 # --------------------------------------------------------------------------
@@ -279,7 +279,7 @@ def test_a_client_is_credited_with_the_outages_between_its_recordings():
     }
     day.monitors = [session]
 
-    report = R.analyse(day)
+    report = R.analyze(day)
     by_name = {p.name: p for p in report.gcs}
     cockpit, qgc = by_name["Cockpit"], by_name["QGroundControl"]
     # The whole 120 s outage lands on Cockpit and none of it on QGC.
@@ -295,7 +295,7 @@ def test_a_failsafe_message_names_the_disarm():
         base, base + 300, "255/240",
         [(base + 299, "WARNING", "MYGCS: 255, heartbeat lost"),
          (base + 299.5, "CRITICAL", "Lost manual control")])]
-    report = R.analyse(day)
+    report = R.analyze(day)
     assert len(report.disarms) == 1
     assert report.disarms[0].cause == "gcs failsafe"
     assert any("failsafe" in f.title.lower() for f in report.findings)
@@ -306,7 +306,7 @@ def test_a_recording_that_simply_ended_is_not_called_a_failsafe():
     day = S.FlightDay(folder=__import__("pathlib").Path("."))
     base = T0.timestamp()
     day.recordings = [_recording(base, base + 300, "255/190")]
-    report = R.analyse(day)
+    report = R.analyze(day)
     assert report.disarms[0].cause == "operator"
     assert not report.of(R.CRITICAL)
 

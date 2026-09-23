@@ -47,7 +47,7 @@ _OFFSET = _TAG["OffsetTime"]
 _IMAGE_DESCRIPTION = _TAG["ImageDescription"]
 _ORIENTATION = _TAG["Orientation"]
 
-#: Written into EXIF ImageDescription so a second pass can recognise its own
+#: Written into EXIF ImageDescription so a second pass can recognize its own
 #: work. GoPro leaves this tag empty, so there is nothing to collide with.
 STAMP_MARKER = "UTC-telemetry-stamp"
 
@@ -159,7 +159,7 @@ def index_photos(
 
 @dataclass
 class BandStyle:
-    """Geometry and colour of the strip added above the frame.
+    """Geometry and color of the strip added above the frame.
 
     Sizes are fractions of the photo so a band looks the same on any capture
     mode. The band covers no image pixels, so its height costs nothing but a
@@ -678,7 +678,7 @@ def banner_folder(
     for i, p in enumerate(files):
         if cancel is not None and cancel.is_set():
             from .ffmpeg_tools import CancelledError
-            raise CancelledError("cancelled")
+            raise CancelledError("canceled")
         got = photo_time(p, offset_hours=offset_hours, tz_name=tz_name)
         if got is None:
             rep.skipped += 1

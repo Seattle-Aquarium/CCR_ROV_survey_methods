@@ -52,9 +52,9 @@ VALUE_W = 110
 #: Kept clear on the right for the range the strip is scaled to.
 RANGE_W = 96
 
-#: Series colours, in order, from the brand palette. Seven, so a group never
+#: Series colors, in order, from the brand palette. Seven, so a group never
 #: has to reuse one.
-SERIES_COLOURS = (
+SERIES_COLORS = (
     brand.SEAFOAM, brand.ALGAE, brand.CORAL, brand.MEDITERRANEAN,
     brand.PURPLE_STAR, "#FFC24D", "#9FB4C7",
 )
@@ -391,9 +391,9 @@ class MonitorPage(ctk.CTkFrame):
             self.detail.configure(text="")
             return
         st = rec.status
-        colour = T.WARN if st.problem else (
+        color = T.WARN if st.problem else (
             T.OK if st.state == "recording" else T.TEXT_MUTED)
-        self.state_label.configure(text=st.line(), text_color=colour)
+        self.state_label.configure(text=st.line(), text_color=color)
 
         bits = []
         if st.csv_path is not None and st.state == "recording":
@@ -443,7 +443,7 @@ class MonitorPage(ctk.CTkFrame):
 
         for i, column in enumerate(columns):
             top = i * ROW_H
-            colour = SERIES_COLOURS[i % len(SERIES_COLOURS)]
+            color = SERIES_COLORS[i % len(SERIES_COLORS)]
             if i:
                 cv.create_line(8, top, width - 8, top, fill=grid)
             cv.create_text(12, top + ROW_H / 2 - 8, anchor="w", text=column,
@@ -457,11 +457,11 @@ class MonitorPage(ctk.CTkFrame):
                       if t >= now - span]
             value = latest.get(column)
             cv.create_text(NAME_W + VALUE_W - 14, top + ROW_H / 2, anchor="e",
-                           text=_pretty(value), fill=colour,
+                           text=_pretty(value), fill=color,
                            font=(T.MONO, 15, "bold"))
-            self._strip(cv, series, top, width, colour, muted, now, span)
+            self._strip(cv, series, top, width, color, muted, now, span)
 
-    def _strip(self, cv, series, top, width, colour, muted, now, span) -> None:
+    def _strip(self, cv, series, top, width, color, muted, now, span) -> None:
         """One reading's line, scaled to its own range over the window."""
         x0 = NAME_W + VALUE_W
         x1 = width - RANGE_W - 10
@@ -493,7 +493,7 @@ class MonitorPage(ctk.CTkFrame):
             points.append(x0 + max(0.0, min(1.0, fx)) * (x1 - x0))
             points.append(y1 - (v - lo) / (hi - lo) * (y1 - y0))
         if len(points) >= 4:
-            cv.create_line(*points, fill=colour, width=2, smooth=False)
+            cv.create_line(*points, fill=color, width=2, smooth=False)
 
         cv.create_text(width - 12, top + pad + 2, anchor="ne",
                        text=_pretty(hi), fill=muted, font=T.FONT_SMALL)

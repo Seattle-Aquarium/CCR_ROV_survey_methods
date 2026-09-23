@@ -267,7 +267,7 @@ def run_batch(source: Path, options: RawDevelopOptions | None = None,
         proc = subprocess.Popen([str(pre.app.exe), str(catalog)])
 
         # Lightroom does not run a plugin just because it is installed and
-        # enabled -- it initialises one only when an entry point it declares
+        # enabled -- it initializes one only when an entry point it declares
         # is used. So the batch has to be invoked from Lightroom's own menu.
         say(0.03, "waiting for Lightroom, then starting the batch…")
         from .menu import CannotStart, start_batch
@@ -282,7 +282,7 @@ def run_batch(source: Path, options: RawDevelopOptions | None = None,
         while True:
             if stopped():
                 (run_dir / "cancel").write_text("x", encoding="utf-8")
-                rep.cancelled = True
+                rep.canceled = True
                 if denoise_started:
                     rep.warnings.append(
                         "Stopped during AI Denoise. Lightroom finishes the "
@@ -331,7 +331,7 @@ def run_batch(source: Path, options: RawDevelopOptions | None = None,
             rep.errors.append(st.error or "Lightroom reported an error")
             keep_run_dir = True
         if st.phase == "stopped":
-            rep.cancelled = True
+            rep.canceled = True
 
         rep.exported = max(0, _count_tifs(tif_dir) - before)
         counts = poller.poll()
@@ -352,14 +352,14 @@ def run_batch(source: Path, options: RawDevelopOptions | None = None,
         # deleted while Lightroom still has them open.
         _quit_lightroom(proc)
         rep.seconds = time.monotonic() - started
-        keep = keep_run_dir or rep.cancelled
+        keep = keep_run_dir or rep.canceled
         install.clean_run_dir(run_dir, keep_diagnostics=keep)
         if keep:
             rep.warnings.append(
                 f"Lightroom's log for this run: {run_dir / 'plugin.log'} "
                 f"(the scratch catalog and its previews have been deleted)")
 
-    if rep.exported and rep.exported < rep.found and not rep.cancelled:
+    if rep.exported and rep.exported < rep.found and not rep.canceled:
         rep.warnings.append(
             f"{rep.found - rep.exported} frame(s) produced no TIF.")
     return rep
@@ -397,7 +397,7 @@ def _do_denoise(run_dir: Path, pre: Preflight, opts: RawDevelopOptions,
         rep.warnings.extend(denoise_all(
             pid, total=total, wait_denoised=wait_denoised,
             amount=opts.denoise_amount, log_dir=run_dir,
-            cancelled=stopped))
+            canceled=stopped))
     except DenoiseUnavailable as ex:
         rep.errors.append(f"AI Denoise could not be completed: {ex}")
         (run_dir / "cancel").write_text("x", encoding="utf-8")

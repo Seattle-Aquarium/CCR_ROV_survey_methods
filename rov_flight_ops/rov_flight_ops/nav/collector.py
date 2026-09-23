@@ -86,7 +86,7 @@ ARDUSUB_MODES = {
     20: "Motor Detect", 21: "Surftrak",
 }
 
-#: The named float ArduSub publishes the Surftrak target in, in metres.
+#: The named float ArduSub publishes the Surftrak target in, in meters.
 #: `ModeSurftrak` uses -1 cm as its invalid marker, so the value arrives as
 #: -0.01 whenever there is no target -- which is most of the time, including
 #: when Surftrak is not the active mode.
@@ -120,7 +120,7 @@ class Jump:
 
     mono: float
     wall: float
-    metres: float
+    meters: float
     seconds: float
     segment: int
     from_trust: str = "unknown"
@@ -128,7 +128,7 @@ class Jump:
 
     def line(self) -> str:
         when = time.strftime("%H:%M:%S", time.localtime(self.wall))
-        move = f"{self.metres:.0f} m in {self.seconds:.1f} s"
+        move = f"{self.meters:.0f} m in {self.seconds:.1f} s"
         if self.from_trust == self.to_trust:
             return f"{when} — position jumped {move} ({self.from_trust})"
         return (f"{when} — position jumped {move}, "
@@ -225,7 +225,7 @@ class NavCollector:
         join on the window's thread would hold the whole application for those
         seconds, which is precisely the freeze this program has been bitten by
         before. The thread is a daemon with bounded timeouts on every request,
-        so once it is signalled it goes away on its own and can hurt nothing
+        so once it is signaled it goes away on its own and can hurt nothing
         on the way out -- it holds no file the next run needs and writes to no
         widget.
 
@@ -531,7 +531,7 @@ class NavCollector:
     def _depth(self, fast: dict, prev: NavSnapshot) -> Reading:
         """Depth below the surface, negative down, from the barometer.
 
-        `GLOBAL_POSITION_INT.relative_alt` is millimetres above the home
+        `GLOBAL_POSITION_INT.relative_alt` is millimeters above the home
         altitude and is what ArduSub derives from the depth sensor -- so it is
         already negative underwater and needs only a scale. It is *not*
         `alt` (MSL, which is meaningless with no origin) and it is not the
@@ -560,9 +560,9 @@ class NavCollector:
         them -- an invalid range shows as invalid, because a gauge that
         silently swaps in a different kind of height is worse than a blank one.
 
-        `RANGEFINDER.distance` is the autopilot's own, already in metres and
+        `RANGEFINDER.distance` is the autopilot's own, already in meters and
         already through whatever filtering ArduSub applies, so it is preferred.
-        `DISTANCE_SENSOR.current_distance` is **centimetres** and comes from
+        `DISTANCE_SENSOR.current_distance` is **centimeters** and comes from
         two different senders on this fleet -- the DVL at 255/0 and the
         autopilot's echo at 1/1 -- which is why it is a named fallback rather
         than merged in.
@@ -741,7 +741,7 @@ class NavCollector:
         2. `LOCAL_POSITION_NED` projected through a **confirmed** origin. Right
            relative to itself, drifting as a whole. Only ever used with an
            origin this program has read back from the vehicle.
-        3. Nothing. The map shows a local-metre view and says so, rather than
+        3. Nothing. The map shows a local-meter view and says so, rather than
            claiming a geographic position it does not have.
 
         **A cycle that did not read the fast group does not age it.** The two
@@ -841,7 +841,7 @@ class NavCollector:
                 # an observation; what caused it is a separate question.
                 self.jumps.append(Jump(
                     mono=fix.recv_mono or now, wall=time.time(),
-                    metres=d, seconds=gap, segment=self._segment,
+                    meters=d, seconds=gap, segment=self._segment,
                     from_trust=last.trust, to_trust=trust))
                 while len(self.jumps) > JUMPS_MAX:
                     self.jumps.pop(0)

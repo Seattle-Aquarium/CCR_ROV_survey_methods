@@ -47,11 +47,11 @@ no vehicle or recorder lamps: there is no tether to read them over. Its two
 lamps watch what this program does depend on.
 
 * **Tabs across the top** are the navigation, numbered in working order.
-* **Flight folder linked** is grey with no flight folder chosen, a ring when one
+* **Flight folder linked** is gray with no flight folder chosen, a ring when one
   is chosen but has no `surveys.json` in it, and lit when the transects are
   there. The ring is the one worth catching: every tab sorts and cuts by those
   times.
-* **SD card connected** is grey until *Import photos* or *Video* has scanned a
+* **SD card connected** is gray until *Import photos* or *Video* has scanned a
   source, a ring when the source is still there but held nothing usable, and lit
   when it held photos or video. It goes out on its own when the card is pulled.
 * **The title banner folds away** with the **▲** button beside the *Dark mode*
@@ -105,6 +105,74 @@ A GoPro card, or the flight's own `photos/GPR` and `photos/JPG`, sorted into
 per-transect folders. Files on a card are **copied**; files already inside the
 flight are **moved**. Previews can be bannered on the way in, and frames outside
 every transect can go to `off_transect/`.
+
+**Meter marks** is an option on the same tab. Tick *Work out which frame sits
+at each meter* and, once the imagery is in place, each transect is measured
+from the telemetry and every meter is given its own photograph. Two outputs,
+each written beside that transect's imagery:
+
+| Written | What it is |
+|---|---|
+| `transects/T1/GPR/meters/` | the raws that landed on a mark, moved clear of the rest |
+| `transects/T1/T1_meter_marks.csv` | one row per mark: distance, time, the frame chosen, and how far off it was |
+| `transects/T1/T1_track.png` | the reconstructed transect from above, marks on it, start and end labeled |
+
+The spacing is yours to set — 1 m by default, but 0.5 m or 2 m work the same
+way. A pause adds no distance: the track is still drawn across it, faintly, but
+the marks stop and pick up where surveying resumes.
+
+The frames that sit on a mark are **moved** into `meters/` inside `GPR`, so a
+transect folder keeps the few frames the analysis wants apart from the many it
+does not. Tick *Also file edited JPGs* and `JPG_edited/meters/` is filled the
+same way, once those exports exist. Moving is not editing — nothing is
+re-encoded and no JPEG generation is spent — which is what makes it safe inside
+`JPG_edited`. It does move frames that downstream ML reads, so it stays off
+unless asked. Re-running is safe: frames already filed are left where they are,
+and `meters/` is searched when the marks are worked out again.
+
+**Which frame a mark gets.** The nearest in time, and **each frame is used at
+most once**. That second rule matters: where marks fall closer together than
+the ~3 s capture cadence, a plain nearest-match hands the same photograph to
+several of them and leaves the rest silently empty. A mark with no frame within
+15 s is reported rather than given a distant one.
+
+**Where the distance comes from.** Sources are tried in order and the first one
+the recording actually contains is used, because they are not equally available
+— a quarter of the 2024-26 archive has no `LOCAL_POSITION_NED` at all. Each
+carries a scale factor measured against the 100 m tape transects:
+
+| Source | Scale | Measured against the tape |
+|---|---|---|
+| `LOCAL_POSITION_NED` velocity, integrated | ×1.010 | 99.0% — essentially unbiased |
+| DVL `VISION_POSITION_DELTA` magnitudes | ×1.037 | 96.5% |
+| `GLOBAL_POSITION_INT` velocity | ×1.058 | fallback; reads ~4.5% under the EKF |
+| `LOCAL_POSITION_NED` position, differenced | ×0.979 | last resort; noise and filter resets inflate it |
+
+Across the 19 tape windows that describe one clean pass this lands at a median
+of **100.0%** of true, mean absolute error 2.4%.
+
+Distance is accumulated at **sensor rate**, not from a 1 Hz CSV. Measuring from
+positions already resampled to one row per second discards the motion inside
+each second before it is counted; on the tape transects that moved a third of
+the marks far enough to pick a different photograph.
+
+**What it tells you when something is wrong.** A timed transect has no tape to
+check against, so the pass reports its own confidence rather than presenting a
+single number:
+
+* **cross-check** — every source the recording supports is measured, and a
+  spread above 10% means at least one is wrong. Healthy flights sit at 2-4%.
+* **straightness** — net displacement over path length. A contour-following run
+  sits near 1; well below 0.5 usually means the window still holds the transit
+  out to the start, or two passes.
+* **coverage** — how much of the surveyed time the telemetry actually spans.
+* **filter resets** — a GPS correction snapping the EKF position looks exactly
+  like travel. These arrive at a normal sample interval, so they are caught by
+  comparing against the vehicle's own speed, removed, and counted.
+
+This is deliberately separate from `mcap_to_csv`: the marks need finer-grained
+telemetry than the 1 Hz transect CSV carries, so the two measure independently
+and their transect lengths will not agree to the meter.
 
 **Banner tools** is the third section of this tab. It lists every
 `JPG_preview` / `JPG_edited` / `JPG_edited_banner` folder in the flight folder
@@ -226,7 +294,7 @@ The job queue and the log behind this are the same files as in ROV Flight
 Operations (`gui/shell.py`, `diagnostics.py`): each job's result goes only to
 that job, one failing result handler no longer stops the queue, a flood of
 progress cannot starve the window, and the output pane keeps its last 2,000
-lines. `tests/test_resilience.py` holds those behaviours here too.
+lines. `tests/test_resilience.py` holds those behaviors here too.
 
 ---
 

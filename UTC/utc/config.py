@@ -94,13 +94,13 @@ class Layout:
     footer_size: int = 40
     show_footer: bool = True
 
-    # colours (semi-transparent brand ground so the video reads through)
+    # colors (semi-transparent brand ground so the video reads through)
     panel_bg: str = "#000000"
     panel_bg_alpha: float = 0.60
     panel_fg: str = brand.WHITE
     panel_muted: str = "#C9D6E4"
 
-    # gauge colours
+    # gauge colors
     gauge_face: str = "#00000022"
     gauge_fg: str = brand.WHITE
     gauge_dim: str = "#FFFFFF73"

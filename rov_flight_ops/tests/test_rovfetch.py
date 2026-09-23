@@ -194,7 +194,7 @@ def test_a_half_finished_earlier_attempt_is_fetched_again(tmp_path):
     assert any("fetching it again" in w for w in rep.warnings)
 
 
-def test_cancelling_leaves_no_partial_file(tmp_path):
+def test_canceling_leaves_no_partial_file(tmp_path):
     from rov_flight_ops.ffmpeg_tools import CancelledError
 
     src, dst = tmp_path / "rov", tmp_path / "ssd"

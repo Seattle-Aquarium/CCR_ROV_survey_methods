@@ -177,7 +177,7 @@ def test_a_repeated_request_is_one_transition_and_one_recording(tmp_path, fakes,
     for r in stops:
         assert r.wait(10)
     assert rec.status.state == "idle"
-    assert len(records(tmp_path)) == 1, "the flight was finalised more than once"
+    assert len(records(tmp_path)) == 1, "the flight was finalized more than once"
 
 
 def test_a_closing_snapshot_that_never_answers_still_closes_the_flight(
@@ -314,7 +314,7 @@ def test_a_late_opening_snapshot_lands_only_in_its_own_flight(tmp_path, fakes,
         release.set()
 
 
-def test_disarm_stop_and_close_at_once_finalise_the_flight_once(tmp_path, fakes,
+def test_disarm_stop_and_close_at_once_finalize_the_flight_once(tmp_path, fakes,
                                                                monkeypatch):
     written = []
     real = flightlog.FlightRecorder._write_files
@@ -350,7 +350,7 @@ def test_disarm_stop_and_close_at_once_finalise_the_flight_once(tmp_path, fakes,
         t.join(15)
     assert session.done.wait(10)
     assert wait_for(lambda: rec.status.state == "idle")
-    assert len(written) == 1, f"finalised {len(written)} times"
+    assert len(written) == 1, f"finalized {len(written)} times"
     assert len(records(tmp_path)) == 1
 
 

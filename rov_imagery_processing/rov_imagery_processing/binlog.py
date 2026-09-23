@@ -359,8 +359,8 @@ def _rows(msg, t: float):
     """
     ty = msg.get_type()
     if ty == "CTUN":
-        # Alt is the EKF's altitude in metres, negative below the surface --
-        # the same quantity GLOBAL_POSITION_INT reports in millimetres.
+        # Alt is the EKF's altitude in meters, negative below the surface --
+        # the same quantity GLOBAL_POSITION_INT reports in millimeters.
         yield ("GLOBAL_POSITION_INT.relative_alt", float(msg.Alt) * 1000.0, "")
         yield ("VFR_HUD.climb", float(getattr(msg, "CRt", 0)) / 100.0, "")
     elif ty == "RFND":
@@ -427,7 +427,7 @@ def write_telemetry_csv(
                     break
                 if cancel is not None and cancel.is_set():
                     from .ffmpeg_tools import CancelledError
-                    raise CancelledError("cancelled")
+                    raise CancelledError("canceled")
                 seen += 1
                 ty = msg.get_type()
                 t = getattr(msg, "TimeUS", 0) / 1e6 + alignment.offset

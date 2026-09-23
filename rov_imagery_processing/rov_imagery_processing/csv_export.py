@@ -2,8 +2,8 @@
 1 Hz telemetry export.
 
 Covers the whole span the mcap recorded, not just the transects: rows outside a
-transect are labelled ``off_transect`` so descents, ascents and between-transect
-manoeuvring stay in the record.
+transect are labeled ``off_transect`` so descents, ascents and between-transect
+maneuvering stay in the record.
 
 Values are held forward from the last sample (these are sampled states, not
 continuous signals), but only up to a per-field staleness limit -- see
@@ -119,7 +119,7 @@ def export_1hz(
         for i in range(n):
             if cancel is not None and cancel.is_set():
                 from .ffmpeg_tools import CancelledError
-                raise CancelledError("cancelled")
+                raise CancelledError("canceled")
             epoch = t0 + i
 
             hit = _label_for(epoch, resolved)

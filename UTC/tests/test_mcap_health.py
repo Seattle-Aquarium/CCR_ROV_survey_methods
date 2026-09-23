@@ -267,7 +267,7 @@ def test_repair_refuses_to_write_over_the_original(healthy, tmp_path):
 
 def test_an_interrupted_repair_leaves_no_finished_looking_file(healthy, tmp_path):
     class Stop:
-        """Cancelled before the first block is written.
+        """Canceled before the first block is written.
 
         These fixtures copy in a single read, so a later trigger would never
         be reached -- and a copy that short is not meaningfully cancellable.

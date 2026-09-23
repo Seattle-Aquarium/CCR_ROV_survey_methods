@@ -4,13 +4,13 @@ Points the operator marks, captured at the instant the button goes down.
 The one requirement that shapes everything here: **the coordinate is taken
 when the button is pressed, not when the name dialog is answered.** An
 operator marking a wolf eel den is looking at the wolf eel, not the screen;
-by the time they have typed "wolf eel den" the ROV has moved five metres, and
+by the time they have typed "wolf eel den" the ROV has moved five meters, and
 a waypoint that records where the vehicle was when the typing finished is
 worse than useless -- it is confidently wrong.
 
 So `capture` takes the position and returns a saved waypoint immediately. The
 rename that follows is an edit of something that already exists on disk, and
-cancelling it keeps the point.
+canceling it keeps the point.
 
 Everything about the fix's provenance is saved with it, because a coordinate
 alone cannot be judged later. In DVL-only mode a position is dead-reckoned
@@ -89,7 +89,7 @@ class WaypointStore:
 
     "Persist, then confirm" is the rule: a dialog that says Saved before the
     write has happened is a promise the program has not kept, and on a field
-    laptop with a synchronised folder the write is exactly the thing that can
+    laptop with a synchronized folder the write is exactly the thing that can
     fail.
     """
 
@@ -313,7 +313,7 @@ def track_geojson(segments, name: str = "ROV track") -> dict:
 #
 # Survey sites and planned transects come in as GeoJSON, because this
 # repository's own `survey.Site` has no coordinates in it at all -- it is
-# names, dates and transect *times*, which is what the rest of the programme
+# names, dates and transect *times*, which is what the rest of the program
 # needs and is no use to a map. Rather than bend that format into carrying
 # geometry it was not designed for, planned features are imported from the
 # lightweight standard every GIS tool this team uses can already write.

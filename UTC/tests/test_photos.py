@@ -99,7 +99,7 @@ def test_orientation_is_baked_and_tag_reset():
         # Close the handle: Windows will not remove the temp dir while a file
         # inside it is still open.
         with Image.open(res.output) as out:
-            assert out.getexif().get(_ORI) == 1, "orientation tag must be neutralised"
+            assert out.getexif().get(_ORI) == 1, "orientation tag must be neutralized"
 
 
 def test_band_is_above_the_image_as_displayed():
@@ -159,7 +159,7 @@ def test_second_pass_refuses_to_stamp_again():
         assert first.ok
 
         again = ph.read_photo_time(first.output)
-        assert again is not None and again[2] is True, "marker not recognised"
+        assert again is not None and again[2] is True, "marker not recognized"
         second = ph.stamp_photo(
             ph.Photo(first.output, 0.0, photo.local, stamped=True),
             _Store(SAMPLE), out_dir=out,

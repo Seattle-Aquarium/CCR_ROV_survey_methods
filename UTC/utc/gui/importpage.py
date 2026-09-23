@@ -10,7 +10,7 @@ source:
   they are already inside the flight and a second copy is waste.
 
 Which one applies is decided by where the source sits, not by a toggle, so the
-safe behaviour cannot be turned off by accident.
+safe behavior cannot be turned off by accident.
 """
 
 from __future__ import annotations

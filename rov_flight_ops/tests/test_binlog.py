@@ -44,9 +44,9 @@ def rows(msg):
 # --------------------------------------------------------------------------
 
 
-def test_depth_comes_from_ctun_in_millimetres():
-    """CTUN.Alt is metres, negative below the surface; the store wants the
-    same quantity in millimetres, as GLOBAL_POSITION_INT reports it."""
+def test_depth_comes_from_ctun_in_millimeters():
+    """CTUN.Alt is meters, negative below the surface; the store wants the
+    same quantity in millimeters, as GLOBAL_POSITION_INT reports it."""
     r = rows(Msg("CTUN", Alt=-10.5, CRt=-29))
     assert r["GLOBAL_POSITION_INT.relative_alt"] == pytest.approx(-10500.0)
     assert r["VFR_HUD.climb"] == pytest.approx(-0.29)
@@ -196,10 +196,10 @@ def test_origin_falls_back_to_the_raw_parameters_when_ekf_never_set_one(
     assert not fix.confirmed
 
 
-def test_origin_recognises_the_stock_applets_own_param_names(monkeypatch, tmp_path):
+def test_origin_recognizes_the_stock_applets_own_param_names(monkeypatch, tmp_path):
     """A vehicle running ArduPilot's unmodified ahrs-set-origin.lua applet
     names its parameters AHRS_ORIG_LAT/AHRS_ORIG_LON, not this fleet's
-    ORIGIN_LAT/ORIGIN_LON. Either has to be recognised."""
+    ORIGIN_LAT/ORIGIN_LON. Either has to be recognized."""
     _fake_connection(monkeypatch, [
         Msg("PARM", Name="AHRS_ORIG_LAT", Value=47.62712097167969),
         Msg("PARM", Name="AHRS_ORIG_LON", Value=-122.39392852783203)])

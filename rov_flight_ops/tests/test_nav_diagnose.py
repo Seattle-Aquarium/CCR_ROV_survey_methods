@@ -243,7 +243,7 @@ def test_the_window_is_bounded_and_keeps_the_nearest_events():
 
 
 def test_alignment_uses_the_monotonic_clock():
-    """A laptop that has just synchronised can move its wall clock backwards
+    """A laptop that has just synchronized can move its wall clock backwards
     by seconds, which would reorder the very events being examined."""
     rows = [{"mono": NOW - 5, "kind": "message_gap", "t": "2026-01-01T00:00:00Z"},
             {"mono": NOW + 1, "kind": "param_change", "t": "1999-01-01T00:00:00Z"}]

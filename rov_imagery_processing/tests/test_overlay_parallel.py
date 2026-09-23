@@ -122,7 +122,7 @@ def test_cancel_stops_a_parallel_render(tmp_path, cfg):
     from rov_imagery_processing.ffmpeg_tools import CancelledError
 
     cancel = threading.Event()
-    cancel.set()                              # already cancelled
+    cancel.set()                              # already canceled
     with pytest.raises(CancelledError):
         _render(tmp_path, cfg, _TEST_FLOOR + 60, workers=4, cancel=cancel)
 

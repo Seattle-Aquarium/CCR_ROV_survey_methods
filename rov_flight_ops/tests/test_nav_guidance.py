@@ -3,7 +3,7 @@ Following a line: cross-track sign, along-track progress, and what stale
 position does to both.
 
 The sign convention is the one that matters most here. "3 m right" has to
-mean three metres to the right of the intended track looking along it, for
+mean three meters to the right of the intended track looking along it, for
 every line direction -- including the ones that cross north.
 """
 

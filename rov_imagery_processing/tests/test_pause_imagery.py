@@ -63,7 +63,7 @@ def _epoch(hhmmss: str) -> float:
 
 def test_a_frame_taken_during_a_pause_lands_off_transect():
     """`plan_sort` is what decides a frame's transect, so this is the whole
-    behaviour for stills: no window contains the frame, so it has no transect
+    behavior for stills: no window contains the frame, so it has no transect
     and the off-transect policy takes over."""
     windows = plan_windows(_plan(Pause("13:05:00", "13:06:00")),
                            exclude_pauses=True)

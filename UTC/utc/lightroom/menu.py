@@ -2,7 +2,7 @@
 Starting the batch, by clicking the menu item that starts it.
 
 Lightroom will not run a plugin because it is installed, registered and
-enabled. It initialises one lazily, the first time something asks for an entry
+enabled. It initializes one lazily, the first time something asks for an entry
 point the plugin declares -- so a plugin has to be *invoked*, and the only
 ways in are the entry points Lightroom itself puts in its menus. Ours is
 ``File > Plug-in Extras > Run UTC RAW batch``, and this module clicks it.

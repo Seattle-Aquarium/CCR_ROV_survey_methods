@@ -46,12 +46,12 @@ _HHMMSS = re.compile(r"^\s*(\d{1,2})\s*[:.]\s*(\d{1,2})\s*[:.]\s*(\d{1,2})(?:[:.
 #: Saved transect times live beside the flight's data under this name. The
 #: file holds the sites and their transects, which is what a reader opening
 #: the logs folder is actually looking for -- the older `utc_plan.json` named
-#: the programme rather than the contents.
+#: the program rather than the contents.
 PLAN_FILENAME = "surveys.json"
 
 #: Names written by earlier versions, newest first. Read, never written, so
 #: flight folders prepared before a rename keep opening without anyone
-#: re-typing a dozen transect times. Every flight this programme has ever
+#: re-typing a dozen transect times. Every flight this program has ever
 #: written is still openable: nothing on disk has to move.
 LEGACY_PLAN_FILENAMES = ("utc_plan.json", "composite_plan.json")
 

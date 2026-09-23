@@ -65,7 +65,7 @@ class BundledLayer:
     path: Path
     name: str = ""
     attribution: str = ""
-    licence: str = ""
+    license: str = ""
     source: str = ""
     fmt: str = "png"
     min_zoom: int = 0
@@ -180,7 +180,7 @@ class BundledMaps:
                 key=key, path=self.dir / f"{key}.mbtiles",
                 name=info.get("source", key),
                 attribution=info.get("attribution", ""),
-                licence=info.get("licence", ""),
+                license=info.get("license", ""),
                 source=info.get("source", ""),
                 fmt=info.get("format", "png"),
                 min_zoom=int(zooms[0]), max_zoom=int(zooms[1]),

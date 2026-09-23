@@ -537,7 +537,7 @@ def detect(params: dict[str, float] | None) -> tuple[str | None, str]:
     """(profile key, how it was decided) from the parameters alone.
 
     "Configured as", never "running as". The parameters say what the EKF has
-    been told to prefer; only the estimator's own behaviour says what it is
+    been told to prefer; only the estimator's own behavior says what it is
     doing, and that is the `used` column of the sensor matrix.
     """
     if not params:

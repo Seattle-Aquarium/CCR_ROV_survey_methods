@@ -103,7 +103,7 @@ def test_clip_name_carries_the_span_and_format():
     assert clips.clip_name(Path("T1_1080p.mp4"), 400, 415, fmt).startswith("T1_1080p_")
 
 
-def test_clip_name_sanitises_a_typed_label():
+def test_clip_name_sanitizes_a_typed_label():
     fmt = clips.CLIP_FORMATS["1080p"]
     n = clips.clip_name(Path("a.mp4"), 0, 5, fmt, label="ling cod / big!")
     assert "/" not in n and " " not in n

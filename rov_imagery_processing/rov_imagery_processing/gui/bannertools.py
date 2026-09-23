@@ -147,7 +147,7 @@ class BannerSection(Card):
             for f in found:
                 # Everything under the flight folder belongs to this flight,
                 # whether or not it sits in the photos/transects layout the
-                # walker recognises. Without this, a stray folder is reported
+                # walker recognizes. Without this, a stray folder is reported
                 # as outside a flight and then refused telemetry.
                 f.flight = f.flight or root
             return found

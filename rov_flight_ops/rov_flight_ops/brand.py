@@ -62,9 +62,9 @@ STONE_TINTS = {
 # memory:
 #
 #   DEEP and MEDIUM   -> backgrounds.
-#   BRIGHT 2-colour   -> UI elements only, layered over darker backgrounds,
+#   BRIGHT 2-color   -> UI elements only, layered over darker backgrounds,
 #                        and best kept to smaller elements.
-#   BRIGHT 3-colour   -> larger elements, where there is room to breathe.
+#   BRIGHT 3-color   -> larger elements, where there is room to breathe.
 #   ALT               -> only over a bright-gradient background, or the hover
 #                        state of a button. Never with photographic content.
 #
@@ -102,10 +102,10 @@ ALT_GRADIENTS = {
     "mediterranean_purple_coral": (MEDITERRANEAN, PURPLE_STAR, CORAL),
 }
 
-#: The two-colour geometry from the spec diagram on p.19: the first colour at
+#: The two-color geometry from the spec diagram on p.19: the first color at
 #: 0, the second reached at 95, and the 50/50 blend landing at 70 rather than
-#: halfway. The bias is what stops a two-colour gradient reading as a flat
-#: wash -- it holds the first colour and then moves.
+#: halfway. The bias is what stops a two-color gradient reading as a flat
+#: wash -- it holds the first color and then moves.
 TWO_COLOR_END = 0.95
 TWO_COLOR_MIDPOINT = 0.70
 
@@ -116,7 +116,7 @@ GRADIENT_ANGLE = 45.0
 
 @dataclass(frozen=True)
 class Theme:
-    """One resolved colour scheme. `name` matches customtkinter's appearance mode."""
+    """One resolved color scheme. `name` matches customtkinter's appearance mode."""
 
     name: str
     bg: str            # window ground
@@ -136,7 +136,7 @@ class Theme:
 
 
 # Dark: Fathom ground with white type and Algae/Seafoam accents. This pairing is
-# shown as accessible in the guidelines' colour-and-accessibility grid (p.20).
+# shown as accessible in the guidelines' color-and-accessibility grid (p.20).
 DARK = Theme(
     name="dark",
     bg=FATHOM,
@@ -156,7 +156,7 @@ DARK = Theme(
 )
 
 # Light: White ground, Stone body copy (per the guidelines), Salish headings,
-# Mediterranean as the action colour.
+# Mediterranean as the action color.
 LIGHT = Theme(
     name="light",
     bg=WHITE,
@@ -357,7 +357,7 @@ def hex_to_rgb(h: str) -> tuple[int, int, int]:
 
 
 def relative_luminance(h: str) -> float:
-    """WCAG relative luminance of a colour."""
+    """WCAG relative luminance of a color."""
     def channel(v: int) -> float:
         c = v / 255
         return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
@@ -367,12 +367,12 @@ def relative_luminance(h: str) -> float:
 
 
 def contrast(a: str, b: str) -> float:
-    """WCAG contrast ratio between two colours, 1.0 to 21.0.
+    """WCAG contrast ratio between two colors, 1.0 to 21.0.
 
     The guidelines set the bar on p.20: 4.5:1 for type, 3:1 for large type
     (>=18pt, or >=14pt bold) and for meaningful images. Worth having in code
     rather than in a person's head -- the chrome sits on a gradient, so a
-    colour that reads on one end of it can vanish at the other, and that is
+    color that reads on one end of it can vanish at the other, and that is
     exactly what happened to the rail's muted ink at 1.6:1 on Mediterranean.
     """
     la, lb = relative_luminance(a), relative_luminance(b)
@@ -381,6 +381,6 @@ def contrast(a: str, b: str) -> float:
 
 
 def rgba(h: str, alpha: float) -> tuple[int, int, int, int]:
-    """Brand colour with an alpha channel, for the semi-transparent overlays."""
+    """Brand color with an alpha channel, for the semi-transparent overlays."""
     r, g, b = hex_to_rgb(h)
     return (r, g, b, max(0, min(255, int(round(alpha * 255)))))

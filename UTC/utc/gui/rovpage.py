@@ -341,7 +341,7 @@ class RovPage(ctk.CTkFrame):
             for n, item in enumerate(items, 1):
                 if cancel is not None and cancel.is_set():
                     from ..ffmpeg_tools import CancelledError
-                    raise CancelledError("cancelled")
+                    raise CancelledError("canceled")
                 if progress:
                     progress(n / len(items),
                              f"reading {item['name']}  ({n} of {len(items)})")

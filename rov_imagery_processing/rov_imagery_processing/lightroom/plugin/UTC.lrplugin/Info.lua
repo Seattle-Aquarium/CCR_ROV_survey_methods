@@ -28,7 +28,7 @@ return {
 
     -- The entry point, and the reason this plugin can be started at all.
     --
-    -- Lightroom initialises a plugin lazily: not at startup, but the first
+    -- Lightroom initializes a plugin lazily: not at startup, but the first
     -- time something asks for one of the entry points the plugin declares.
     -- A plugin that declares none is registered, enabled, shown as "Installed
     -- and running" in the Plug-in Manager -- and never executes a line. This

@@ -31,6 +31,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import layout
+from . import metermark as mm
 from . import photos as ph
 from .telemetry import TelemetryStore
 
@@ -54,6 +55,16 @@ class SortOptions:
     off_transect_gpr: str = KEEP
     off_transect_jpg: str = KEEP
 
+    #: Work out which frame sits at each meter, once the imagery has moved.
+    meter_marks: bool = False
+    meter_interval_m: float = 1.0
+    marks_csv: bool = False
+    marks_png: bool = False
+    #: File the matched frames into GPR/meters/, and optionally
+    #: JPG_edited/meters/ as well.
+    marks_file_gpr: bool = True
+    marks_file_jpg: bool = False
+
     def validate(self) -> list[str]:
         errs = []
         for label, v in (("GPR", self.off_transect_gpr),
@@ -76,6 +87,7 @@ class SortReport:
     transects: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    marks: mm.MarkReport | None = None
 
     def summary(self) -> str:
         lines = [f"Sorted into {len(self.transects)} transect folder(s): "
@@ -90,6 +102,8 @@ class SortReport:
             lines.append(f"  off-transect: {self.off_gpr} GPR, {self.off_jpg} JPG")
         if self.failed:
             lines.append(f"  {self.failed} failed")
+        if self.marks is not None:
+            lines.append(self.marks.summary())
         return "\n".join(lines)
 
 
@@ -216,6 +230,8 @@ def sort_flight(
         raise ValueError(errs[0])
     if opts.banner_previews and store is None:
         raise ValueError("bannering previews needs telemetry; pass `store`")
+    if opts.meter_marks and store is None:
+        raise ValueError("meter marks need telemetry; pass `store`")
 
     flight = Path(flight)
     rep = SortReport()
@@ -223,14 +239,19 @@ def sort_flight(
     rep.warnings.extend(warns)
     rep.unmatched_gpr = sum(1 for i in items if i.gpr and not i.jpg)
     if not items:
+        # A flight sorted on an earlier day has empty offload folders, so
+        # there is nothing to move -- but its transect folders are full, and
+        # marks are worked out from those rather than from this run's moves.
         rep.warnings.append("no imagery found to sort")
+        if opts.meter_marks and store is not None:
+            _run_marks(flight, windows, store, opts, rep, progress, cancel)
         return rep
 
     total = max(1, len(items))
     for i, it in enumerate(items):
         if cancel is not None and cancel.is_set():
             from .ffmpeg_tools import CancelledError
-            raise CancelledError("cancelled")
+            raise CancelledError("canceled")
 
         if it.transect:
             tdir = layout.ensure_transect(flight, it.transect)
@@ -275,10 +296,38 @@ def sort_flight(
             progress((i + 1) / total, f"sorting {i+1}/{total}")
 
     rep.transects.sort(key=layout.transect_sort_key)
+
+    # After the move, so marks are handed out against the frames that really
+    # landed in each transect folder.
+    if opts.meter_marks and store is not None:
+        _run_marks(flight, windows, store, opts, rep, progress, cancel)
+
     if progress:
         progress(1.0, f"sorted {rep.jpg_moved} preview(s), "
                       f"{rep.gpr_moved} raw(s)")
     return rep
+
+
+def _run_marks(flight, windows, store, opts, rep, progress, cancel) -> None:
+    """Work out the distance marks and hang the report off `rep`.
+
+    Shared by both exits from sort_flight: the normal one, and the early
+    return taken when a flight was already sorted and there is nothing left
+    to move.
+    """
+    rep.marks = mm.run_for_flight(
+        flight, windows, store,
+        mm.MarkOptions(enabled=True,
+                       interval_m=float(opts.meter_interval_m or 1.0),
+                       write_csv=bool(opts.marks_csv),
+                       write_png=bool(opts.marks_png),
+                       move_gpr=bool(opts.marks_file_gpr),
+                       move_jpg=bool(opts.marks_file_jpg)),
+        progress=(lambda f, m="": progress(0.95 + f * 0.05, m))
+        if progress else None,
+        cancel=cancel)
+    rep.warnings.extend(rep.marks.warnings)
+    rep.errors.extend(rep.marks.errors)
 
 
 def _dispose(path: Path | None, policy: str, flight: Path,

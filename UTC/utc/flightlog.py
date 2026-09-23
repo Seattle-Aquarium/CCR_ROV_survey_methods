@@ -32,7 +32,7 @@ hidden.
 
 **A dropped request is not a disarm.** `read_arm_state` returns None when it
 cannot tell, and None never ends a flight. The tether drops packets -- this
-programme has measured it doing so -- and a recorder that stopped on one lost
+program has measured it doing so -- and a recorder that stopped on one lost
 GET would stop mid-transect.
 
 **Nothing here can fail a flight.** Every write is best-effort and every read is

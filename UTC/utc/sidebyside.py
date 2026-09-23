@@ -49,7 +49,7 @@ VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".m4v"}
 #: into one another without it, and the seam is exactly what the eye needs to
 #: judge them separately.
 DIVIDER_PX = 6
-DIVIDER_COLOUR = "0x0B1A24"
+DIVIDER_COLOR = "0x0B1A24"
 
 
 @dataclass(frozen=True)
@@ -466,7 +466,7 @@ def _filter(left: Side, right: Side, fmt: SideBySideFormat,
     # The divider is padding on the left pane, so it cannot be mistaken for
     # part of either image.
     parts.append(
-        f"[{lab_l}]pad=iw+{DIVIDER_PX}:ih:0:0:color={DIVIDER_COLOUR}[lp]")
+        f"[{lab_l}]pad=iw+{DIVIDER_PX}:ih:0:0:color={DIVIDER_COLOR}[lp]")
     parts.append(f"[lp][{lab_r}]hstack=inputs=2[out]")
     return ";".join(parts)
 

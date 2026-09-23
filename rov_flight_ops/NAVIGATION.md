@@ -42,7 +42,7 @@ confirm a specific change.
    connected — the basemap is in the repository, not on a tile server.
 3. In **Navigation readiness**, check the profile. Press **Start…** to say how
    this dive begins and to set the origin. Without an origin there is no
-   latitude or longitude — the map falls back to a metre grid and says so.
+   latitude or longitude — the map falls back to a meter grid and says so.
 4. Read the matrix. Four columns, four different questions; a red mark in
    **Fused** with green in **Recv** and **Valid** means a healthy sensor the
    estimator is not using.
@@ -62,7 +62,7 @@ confirm a specific change.
 |                                     +---------------------------+
 |                                     |  Survey plan              |
 |   lat/lon · source · age            |  tools · features         |
-+-------------------------------------+  inspector: metres, °T    |
++-------------------------------------+  inspector: meters, °T    |
 | GUIDANCE  |  SITE / ORIGIN | TO SITE|                           |
 +-------------------------------------+---------------------------+
 ```
@@ -89,7 +89,7 @@ how a whole day's coordinates get lost:
 | **Conf** | the parameters say this source should be used |
 | **Recv** | samples are arriving at all — from the message counter, so a cached HTTP reply is not mistaken for a new measurement |
 | **Valid** | the measurement itself says it means something: a bottom lock, a fix type above zero, a range greater than nought |
-| **Fused** | the estimator's own behaviour supports it being used, with the basis behind **Health…** |
+| **Fused** | the estimator's own behavior supports it being used, with the basis behind **Health…** |
 
 The fourth column used to say "Used" and inferred it from general estimator
 flags, from which parameters were selected, and from a fresh derived heading.
@@ -103,8 +103,8 @@ the DVL supplies velocity while position comes from the acoustics, and one row
 could not say that.
 
 Symbols are `✓` `✗` `◐` (partly) `?` (cannot be established) `–` (not
-applicable). Every state has a glyph as well as a colour, because a Rugged
-screen in daylight loses the colour first. A detail too long for its column is
+applicable). Every state has a glyph as well as a color, because a Rugged
+screen in daylight loses the color first. A detail too long for its column is
 cut with an ellipsis; **Health…** has the whole sentence.
 
 **The strip under the map** carries the three things you must never go looking
@@ -300,7 +300,7 @@ active only when the measurements say so.
 ## The map
 
 Pan by dragging, zoom with the wheel or a double-click, **Follow** keeps the
-vehicle centred, **Fit** frames everything.
+vehicle centered, **Fit** frames everything.
 
 ### Basemaps
 
@@ -322,7 +322,7 @@ they are never queued for fetching — a bundled tile is in the pack or it is
 nowhere.
 
 `assets/maps/pier59/manifest.json` records, per layer, the source, the URL it
-was built from, the licence, the build date, the bounds, the zoom range, the
+was built from, the license, the build date, the bounds, the zoom range, the
 byte count and a SHA-256. A test checks the checksums against the files in Git
 and that neither layer came from the standard `tile.openstreetmap.org` service,
 whose terms do not permit bulk prefetching. The chart is rendered locally from
@@ -332,14 +332,14 @@ domain.
 **Past a layer's top zoom the view is enlarged, not sharper.** The map goes to
 z21 — 0.05 m per pixel, the scale a plan with 2 m lanes is drawn at — and above
 the pack's own detail each tile is its ancestor cropped and scaled with
-nearest-neighbour, so it goes visibly blocky. That is deliberate: smooth
+nearest-neighbor, so it goes visibly blocky. That is deliberate: smooth
 interpolation would invent edges that look like resolution the pack does not
 have. Three doublings is the limit; past that a blank grid is honester.
 
 Fetched layers are cached permanently in `%LOCALAPPDATA%\CCR_ROV\map_tiles`,
 outside the repository.
 
-With no tiles at all the map draws a metre grid, a scale bar, a north arrow and
+With no tiles at all the map draws a meter grid, a scale bar, a north arrow and
 the tracks — which is most of what it is for. It says *no basemap — grid only*
 rather than looking broken.
 
@@ -361,14 +361,14 @@ server.
 
 ### Seabed depth
 
-Tick **Seabed depth** and the track is coloured by the depth of the seabed
+Tick **Seabed depth** and the track is colored by the depth of the seabed
 under the vehicle — depth below the surface minus altitude above the bottom,
-both measured by the ROV. At the metre scale these surveys work at that is
+both measured by the ROV. At the meter scale these surveys work at that is
 better bathymetry than any public source, and it accumulates for free.
 
 ### When there is no geographic position
 
-The map switches to a **local view**: metres from the start, a grid, a scale
+The map switches to a **local view**: meters from the start, a grid, a scale
 bar, and a banner saying *the track's shape is real; its place on the Earth is
 not known*. It does not draw a chart under a track it cannot place.
 
@@ -421,11 +421,11 @@ named on screen rather than inferred from which modifier is held.
 
 | Tool | Draw it | Gives you |
 |---|---|---|
-| **Line** | click the start, click the end | length in metres, bearing in °T |
+| **Line** | click the start, click the end | length in meters, bearing in °T |
 | **Polyline** | click each point, double-click or Enter to finish | per-segment length and bearing |
 | **Rectangle** | drag a box; Shift-drag a corner to rotate | L × W in m, area in m², orientation °T |
 | **Survey grid** | drag a box; lanes fill it | the rectangle plus its lanes |
-| **Circle** | click the centre, drag the radius | radius, diameter, area |
+| **Circle** | click the center, drag the radius | radius, diameter, area |
 | **Polygon** | click each corner, double-click or Enter to close | area and perimeter |
 
 New vertices snap to existing ones within a dozen pixels. Undo and redo cover
@@ -433,10 +433,10 @@ every edit. The plan autosaves into the flight folder and exports to GeoJSON
 (WGS84 only — an export in any other CRS is refused rather than silently
 reprojected).
 
-### Metres, never pixels
+### Meters, never pixels
 
 Every number comes from the geometry, not from the screen. A rectangle is
-stored as centre, length, width and rotation — **not** as four corners — so no
+stored as center, length, width and rotation — **not** as four corners — so no
 sequence of handle drags can shear it into a parallelogram, which is exactly
 what storing corners allows. Dimensions are drawn live on the edges while you
 drag, from the same `measurements()` call the inspector uses, so the two cannot
@@ -444,11 +444,11 @@ disagree.
 
 Type an exact figure into the inspector when clicking is not good enough: "30.0
 m at 125°T" with either endpoint held fixed, a rotation to the degree, a lane
-spacing to the centimetre.
+spacing to the centimeter.
 
 The one thing pixels decide is whether a label *fits*. An edge too short on
 screen to carry its dimension legibly is left unlabelled rather than stacked on
-its neighbours, and the block in the middle of an area is held back until the
+its neighbors, and the block in the middle of an area is held back until the
 box is big enough for its number of lines. Zoom in and they come back; the
 inspector has them at any zoom.
 
@@ -464,7 +464,7 @@ stated rather than left to the code:
 
 So a width that does not divide by the spacing gets slightly tighter lanes
 rather than a bare strip along one edge. **2 m in a 5 m width gives three lanes
-at 1.5 m**, not two at 2 m with a metre unswept. The inspector reports the
+at 1.5 m**, not two at 2 m with a meter unswept. The inspector reports the
 effective spacing whenever it differs from the requested one.
 
 A 30 × 20 m box at 2 m gives ten lanes at exactly 2 m, the first and last 1 m
@@ -478,14 +478,14 @@ exception.
 
 ### Coverage is not lane-flying
 
-**Flying the centre lines is not surveying every square metre.** Nothing in
+**Flying the center lines is not surveying every square meter.** Nothing in
 this module knows how wide the camera sees, so by default the plan reports:
 
 > *coverage not established — no effective swath width has been given, and
-> flying a lane's centre line does not survey the strip either side of it*
+> flying a lane's center line does not survey the strip either side of it*
 
 Supply a **Swath** in the inspector and it will compute overlap, any gap
-between lanes, and the uncovered strip at each edge — labelled as what it is:
+between lanes, and the uncovered strip at each edge — labeled as what it is:
 planned coverage from a stated swath width. It is **not** observed coverage,
 and it accounts for nothing about altitude, attitude, visibility or what was
 actually flown.
@@ -523,7 +523,7 @@ without one the strip says why instead of showing a number. A position gap is
 counted and adds no path length, and an estimator jump is not counted as
 distance flown.
 
-The corridor is a **stated width**, not an accuracy claim: it colours the
+The corridor is a **stated width**, not an accuracy claim: it colors the
 readout when you are inside it and says what it is. It knows nothing about the
 tether, obstacles or current.
 
@@ -536,7 +536,7 @@ how much that claim is worth, and those are different questions that the same
 two numbers answer identically whether the acoustics are correcting the
 estimator or stopped four minutes ago.
 
-So **the track is coloured by what each position was resting on**, and the line
+So **the track is colored by what each position was resting on**, and the line
 under the coordinates says it in words.
 
 | On the map | Means |
@@ -545,7 +545,7 @@ under the coordinates says it in words.
 | **blue** | dead-reckoned — relative aiding from a confirmed origin. The shape is right; the whole thing drifts |
 | **coral** | degraded — aiding is claimed but something behind it is stale or invalid |
 | **coral, dashed** | no aiding at all — constant-position mode |
-| **grey, dotted** | not established |
+| **gray, dotted** | not established |
 
 Each point keeps the verdict it was recorded with. A track recoloured from the
 *present* state would quietly relabel history: an hour of good acoustic work
@@ -562,7 +562,7 @@ so the stronger claim is not available and is not made.
 
 This matters because **the absolute-position flag stays true long after the
 corrections stop.** The estimator does not fall over; it coasts. In the
-acoustic profile a position with no recent fix behind it is therefore coloured
+acoustic profile a position with no recent fix behind it is therefore colored
 **degraded**, with the age on the readout, because that gap is precisely where
 an operator carries on trusting a fix that has been drifting for minutes. The
 test is not applied to a DVL-only dive, where there are no acoustics to be
@@ -645,7 +645,7 @@ abandoned for the wrong reason.
 An empty window says so, and says what that does and does not rule out: it
 rules out everything the session log watches, and nothing it does not.
 
-Alignment is on the monotonic clock. A laptop that has just synchronised can
+Alignment is on the monotonic clock. A laptop that has just synchronized can
 move its wall clock backwards by seconds, which would silently reorder the
 very events being examined.
 
@@ -671,7 +671,7 @@ of what the vehicle is doing now.
 ## Waypoints
 
 **＋ Create waypoint** captures the ROV's position **at the instant you press
-it**, saves it to disk, and *then* offers a rename. Cancelling the rename keeps
+it**, saves it to disk, and *then* offers a rename. Canceling the rename keeps
 the point.
 
 That order is deliberate: by the time you have typed "wolf eel den" the ROV has
@@ -741,7 +741,7 @@ saved state whose session id matches — yesterday's total is not this flight's.
 | Voltage / current | `BATTERY_STATUS` | `current_battery = −1` means *no sensor*, not a small negative current. |
 | ROV position | `GLOBAL_POSITION_INT` | or `LOCAL_POSITION_NED` projected through a **confirmed** origin, marked *dead-reckoned*. |
 | Vessel position/heading | WL UGPS External `/status` | GGA and HDT freshness are its own four-second receipt window. It does **not** publish fix quality, HDOP or satellite count, and its course/speed over ground are fixed at 0 and never updated — the page marks those *unsupported* rather than showing 0. |
-| Acoustic quality | `GPS_INPUT.vdop` | the Water Linked extension puts the **acoustic standard deviation in metres** there. It is not a vertical dilution of precision. |
+| Acoustic quality | `GPS_INPUT.vdop` | the Water Linked extension puts the **acoustic standard deviation in meters** there. It is not a vertical dilution of precision. |
 | Satellites | `GPS_INPUT.satellites_visible` | the **topside** receiver's count, forced to ≥6 under `--ignore_gps`. Not a measure of underwater position quality. |
 | EKF | `EKF_STATUS_REPORT` flags | `EKF_POS_HORIZ_ABS`, `EKF_POS_HORIZ_REL`, `EKF_CONST_POS_MODE`. |
 
@@ -762,7 +762,7 @@ Replay drives the whole page from something that is not a vehicle, and
 so there is nothing a send could be called on.
 
 Sources: a navigation session this program recorded; a transect CSV from the
-extractor (any dive this year); or a synthetic dive, labelled **SYNTHETIC**
+extractor (any dive this year); or a synthetic dive, labeled **SYNTHETIC**
 everywhere it appears, with deliberate faults — DVL lock loss, a stale vessel
 heading, a power excursion past 1,000 W, an estimator reset.
 
@@ -824,7 +824,7 @@ aiding at all — that one *is* a fault.
 (offline)**, which is in the repository and always there.
 
 **The altitude shows `—` and "no bottom lock"**
-→ The downward range is invalid. This is correct behaviour: it will not
+→ The downward range is invalid. This is correct behavior: it will not
 substitute depth or a stale value. Check the DVL and `RNGFND1_TYPE = 10`.
 
 **`⚠ RNGFND1_ORIENT is 5000 — not an orientation`**
@@ -864,7 +864,7 @@ BlueOS **1.5.0-beta.39**, Navigator.
 | Water Linked DVL | v1.0.10 | `dvl.py`, `mavlink2resthelper.py`, `main.py` (Flask, port 9001) | **works** — `/get_status` read; message type checked |
 | WL UGPS External | v1.1.0-beta.1 | `main.py` (FastAPI, container port **8080**), `topside_position.py` | **works** — `/status` read; port discovered via BlueOS |
 | Water Linked UGPS | v1.0.7 | `mavlink2resthelper.py` | **works** — read through `GPS_INPUT` at the autopilot |
-| Surftrak (in ArduSub) | 4.5.7 | `GCS_Mavlink.cpp`, `mode_surftrak.cpp` | **works** — `RFTarget` in metres, −0.01 = no target |
+| Surftrak (in ArduSub) | 4.5.7 | `GCS_Mavlink.cpp`, `mode_surftrak.cpp` | **works** — `RFTarget` in meters, −0.01 = no target |
 | Surftrak Fixit | v1.0.0-beta.2 | `surftrak_status.py` | **not called** — confirmed wrong-parameter bug; its damage is detected |
 | Tether Diagnostics | v1.0.3 | not resolved publicly | **not used** by this page |
 | Madrona / major_tom | — | not audited | **not used** by this page |
@@ -971,13 +971,13 @@ With Nereo on the bench, disarmed, tether connected. Tick these before flying.
 | Origin: mechanism detection, staging order, saved ≠ active | **done** — tested |
 | Versioned session log, manifest, append-only events | **done** — tested |
 | Replay, synthetic faults, speed-independent energy, no vehicle writes | **done** — tested |
-| Bundled, licensed Pier 59 basemap in the repository | **done** — 600 KiB, manifest with checksums and licence, tested from a clean cache |
+| Bundled, licensed Pier 59 basemap in the repository | **done** — 600 KiB, manifest with checksums and license, tested from a clean cache |
 | Interactive plan: measured lines, rotated boxes, grids, circles, polygons | **done** — tested, including 600 m² verified three independent ways |
 | Documented edge-offset rule; non-divisible spacing handled | **done** — tested; 2 m in a 5 m width gives three lanes at 1.5 m |
 | Coverage refused without a stated swath width | **done** — tested |
 | Live guidance: cross-track by travel direction, projected progress | **done** — tested against synthetic paths, including stale position and jumps |
 | OTS / custom start writes nothing to the vehicle | **done** — tested by making every HTTP call raise |
-| Track coloured by navigation state, stamped at record time | **done** — tested, including distinctness in both appearance modes |
+| Track colored by navigation state, stamped at record time | **done** — tested, including distinctness in both appearance modes |
 | Guided diagnosis, observation separated from suspected cause | **done** — tested; no action this program performs itself |
 | "What changed?" without inferring causality | **done** — tested; the words because/caused/due to appear nowhere in its output |
 | Diagnostic snapshot with bounded history and parameter provenance | **done** — tested; starts no collectors |
@@ -1001,9 +1001,9 @@ one function costs.
 | 2,000 track points | 22 ms | 42 ms |
 | 8,000 track points | 40 ms | 84 ms |
 | 8,000 points + 40 grids (400 lanes) | 59 ms | 118 ms |
-| the same, with trust colouring off | 44 ms | 88 ms |
+| the same, with trust coloring off | 44 ms | 88 ms |
 
-Colouring the track by navigation state costs about 15% on the heaviest case
+Coloring the track by navigation state costs about 15% on the heaviest case
 and is not measurable on a normal one, because the extra work is splitting a
 polyline into runs rather than drawing anything more.
 
@@ -1066,10 +1066,10 @@ imagery and it goes blocky rather than blank — that is the enlargement, and it
 says so.
 
 **3. Draw the survey.** Pick the **rectangle** tool and drag a box over the
-survey area. The edges carry their length and width in metres while you drag.
+survey area. The edges carry their length and width in meters while you drag.
 Type exact numbers into the inspector — 30 by 20, rotated 37 — and the box on
 the map follows. Switch it to a **survey grid** and set the lane spacing to 2 m:
-ten lanes appear, inset a metre from each edge, with their travel order and
+ten lanes appear, inset a meter from each edge, with their travel order and
 turn legs drawn.
 
 Add a **line** for the approach: click the start, click the end, then type

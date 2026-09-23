@@ -103,11 +103,11 @@ def test_the_chapter_buttons_are_larger_than_a_standard_button(app):
     assert T.CHAPTER_BTN_BORDER_ON > T.CHAPTER_BTN_BORDER
 
 
-def test_each_chapter_gets_its_own_colour(app):
+def test_each_chapter_gets_its_own_color(app):
     from utc.gui import theme as T
-    assert len(T.CHAPTER_COLOURS) >= len(EXPECTED_CHAPTERS)
-    used = [app.nav._colour_for(i) for i in range(1, 5)]
-    assert len(set(used)) == 4, "four chapters, four colours"
+    assert len(T.CHAPTER_COLORS) >= len(EXPECTED_CHAPTERS)
+    used = [app.nav._color_for(i) for i in range(1, 5)]
+    assert len(set(used)) == 4, "four chapters, four colors"
 
 
 def test_the_gaps_between_buttons_are_not_clickable(app):
@@ -120,7 +120,7 @@ def test_the_gaps_between_buttons_are_not_clickable(app):
 
 
 # --------------------------------------------------------------------------
-#  behaviour
+#  behavior
 # --------------------------------------------------------------------------
 
 
@@ -213,10 +213,10 @@ def test_every_button_style_puts_legible_type_on_every_chapter(app, style,
 
     monkeypatch.setattr(T, "CHAPTER_BTN_STYLE", style)
     for index in (1, 2, 3, 4):
-        colour = app.nav._colour_for(index)
+        color = app.nav._color_for(index)
         for mode in (lambda pair: pair[0], lambda pair: pair[1]):
             fill, _b, _w, _r, _bar, ink = app.nav._button_look(
-                colour, state, True, mode)
+                color, state, True, mode)
             assert brand.contrast(ink, fill) >= 4.5, (
                 f"{style}/{state}: {ink} on {fill} for chapter {index}")
 

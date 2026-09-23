@@ -42,7 +42,7 @@ def telemetry_csv_for(flight_dir: Path, cache_root: Path) -> tuple[Path | None, 
 
     One place decides this, because the answer is not "the cache's
     telemetry.csv": a flight whose mcap failed can be pointed at the
-    autopilot's dataflash log instead, and every caller has to honour that.
+    autopilot's dataflash log instead, and every caller has to honor that.
     """
     cache = cache_dir_for(Path(flight_dir), cache_root)
     over = binlog.override_active(cache)

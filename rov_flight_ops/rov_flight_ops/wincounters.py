@@ -24,7 +24,7 @@ row with a blank in it, never an exception that stops a flight being recorded.
 column can be explained rather than guessed at.
 
 Counters are added with `PdhAddEnglishCounterW` rather than `PdhAddCounterW`:
-counter names are localised, and a laptop set to another display language
+counter names are localized, and a laptop set to another display language
 would otherwise find none of them.
 """
 
@@ -95,7 +95,7 @@ _PDH = _load_pdh()
 #:
 #: `% Idle Time` rather than `% Disk Time` for how busy the disk is: on a
 #: multi-queue NVMe the latter routinely reads several hundred percent, which
-#: is not a percentage of anything a reader would recognise. 100 minus idle is
+#: is not a percentage of anything a reader would recognize. 100 minus idle is
 #: the figure Task Manager shows.
 SCALARS = {
     "cpu_perf_pct":        r"\Processor Information(_Total)\% Processor Performance",
@@ -125,7 +125,7 @@ _ENGINE_RE = re.compile(
 
 
 class Counters:
-    """One PDH query holding every counter this programme reads.
+    """One PDH query holding every counter this program reads.
 
     Rate counters (bytes/sec, pages/sec, % busy) are differences between two
     collections, so the first `sample()` after construction returns mostly
@@ -244,7 +244,7 @@ class GpuReading:
     total_pct: float | None = None
     video_decode_pct: float | None = None
     memory_used_mb: float | None = None
-    #: Utilisation attributable to a given set of pids, same units as `total`.
+    #: Utilization attributable to a given set of pids, same units as `total`.
     by_pid_pct: dict[int, float] = field(default_factory=dict)
 
 
@@ -629,7 +629,7 @@ def capabilities(counters: Counters | None = None) -> dict[str, str]:
         "unavailable -- Windows exposes core temperatures only to a signed "
         "driver or an elevated WMI read, and UTC runs as neither")
     gpu = read_gpu(c)
-    out["gpu utilisation"] = (
+    out["gpu utilization"] = (
         "per-process engine counters" if gpu.total_pct is not None
         else "no GPU engine counters")
     out["gpu temperature"] = (

@@ -2,7 +2,7 @@
 Drawing and editing a survey plan on the map.
 
 The interaction half of the plan editor. `plan.py` owns the geometry and the
-metres; this owns what a press, a drag and a release mean, and what gets drawn
+meters; this owns what a press, a drag and a release mean, and what gets drawn
 on top of the chart while they happen.
 
 **Pan and draw are separate modes, always.** A tool is armed deliberately and
@@ -12,7 +12,7 @@ with the mode, and the mode is named on screen rather than inferred from which
 modifier is held.
 
 **Dimensions are live and come from the geometry, not the pixels.** While a
-rectangle is being dragged its edges carry the length and width in metres and
+rectangle is being dragged its edges carry the length and width in meters and
 its middle carries the area, computed by projecting the pointer into the
 plan's local frame -- so they are the same numbers the inspector will show and
 the same ones that get saved. A label derived from screen distance would
@@ -38,17 +38,17 @@ CLICK_PX = 4
 
 #: How far outside the canvas a feature may reach and still be drawn. A
 #: little, so a shape half off the edge keeps its visible half; nothing is
-#: gained by drawing the forty boxes that are a kilometre away.
+#: gained by drawing the forty boxes that are a kilometer away.
 VIEW_MARGIN_PX = 80
 
-#: Below this many pixels between neighbouring lanes, individual lanes are a
+#: Below this many pixels between neighboring lanes, individual lanes are a
 #: solid block rather than a diagram. The box is drawn with a count instead --
 #: which is the information at that scale anyway, and turns forty grids from
 #: about a second of canvas work into a few milliseconds.
 LANE_MIN_PX = 5
 
 #: An edge shorter than this on screen cannot carry its dimension legibly, so
-#: the label is left off rather than stacked on its neighbours. Zooming in
+#: the label is left off rather than stacked on its neighbors. Zooming in
 #: brings it back and the inspector has the number either way. Without this a
 #: 30 m box seen from 400 m away draws five labels inside seventy pixels, and
 #: the smudge that results hides the shape underneath it.
@@ -90,7 +90,7 @@ TOOL_HINT = {
     "polyline": "Click each point; double-click or Enter to finish.",
     "rect": "Drag a box. Hold Shift while dragging a corner handle to rotate.",
     "grid": "Drag a box; lanes fill it. Spacing and direction are on the right.",
-    "circle": "Click the centre, then drag out the radius.",
+    "circle": "Click the center, then drag out the radius.",
     "polygon": "Click each corner; double-click or Enter to close.",
 }
 
@@ -158,11 +158,11 @@ class PlanEditor:
     def drawing(self) -> bool:
         return self.tool != "pan"
 
-    def cancel_draft(self, why: str = "Cancelled.") -> None:
+    def cancel_draft(self, why: str = "Canceled.") -> None:
         """Escape: abandon what is being drawn, keep everything saved.
 
         `why` because the caller often knows something the operator needs --
-        "too small to survey" is not the same message as "cancelled", and an
+        "too small to survey" is not the same message as "canceled", and an
         earlier version set the explanation and then had it overwritten here,
         so a refused box looked like one the operator had abandoned.
         """
@@ -191,13 +191,13 @@ class PlanEditor:
     # ------------------------------------------------------------------
 
     def _anchor(self) -> P.Anchor | None:
-        """The local frame a new feature is drawn in: the map's centre.
+        """The local frame a new feature is drawn in: the map's center.
 
         One anchor per feature, taken where it was drawn, so a plan spread
         over a site does not accumulate projection error from a single distant
         origin.
         """
-        c = self.map.centre
+        c = self.map.center
         return P.Anchor(c[0], c[1]) if c else None
 
     def _to_local(self, anchor: P.Anchor, x: float, y: float):
@@ -350,19 +350,19 @@ class PlanEditor:
         elif self.tool == "polygon" and len(pts) >= 3:
             feature = P.Polygon(anchor=a, points=pts)
         elif self.tool == "circle" and len(pts) >= 2:
-            feature = P.Circle(anchor=a, centre=pts[0],
+            feature = P.Circle(anchor=a, center=pts[0],
                                radius_m=math.dist(pts[0], pts[1]))
         elif self.tool in ("rect", "grid") and len(pts) >= 2:
             ae, an = pts[0]
             be, bn = pts[1]
-            centre = ((ae + be) / 2.0, (an + bn) / 2.0)
+            center = ((ae + be) / 2.0, (an + bn) / 2.0)
             width = abs(be - ae)
             length = abs(bn - an)
             if self.tool == "rect":
-                feature = P.Rect(anchor=a, centre=centre, length_m=length,
+                feature = P.Rect(anchor=a, center=center, length_m=length,
                                  width_m=width, rotation_deg=0.0)
             else:
-                feature = P.Grid(anchor=a, centre=centre, length_m=length,
+                feature = P.Grid(anchor=a, center=center, length_m=length,
                                  width_m=width, rotation_deg=0.0,
                                  spacing_m=self.grid_spacing_m,
                                  lane_axis=self.grid_axis)
@@ -401,15 +401,15 @@ class PlanEditor:
                 at = self._to_screen(f.anchor, e, n)
                 if at:
                     out.append((at[0], at[1], "corner", i))
-            at = self._to_screen(f.anchor, *f.centre)
+            at = self._to_screen(f.anchor, *f.center)
             if at:
-                out.append((at[0], at[1], "centre", -1))
+                out.append((at[0], at[1], "center", -1))
         elif isinstance(f, P.Circle):
-            at = self._to_screen(f.anchor, *f.centre)
+            at = self._to_screen(f.anchor, *f.center)
             if at:
-                out.append((at[0], at[1], "centre", -1))
-            edge = self._to_screen(f.anchor, f.centre[0] + f.radius_m,
-                                   f.centre[1])
+                out.append((at[0], at[1], "center", -1))
+            edge = self._to_screen(f.anchor, f.center[0] + f.radius_m,
+                                   f.center[1])
             if edge:
                 out.append((edge[0], edge[1], "radius", 0))
         elif isinstance(f, (P.Line, P.Polygon)):
@@ -435,13 +435,13 @@ class PlanEditor:
             return
 
         if isinstance(f, (P.Rect, P.Grid)):
-            if role == "centre":
-                f.centre = pt
+            if role == "center":
+                f.center = pt
             elif role == "corner" and self._rotating:
-                # Shift-drag a corner spins the box about its centre, keeping
+                # Shift-drag a corner spins the box about its center, keeping
                 # its dimensions -- which is what "arbitrary rotation" means.
-                de = pt[0] - f.centre[0]
-                dn = pt[1] - f.centre[1]
+                de = pt[0] - f.center[0]
+                dn = pt[1] - f.center[1]
                 # The corner's own angle within the unrotated box, so the box
                 # does not jump to put the corner under the pointer.
                 base = math.degrees(math.atan2(f.width_m / 2, f.length_m / 2))
@@ -463,15 +463,15 @@ class PlanEditor:
                 f.length_m, f.width_m = length, width
                 mid_local = (le / 2.0, ln / 2.0)
                 a2 = math.radians(f.rotation_deg)
-                f.centre = (opp[0] + mid_local[0] * math.cos(a2)
+                f.center = (opp[0] + mid_local[0] * math.cos(a2)
                             + mid_local[1] * math.sin(a2),
                             opp[1] - mid_local[0] * math.sin(a2)
                             + mid_local[1] * math.cos(a2))
         elif isinstance(f, P.Circle):
-            if role == "centre":
-                f.centre = pt
+            if role == "center":
+                f.center = pt
             else:
-                f.radius_m = max(0.25, math.dist(f.centre, pt))
+                f.radius_m = max(0.25, math.dist(f.center, pt))
         elif isinstance(f, (P.Line, P.Polygon)) and role == "vertex":
             if 0 <= idx < len(f.points):
                 f.points[idx] = pt
@@ -539,18 +539,18 @@ class PlanEditor:
             return False
         if not _on_screen(pts, view):
             return False
-        colour = _hex(T.ACCENT if selected else T.HEADING)
+        color = _hex(T.ACCENT if selected else T.HEADING)
         width = 3 if selected else 2
 
         if isinstance(f, P.Grid):
-            self._draw_grid(f, pts, colour, selected)
+            self._draw_grid(f, pts, color, selected)
         elif f.closed():
             flat = [v for p in pts for v in p]
-            c.create_polygon(*flat, outline=colour, fill="", width=width)
+            c.create_polygon(*flat, outline=color, fill="", width=width)
         else:
             flat = [v for p in pts for v in p]
-            c.create_line(*flat, fill=colour, width=width, capstyle="round")
-            self._draw_direction(pts, colour)
+            c.create_line(*flat, fill=color, width=width, capstyle="round")
+            self._draw_direction(pts, color)
 
         label = f.name or f.kind
         m = f.measurements()
@@ -559,12 +559,12 @@ class PlanEditor:
         elif m.get("length_m"):
             label += f"  {m['length_m']:.1f} m"
         c.create_text(pts[0][0] + 8, pts[0][1] - 10, text=label, anchor="w",
-                      fill=colour, font=T.FONT_SMALL)
+                      fill=color, font=T.FONT_SMALL)
 
         if selected:
             self._draw_dimensions(f, pts)
             for hx, hy, role, _i in self.handles(f):
-                fill = _hex(T.OK) if role == "centre" else _hex(T.ACCENT)
+                fill = _hex(T.OK) if role == "center" else _hex(T.ACCENT)
                 c.create_rectangle(hx - HANDLE_PX / 2, hy - HANDLE_PX / 2,
                                    hx + HANDLE_PX / 2, hy + HANDLE_PX / 2,
                                    fill=fill, outline=_hex(T.BG))
@@ -573,10 +573,10 @@ class PlanEditor:
                           anchor="w", fill=_hex(T.TEXT_MUTED),
                           font=T.FONT_SMALL)
 
-    def _draw_grid(self, g, corner_pts, colour: str, selected: bool) -> None:
+    def _draw_grid(self, g, corner_pts, color: str, selected: bool) -> None:
         c = self.map.canvas
         flat = [v for p in corner_pts for v in p]
-        c.create_polygon(*flat, outline=colour, fill="", width=3 if selected else 2,
+        c.create_polygon(*flat, outline=color, fill="", width=3 if selected else 2,
                          dash=(6, 3))
 
         # How far apart the lanes would be on screen. Below a few pixels they
@@ -594,7 +594,7 @@ class PlanEditor:
         if across / n < LANE_MIN_PX and not selected:
             cx = sum(p[0] for p in corner_pts[:4]) / 4
             cy = sum(p[1] for p in corner_pts[:4]) / 4
-            c.create_text(cx, cy, text=f"{n} lanes", fill=colour,
+            c.create_text(cx, cy, text=f"{n} lanes", fill=color,
                           font=T.FONT_SMALL)
             return
 
@@ -606,15 +606,15 @@ class PlanEditor:
                 continue
             done = lane.state == "done"
             skipped = lane.state == "skipped"
-            lane_colour = (_hex(T.OK) if done else
-                           _hex(T.TEXT_MUTED) if skipped else colour)
-            c.create_line(a[0], a[1], b[0], b[1], fill=lane_colour,
+            lane_color = (_hex(T.OK) if done else
+                           _hex(T.TEXT_MUTED) if skipped else color)
+            c.create_line(a[0], a[1], b[0], b[1], fill=lane_color,
                           width=2, dash=(2, 4) if skipped else None)
             # Direction arrow at the far end, so the travel order is visible.
-            self._arrow(a, b, lane_colour)
+            self._arrow(a, b, lane_color)
             mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
             c.create_text(mid[0], mid[1] - 7, text=str(lane.index),
-                          fill=lane_colour, font=T.FONT_SMALL)
+                          fill=lane_color, font=T.FONT_SMALL)
         # Turn legs, dotted and visibly not survey lines.
         for pa, pb in g.transits():
             a = self._to_screen(g.anchor, *pa)
@@ -623,17 +623,17 @@ class PlanEditor:
                 c.create_line(a[0], a[1], b[0], b[1], fill=_hex(T.TEXT_MUTED),
                               width=1, dash=(1, 4))
 
-    def _arrow(self, a, b, colour: str) -> None:
+    def _arrow(self, a, b, color: str) -> None:
         ang = math.atan2(b[1] - a[1], b[0] - a[0])
         for s in (-1, 1):
             self.map.canvas.create_line(
                 b[0], b[1],
                 b[0] - 9 * math.cos(ang + s * 0.5),
-                b[1] - 9 * math.sin(ang + s * 0.5), fill=colour, width=2)
+                b[1] - 9 * math.sin(ang + s * 0.5), fill=color, width=2)
 
-    def _draw_direction(self, pts, colour: str) -> None:
+    def _draw_direction(self, pts, color: str) -> None:
         if len(pts) >= 2:
-            self._arrow(pts[-2], pts[-1], colour)
+            self._arrow(pts[-2], pts[-1], color)
 
     def _draw_dimensions(self, f, pts) -> None:
         """Numbers on the edges, so the shape says what it is while it is
@@ -661,8 +661,8 @@ class PlanEditor:
                 # which put "20 m" along a 30 m edge -- invisible
                 # while both labels were drawn and the box was square
                 # on screen, obvious the moment only one of them fits.
-                metres = f.length_m if i % 2 == 0 else f.width_m
-                c.create_text(mid[0], mid[1], text=f"{metres:.1f} m",
+                meters = f.length_m if i % 2 == 0 else f.width_m
+                c.create_text(mid[0], mid[1], text=f"{meters:.1f} m",
                               fill=_hex(T.TEXT), font=T.FONT_SMALL)
             lines = 3 if isinstance(f, P.Grid) else 2
             if min(edges) < BLOCK_LINE_PX * lines:
@@ -687,7 +687,7 @@ class PlanEditor:
                               text=f"{length:.1f} m  {brg:.0f}°T",
                               fill=_hex(T.TEXT), font=T.FONT_SMALL)
         elif isinstance(f, P.Circle):
-            at = self._to_screen(f.anchor, *f.centre)
+            at = self._to_screen(f.anchor, *f.center)
             if at and pts and _px(at, pts[0]) >= LABEL_MIN_PX / 2:
                 c.create_text(at[0], at[1] - 10,
                               text=f"r {f.radius_m:.1f} m · "
@@ -700,7 +700,7 @@ class PlanEditor:
             return
         c = self.map.canvas
         a = self._draft_anchor
-        colour = _hex(T.ACCENT)
+        color = _hex(T.ACCENT)
         pts = [self._to_screen(a, e, n) for e, n in self._draft]
         pts = [p for p in pts if p]
         cur = (self._to_screen(a, *self._cursor) if self._cursor else None)
@@ -712,7 +712,7 @@ class PlanEditor:
                    self._to_screen(a, e1, n1), self._to_screen(a, e0, n1)]
             if all(box):
                 flat = [v for p in box for v in p]
-                c.create_polygon(*flat, outline=colour, fill="", width=2,
+                c.create_polygon(*flat, outline=color, fill="", width=2,
                                  dash=(5, 3))
                 width = abs(e1 - e0)
                 length = abs(n1 - n0)
@@ -721,7 +721,7 @@ class PlanEditor:
                     mid = ((p[0] + q[0]) / 2, (p[1] + q[1]) / 2)
                     c.create_text(mid[0], mid[1],
                                   text=f"{(width if i % 2 == 0 else length):.1f} m",
-                                  fill=colour, font=T.FONT_SMALL)
+                                  fill=color, font=T.FONT_SMALL)
                 cx = sum(p[0] for p in box) / 4
                 cy = sum(p[1] for p in box) / 4
                 note = f"{width * length:,.0f} m²"
@@ -729,24 +729,24 @@ class PlanEditor:
                     across = width if self.grid_axis == "length" else length
                     n = max(1, math.ceil(across / self.grid_spacing_m - 1e-9))
                     note += f"\n{n} lanes @ {self.grid_spacing_m:g} m"
-                c.create_text(cx, cy, text=note, fill=colour,
+                c.create_text(cx, cy, text=note, fill=color,
                               font=T.FONT_SMALL, justify="center")
             return
 
         if self.tool == "circle" and pts and cur:
             r = math.dist(pts[0], cur)
             c.create_oval(pts[0][0] - r, pts[0][1] - r, pts[0][0] + r,
-                          pts[0][1] + r, outline=colour, width=2, dash=(5, 3))
-            metres = math.dist(self._draft[0], self._cursor)
+                          pts[0][1] + r, outline=color, width=2, dash=(5, 3))
+            meters = math.dist(self._draft[0], self._cursor)
             c.create_text(pts[0][0], pts[0][1] - 12,
-                          text=f"r {metres:.1f} m · {math.pi * metres ** 2:,.0f} m²",
-                          fill=colour, font=T.FONT_SMALL)
+                          text=f"r {meters:.1f} m · {math.pi * meters ** 2:,.0f} m²",
+                          fill=color, font=T.FONT_SMALL)
             return
 
         chain = pts + ([cur] if cur else [])
         if len(chain) >= 2:
             flat = [v for p in chain for v in p]
-            c.create_line(*flat, fill=colour, width=2, dash=(5, 3))
+            c.create_line(*flat, fill=color, width=2, dash=(5, 3))
             if self._cursor is not None:
                 last = self._draft[-1]
                 d = math.dist(last, self._cursor)
@@ -757,10 +757,10 @@ class PlanEditor:
                 if len(self._draft) > 1:
                     text += f"   total {total:.1f} m"
                 c.create_text(chain[-1][0] + 10, chain[-1][1] - 10, text=text,
-                              anchor="w", fill=colour, font=T.FONT_SMALL)
+                              anchor="w", fill=color, font=T.FONT_SMALL)
         for p in pts:
             c.create_oval(p[0] - 3, p[1] - 3, p[0] + 3, p[1] + 3,
-                          fill=colour, outline="")
+                          fill=color, outline="")
 
 
 def _sp(m: dict) -> str:
@@ -837,9 +837,9 @@ def _near_segment(a, b, at, tol: float) -> bool:
     return math.dist((ax + t * dx, ay + t * dy), at) <= tol
 
 
-def _hex(colour) -> str:
+def _hex(color) -> str:
     import customtkinter as ctk
-    if isinstance(colour, (tuple, list)):
+    if isinstance(color, (tuple, list)):
         mode = ctk.get_appearance_mode()
-        return colour[1] if str(mode).lower() == "dark" else colour[0]
-    return colour
+        return color[1] if str(mode).lower() == "dark" else color[0]
+    return color

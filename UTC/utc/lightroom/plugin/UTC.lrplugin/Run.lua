@@ -2,7 +2,7 @@
   The entry point: File > Plug-in Extras > Run UTC RAW batch.
 
   Lightroom will not run a plugin just because it is installed, registered and
-  enabled -- it initialises one lazily, the first time something asks for an
+  enabled -- it initializes one lazily, the first time something asks for an
   entry point the plugin declares. An earlier design had only LrInitPlugin and
   no entry points at all, and so never executed a single line while the
   Plug-in Manager cheerfully reported "Installed and running". This menu item

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tkinter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import date as _date
 
 import customtkinter as ctk
@@ -854,3 +854,18 @@ class TimeEntry(ctk.CTkEntry):
     @property
     def complete(self) -> bool:
         return len(self._digits(self._var.get())) == 6
+
+
+def transect_error(errs: Sequence[str], limit: int = 8) -> str:
+    """The "fix the transects" dialog, with the usual cause spelled out.
+
+    Every tab reads its transects from the rows on *Flight & transects*, not
+    from the flight folder on disk, so a flight opened anywhere else validates
+    as an empty plan. That reads as a complaint about the times themselves,
+    which sends people to check a file that was never the problem.
+    """
+    bullets = list(errs[:limit])
+    bullets.append("Open the flight folder on the Flight & transects tab "
+                   "first — the other tabs read its transects from there, and "
+                   "cannot run until it has been opened at least once.")
+    return "Fix the transects first:\n\n• " + "\n• ".join(bullets)

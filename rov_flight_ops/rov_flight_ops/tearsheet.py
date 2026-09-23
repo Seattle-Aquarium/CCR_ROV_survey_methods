@@ -28,7 +28,7 @@ Brand rules followed from SAQ-001 (v1, Aug 2023), via `brand`:
   * Salish, Fathom and Mediterranean lead; Algae, Seafoam, Coral and Purple
     Star accent. No tints of anything but Stone.
   * Severity uses Coral, not red: the palette has a warm accent and the
-    guidelines ask that the brand's own colours do the work.
+    guidelines ask that the brand's own colors do the work.
 """
 
 from __future__ import annotations
@@ -55,9 +55,9 @@ PAGE_W, PAGE_H = 11.0, 8.5
 LEFT, RIGHT = 0.055, 0.945
 TOP, BOTTOM = 0.945, 0.055
 
-#: Severity to colour. Coral for the things that stopped the survey, Seafoam
+#: Severity to color. Coral for the things that stopped the survey, Seafoam
 #: for the things worth reading, Algae for the things that went right.
-LEVEL_COLOUR = {
+LEVEL_COLOR = {
     R.CRITICAL: brand.CORAL,
     R.WARNING: brand.SEAFOAM,
     R.NOTE: brand.MEDITERRANEAN,
@@ -134,43 +134,43 @@ class _Pen:
         self.fig = fig
         self.f = fonts
 
-    def display(self, x, y, text, colour=brand.SALISH, size=26, **kw):
-        return self.fig.text(x, y, text.upper(), color=colour, size=size,
+    def display(self, x, y, text, color=brand.SALISH, size=26, **kw):
+        return self.fig.text(x, y, text.upper(), color=color, size=size,
                              family=self.f["display"], weight="extra bold",
                              va="top", **kw)
 
-    def title(self, x, y, text, colour=brand.SALISH, size=15, **kw):
-        return self.fig.text(x, y, text, color=colour, size=size,
+    def title(self, x, y, text, color=brand.SALISH, size=15, **kw):
+        return self.fig.text(x, y, text, color=color, size=size,
                              family=self.f["display"], weight="bold",
                              va="top", **kw)
 
-    def header(self, x, y, text, colour=brand.SALISH, size=11, **kw):
-        return self.fig.text(x, y, text, color=colour, size=size,
+    def header(self, x, y, text, color=brand.SALISH, size=11, **kw):
+        return self.fig.text(x, y, text, color=color, size=size,
                              family=self.f["body"], weight="semibold",
                              va="top", **kw)
 
-    def eyebrow(self, x, y, text, colour=brand.MEDITERRANEAN, size=7.5, **kw):
-        return self.fig.text(x, y, text.upper(), color=colour, size=size,
+    def eyebrow(self, x, y, text, color=brand.MEDITERRANEAN, size=7.5, **kw):
+        return self.fig.text(x, y, text.upper(), color=color, size=size,
                              family=self.f["eyebrow"],
                              weight=self.f["eyebrow_weight"],
                              va="top", **kw)
 
-    def body(self, x, y, text, colour=brand.STONE, size=8.2,
+    def body(self, x, y, text, color=brand.STONE, size=8.2,
              weight="regular", **kw):
-        return self.fig.text(x, y, text, color=colour, size=size,
+        return self.fig.text(x, y, text, color=color, size=size,
                              family=self.f["body"], weight=weight,
                              va="top", linespacing=1.45, **kw)
 
-    def mono(self, x, y, text, colour=brand.STONE, size=7.4, **kw):
-        return self.fig.text(x, y, text, color=colour, size=size,
+    def mono(self, x, y, text, color=brand.STONE, size=7.4, **kw):
+        return self.fig.text(x, y, text, color=color, size=size,
                              family="DejaVu Sans Mono", va="top",
                              linespacing=1.5, **kw)
 
-    def rule(self, x0, x1, y, colour=brand.STONE_TINTS[20], width=0.8):
+    def rule(self, x0, x1, y, color=brand.STONE_TINTS[20], width=0.8):
         line = self.fig.add_artist(
             __import__("matplotlib.lines", fromlist=["Line2D"]).Line2D(
                 [x0, x1], [y, y], transform=self.fig.transFigure,
-                color=colour, linewidth=width))
+                color=color, linewidth=width))
         return line
 
     def measure(self, artist) -> float:
@@ -192,11 +192,11 @@ class _Pen:
             return 0.0
         return box.height / self.fig.bbox.height
 
-    def panel(self, x0, y0, x1, y1, colour=brand.PUMICE, alpha=1.0, z=0):
+    def panel(self, x0, y0, x1, y1, color=brand.PUMICE, alpha=1.0, z=0):
         import matplotlib.patches as mp  # noqa: PLC0415
         self.fig.add_artist(mp.Rectangle(
             (x0, y0), x1 - x0, y1 - y0, transform=self.fig.transFigure,
-            facecolor=colour, edgecolor="none", alpha=alpha, zorder=z))
+            facecolor=color, edgecolor="none", alpha=alpha, zorder=z))
 
 
 def _wrap(text: str, width: int) -> str:
@@ -268,10 +268,10 @@ def _verdict_strip(pen: _Pen, report: R.DayReport, y: float) -> float:
          brand.CORAL if lost / monitored > 0.05 else brand.ALGAE),
     ]
     width = (RIGHT - LEFT) / len(tiles)
-    for i, (label, value, colour) in enumerate(tiles):
+    for i, (label, value, color) in enumerate(tiles):
         x = LEFT + i * width
         pen.eyebrow(x, y, label, brand.STONE, size=7)
-        pen.fig.text(x, y - 0.018, value, color=colour, size=19,
+        pen.fig.text(x, y - 0.018, value, color=color, size=19,
                      family=pen.f["display"], weight="bold", va="top")
     return y - 0.072
 
@@ -358,9 +358,9 @@ def _timeline(fig, pen: _Pen, report: R.DayReport, rect) -> None:
     y = rows["Flown from"]
     for start, end, gcs in R._gcs_intervals(day):
         name = R.GCS_NAMES.get(gcs.split("/")[-1], gcs)
-        colour = brand.MEDITERRANEAN if "Cockpit" in name else brand.SEAFOAM
+        color = brand.MEDITERRANEAN if "Cockpit" in name else brand.SEAFOAM
         ax.add_patch(mp.Rectangle(
-            (start, y), end - start, height, facecolor=colour, alpha=0.30,
+            (start, y), end - start, height, facecolor=color, alpha=0.30,
             edgecolor="none", zorder=2))
         if end - start > (t1 - t0) * 0.08:
             ax.text((start + end) / 2, y + height / 2, name, ha="center",
@@ -406,8 +406,8 @@ def _legend(pen: _Pen, y: float) -> None:
              ("Tether down", brand.CORAL),
              ("Not monitored", brand.STONE_TINTS[10])]
     x = LEFT
-    for label, colour in items:
-        pen.panel(x, y - 0.004, x + 0.016, y + 0.008, colour)
+    for label, color in items:
+        pen.panel(x, y - 0.004, x + 0.016, y + 0.008, color)
         pen.body(x + 0.021, y + 0.011, label, brand.STONE, size=7)
         x += 0.021 + 0.010 * len(label)
 
@@ -434,7 +434,7 @@ def _finding(pen: _Pen, finding, x: float, y: float, width: int,
     block overruns the floor its artists are removed again, so a column
     always ends on a whole finding instead of on half of one.
     """
-    colour = LEVEL_COLOUR.get(finding.level, brand.STONE)
+    color = LEVEL_COLOR.get(finding.level, brand.STONE)
     wrapped = _wrap(finding.detail, width)
     lines = finding.evidence[:4] if (evidence and finding.evidence) else []
     drawn = []
@@ -459,7 +459,7 @@ def _finding(pen: _Pen, finding, x: float, y: float, width: int,
             artist.remove()
         return y, False
 
-    pen.panel(x, cursor + 0.004, x + 0.0032, y + 0.008, colour)
+    pen.panel(x, cursor + 0.004, x + 0.0032, y + 0.008, color)
     return cursor - FINDING_GAP, True
 
 
@@ -519,7 +519,7 @@ def render_page_findings(fig, pen: _Pen, report: R.DayReport,
                     break
                 heading = pen.eyebrow(
                     x, y, LEVEL_WORD.get(finding.level, finding.level),
-                    LEVEL_COLOUR.get(finding.level, brand.STONE))
+                    LEVEL_COLOR.get(finding.level, brand.STONE))
                 y -= 0.028
             y, drawn = _finding(pen, finding, x, y, WRAP_HALF,
                                 evidence=True, floor=floor)
@@ -555,7 +555,7 @@ def _series_panel(fig, pen, report, rect, columns, title, unit) -> None:
     ax.set_title(title, size=8, color=brand.SALISH, family=pen.f["body"],
                  weight="semibold", loc="left", pad=7)
 
-    colours = (brand.MEDITERRANEAN, brand.ALGAE, brand.PURPLE_STAR)
+    colors = (brand.MEDITERRANEAN, brand.ALGAE, brand.PURPLE_STAR)
     drawn = False
     for i, column in enumerate(columns):
         xs, ys = [], []
@@ -572,7 +572,7 @@ def _series_panel(fig, pen, report, rect, columns, title, unit) -> None:
         clean_x = [x for x in xs if x is not None]
         if not clean_x:
             continue
-        ax.plot(xs, ys, lw=0.9, color=colours[i % len(colours)],
+        ax.plot(xs, ys, lw=0.9, color=colors[i % len(colors)],
                 label=column, solid_joinstyle="round")
         drawn = True
     if not drawn:
@@ -744,10 +744,10 @@ def render_page_two(fig, pen: _Pen, report: R.DayReport) -> None:
 
 
 def build(report: R.DayReport, path: Path | None = None) -> Sheet:
-    """Render the tear-sheet for one analysed day.
+    """Render the tear-sheet for one analyzed day.
 
     Written next to the logs it came from unless told otherwise, because the
-    sheet travelling with the flight folder is the point -- a PDF in a
+    sheet traveling with the flight folder is the point -- a PDF in a
     downloads folder is separated from its evidence the moment it is moved.
     """
     import time  # noqa: PLC0415
@@ -819,11 +819,11 @@ def build(report: R.DayReport, path: Path | None = None) -> Sheet:
 
 
 def build_for(folder: Path, *, progress=None, path: Path | None = None) -> Sheet:
-    """Scan, analyse and render in one call. The whole tool, from a folder."""
+    """Scan, analyze and render in one call. The whole tool, from a folder."""
     day = S.scan(Path(folder), progress=progress)
     if progress:
         progress(0.97, "Working out what it means")
-    report = R.analyse(day)
+    report = R.analyze(day)
     if progress:
         progress(0.99, "Drawing the sheet")
     return build(report, path)

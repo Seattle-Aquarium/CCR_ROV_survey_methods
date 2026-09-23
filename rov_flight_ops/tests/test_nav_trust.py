@@ -124,7 +124,7 @@ def test_a_stale_position_is_degraded_however_good_the_aiding_was():
     assert "stale" in note
 
 
-def test_dead_reckoning_is_relative_and_labelled_as_such():
+def test_dead_reckoning_is_relative_and_labeled_as_such():
     s = _snap(rel=1.0, fix_kind="dead")
     state, note = TR.track_state(s, NOW)
     assert state == TR.RELATIVE
@@ -134,7 +134,7 @@ def test_dead_reckoning_is_relative_and_labelled_as_such():
 def test_absolute_aiding_without_a_recent_acoustic_fix_is_degraded():
     """In the acoustic profile the estimator can hold an absolute position
     long after the corrections stopped. The flag is true; the position is
-    drifting. Colouring that as healthy is how an operator keeps trusting a
+    drifting. Coloring that as healthy is how an operator keeps trusting a
     fix that stopped being corrected minutes ago."""
     fresh = _snap(abs_=1.0, acoustic_age=1.0)
     stale = _snap(abs_=1.0, acoustic_age=30.0)
@@ -146,7 +146,7 @@ def test_absolute_aiding_without_a_recent_acoustic_fix_is_degraded():
 
 def test_the_acoustic_test_is_not_applied_to_a_dvl_only_dive():
     """There are no acoustics to be stale in the DVL profile, and marking
-    every DVL dive degraded for missing them would make the colour useless."""
+    every DVL dive degraded for missing them would make the color useless."""
     s = _snap(abs_=1.0)
     assert TR.track_state(s, NOW, profile_key="dvl")[0] == TR.ABSOLUTE
 
@@ -157,10 +157,10 @@ def test_no_position_at_all_is_unknown_not_degraded():
 
 
 def test_the_worst_state_in_a_run_is_the_one_reported():
-    assert TR.summarise([TR.ABSOLUTE, TR.RELATIVE]) == TR.RELATIVE
-    assert TR.summarise([TR.ABSOLUTE, TR.DEGRADED, TR.RELATIVE]) == TR.DEGRADED
-    assert TR.summarise([TR.ABSOLUTE]) == TR.ABSOLUTE
-    assert TR.summarise([]) == TR.UNKNOWN
+    assert TR.summarize([TR.ABSOLUTE, TR.RELATIVE]) == TR.RELATIVE
+    assert TR.summarize([TR.ABSOLUTE, TR.DEGRADED, TR.RELATIVE]) == TR.DEGRADED
+    assert TR.summarize([TR.ABSOLUTE]) == TR.ABSOLUTE
+    assert TR.summarize([]) == TR.UNKNOWN
 
 
 # --------------------------------------------------------------------------
@@ -183,36 +183,36 @@ def test_a_track_point_keeps_the_state_it_was_recorded_with():
 def test_a_jump_records_what_the_position_rested_on_either_side():
     from rov_flight_ops.nav.collector import Jump
 
-    j = Jump(mono=1.0, wall=time.time(), metres=42.0, seconds=0.5, segment=3,
+    j = Jump(mono=1.0, wall=time.time(), meters=42.0, seconds=0.5, segment=3,
              from_trust=TR.ABSOLUTE, to_trust=TR.DEGRADED)
     line = j.line()
     assert "42 m in 0.5 s" in line
     assert "absolute to degraded" in line
 
-    same = Jump(mono=1.0, wall=time.time(), metres=9.0, seconds=0.2, segment=1,
+    same = Jump(mono=1.0, wall=time.time(), meters=9.0, seconds=0.2, segment=1,
                 from_trust=TR.RELATIVE, to_trust=TR.RELATIVE)
     assert "relative to relative" not in same.line()
     assert "(relative)" in same.line()
 
 
-def test_every_state_has_a_colour_and_a_word():
+def test_every_state_has_a_color_and_a_word():
     navmap = pytest.importorskip("rov_flight_ops.gui.navmap")
 
     for state in TR.STATES:
-        assert state in navmap.TRUST_COLOURS, state
+        assert state in navmap.TRUST_COLORS, state
         assert navmap.TRUST_WORDS.get(state), state
     # Every state must be distinguishable from every other **in the mode the
     # operator is actually looking at**. Comparing the (light, dark) pairs is
     # not enough and was the bug: `ok` and `accent` differ as pairs but are
     # both Algae in dark mode, so "acoustically aided" and "dead-reckoned"
-    # drew as the same green -- the one distinction the colouring is for.
+    # drew as the same green -- the one distinction the coloring is for.
     for index, mode in ((0, "light"), (1, "dark")):
         styles = {}
         for s in TR.STATES:
-            colour = navmap.TRUST_COLOURS[s]
-            if isinstance(colour, (list, tuple)):
-                colour = colour[index]
-            styles[s] = (str(colour).upper(), navmap.TRUST_DASH.get(s))
+            color = navmap.TRUST_COLORS[s]
+            if isinstance(color, (list, tuple)):
+                color = color[index]
+            styles[s] = (str(color).upper(), navmap.TRUST_DASH.get(s))
         assert len(set(styles.values())) == len(TR.STATES), (mode, styles)
 
 
@@ -221,8 +221,8 @@ def test_a_run_of_track_takes_the_style_of_what_it_rested_on():
     must not draw as one confident line."""
     navmap = pytest.importorskip("rov_flight_ops.gui.navmap")
 
-    assert navmap.trust_colour(TR.ABSOLUTE) != navmap.trust_colour(TR.DEGRADED)
+    assert navmap.trust_color(TR.ABSOLUTE) != navmap.trust_color(TR.DEGRADED)
     assert navmap.trust_dash(TR.ABSOLUTE) is None
     assert navmap.trust_dash(TR.NO_AIDING) is not None
     # An unrecognised state falls back to muted rather than raising in a draw.
-    assert navmap.trust_colour("nonsense") == navmap.trust_colour(TR.UNKNOWN)
+    assert navmap.trust_color("nonsense") == navmap.trust_color(TR.UNKNOWN)

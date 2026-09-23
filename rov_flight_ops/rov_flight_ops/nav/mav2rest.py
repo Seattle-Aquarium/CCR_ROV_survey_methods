@@ -273,7 +273,7 @@ class Mavlink2Rest:
         if counter is None:
             # A service that does not publish a counter leaves us no way to
             # tell a new message from a cached one. Treat every read as fresh
-            # -- it is the old, weaker behaviour -- but record that, so the
+            # -- it is the old, weaker behavior -- but record that, so the
             # health panel can say the freshness is unverified rather than
             # implying it was checked.
             fresh = True

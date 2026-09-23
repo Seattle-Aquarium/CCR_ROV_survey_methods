@@ -1,20 +1,20 @@
 """
 Drawing the brand gradients.
 
-CustomTkinter has no gradient fill -- every colour it takes is flat. So the
+CustomTkinter has no gradient fill -- every color it takes is flat. So the
 gradients are rendered to bitmaps here and drawn onto a `tk.Canvas`, which is
 the one surface in Tk that lets text and widgets sit over an image with no
 rectangle of their own behind them. A CTkLabel holding the image cannot do
 that: a child label's "transparent" fill resolves to its master's flat
-*colour*, which paints a visible block across the gradient.
+*color*, which paints a visible block across the gradient.
 
 The geometry follows the spec diagram on p.19 of the guidelines rather than a
-plain linear ramp. A two-colour gradient there reaches its second colour at 95
+plain linear ramp. A two-color gradient there reaches its second color at 95
 and puts the 50/50 blend at 70, not at the midpoint -- so it holds the first
-colour and then moves. That bias is most of what stops a two-colour background
+color and then moves. That bias is most of what stops a two-color background
 reading as a flat wash, and it is why this does not simply call PIL.
 
-Bitmaps are cached by (size, colours, angle). A window resize regenerates at a
+Bitmaps are cached by (size, colors, angle). A window resize regenerates at a
 new width, so without the cache a drag across the screen would render hundreds
 of images; with it, a size that has been seen before costs a dictionary lookup.
 """
@@ -36,8 +36,8 @@ _CACHE: dict[tuple, Image.Image] = {}
 _CACHE_MAX = 64
 
 
-def _rgb(colour: str) -> np.ndarray:
-    return np.array(brand.hex_to_rgb(colour), dtype=np.float64)
+def _rgb(color: str) -> np.ndarray:
+    return np.array(brand.hex_to_rgb(color), dtype=np.float64)
 
 
 def _ramp(size: tuple[int, int], angle: float) -> np.ndarray:
@@ -63,7 +63,7 @@ def _blend(t: np.ndarray, c1: np.ndarray, c2: np.ndarray,
     """Interpolate c1..c2 over t in 0..1, with the 50/50 blend at `midpoint`.
 
     A midpoint below 0.5 pushes the blend early, above 0.5 holds the first
-    colour. Implemented as an exponent so the curve stays smooth: at
+    color. Implemented as an exponent so the curve stays smooth: at
     t == midpoint the exponent yields exactly 0.5.
     """
     t = np.clip(t, 0.0, 1.0)
@@ -73,20 +73,20 @@ def _blend(t: np.ndarray, c1: np.ndarray, c2: np.ndarray,
     return c1[None, None, :] + (c2 - c1)[None, None, :] * t[:, :, None]
 
 
-def two_colour(size: tuple[int, int], c1: str, c2: str,
+def two_color(size: tuple[int, int], c1: str, c2: str,
                angle: float = brand.GRADIENT_ANGLE) -> Image.Image:
-    """A background gradient built to the guidelines' two-colour geometry."""
+    """A background gradient built to the guidelines' two-color geometry."""
     t = _ramp(size, angle)
-    # The second colour is reached at 95 and holds flat to the end.
+    # The second color is reached at 95 and holds flat to the end.
     t = np.clip(t / brand.TWO_COLOR_END, 0.0, 1.0)
     px = _blend(t, _rgb(c1), _rgb(c2),
                 midpoint=brand.TWO_COLOR_MIDPOINT / brand.TWO_COLOR_END)
     return Image.fromarray(np.round(px).astype(np.uint8), "RGB")
 
 
-def three_colour(size: tuple[int, int], c1: str, c2: str, c3: str,
+def three_color(size: tuple[int, int], c1: str, c2: str, c3: str,
                  angle: float = brand.GRADIENT_ANGLE) -> Image.Image:
-    """Three colours at 0, 50 and 100, each half blending evenly."""
+    """Three colors at 0, 50 and 100, each half blending evenly."""
     t = _ramp(size, angle)
     first = _blend(np.clip(t * 2.0, 0.0, 1.0), _rgb(c1), _rgb(c2))
     second = _blend(np.clip(t * 2.0 - 1.0, 0.0, 1.0), _rgb(c2), _rgb(c3))
@@ -94,20 +94,20 @@ def three_colour(size: tuple[int, int], c1: str, c2: str, c3: str,
     return Image.fromarray(np.round(px).astype(np.uint8), "RGB")
 
 
-def render(size: tuple[int, int], colours: tuple[str, ...],
+def render(size: tuple[int, int], colors: tuple[str, ...],
            angle: float = brand.GRADIENT_ANGLE) -> Image.Image:
-    """Two or three brand colours, drawn to `size`. Cached."""
+    """Two or three brand colors, drawn to `size`. Cached."""
     w, h = max(1, int(size[0])), max(1, int(size[1]))
-    key = (w, h, tuple(colours), round(angle, 3))
+    key = (w, h, tuple(colors), round(angle, 3))
     hit = _CACHE.get(key)
     if hit is not None:
         return hit
-    if len(colours) == 3:
-        img = three_colour((w, h), *colours, angle=angle)
-    elif len(colours) == 2:
-        img = two_colour((w, h), *colours, angle=angle)
+    if len(colors) == 3:
+        img = three_color((w, h), *colors, angle=angle)
+    elif len(colors) == 2:
+        img = two_color((w, h), *colors, angle=angle)
     else:
-        raise ValueError(f"a gradient needs two or three colours, got {len(colours)}")
+        raise ValueError(f"a gradient needs two or three colors, got {len(colors)}")
     if len(_CACHE) >= _CACHE_MAX:
         _CACHE.clear()
     _CACHE[key] = img
@@ -121,7 +121,7 @@ def chip(size: tuple[int, int], fill: str, border: str = "",
 
     Tk's canvas has no rounded rectangle and no anti-aliasing, so a chapter
     button drawn with canvas primitives comes out with stepped corners next to
-    CustomTkinter's smooth ones. PIL draws it properly; `ground` is the colour
+    CustomTkinter's smooth ones. PIL draws it properly; `ground` is the color
     behind it, composited in so the corners do not show black.
 
     Cached like the gradients: the rail repaints on hover, and four buttons at
@@ -145,10 +145,10 @@ def chip(size: tuple[int, int], fill: str, border: str = "",
 
 
 def sample(img: Image.Image, x: int, y: int) -> str:
-    """The hex colour at a point, for a widget that has to sit on the gradient.
+    """The hex color at a point, for a widget that has to sit on the gradient.
 
     CustomTkinter widgets carry their own flat background. One placed over a
-    gradient can be told the colour underneath it, which hides the seam; this
+    gradient can be told the color underneath it, which hides the seam; this
     is how the theme switch disappears into the banner.
     """
     px = img.getpixel((min(max(int(x), 0), img.width - 1),
