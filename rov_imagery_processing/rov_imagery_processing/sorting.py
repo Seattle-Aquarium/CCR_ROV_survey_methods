@@ -220,6 +220,7 @@ def sort_flight(
     options: SortOptions | None = None,
     style: ph.BandStyle | None = None,
     offset_hours: float | None = None,
+    tz_name: str | None = None,
     progress: ProgressCB | None = None,
     cancel=None,
 ) -> SortReport:
@@ -244,7 +245,8 @@ def sort_flight(
         # marks are worked out from those rather than from this run's moves.
         rep.warnings.append("no imagery found to sort")
         if opts.meter_marks and store is not None:
-            _run_marks(flight, windows, store, opts, rep, progress, cancel)
+            _run_marks(flight, windows, store, opts, rep, progress, cancel,
+                       tz_name)
         return rep
 
     total = max(1, len(items))
@@ -300,7 +302,7 @@ def sort_flight(
     # After the move, so marks are handed out against the frames that really
     # landed in each transect folder.
     if opts.meter_marks and store is not None:
-        _run_marks(flight, windows, store, opts, rep, progress, cancel)
+        _run_marks(flight, windows, store, opts, rep, progress, cancel, tz_name)
 
     if progress:
         progress(1.0, f"sorted {rep.jpg_moved} preview(s), "
@@ -308,13 +310,16 @@ def sort_flight(
     return rep
 
 
-def _run_marks(flight, windows, store, opts, rep, progress, cancel) -> None:
+def _run_marks(flight, windows, store, opts, rep, progress, cancel,
+               tz_name=None) -> None:
     """Work out the distance marks and hang the report off `rep`.
 
     Shared by both exits from sort_flight: the normal one, and the early
     return taken when a flight was already sorted and there is nothing left
     to move.
     """
+    from .ingest import _zone
+
     rep.marks = mm.run_for_flight(
         flight, windows, store,
         mm.MarkOptions(enabled=True,
@@ -323,6 +328,7 @@ def _run_marks(flight, windows, store, opts, rep, progress, cancel) -> None:
                        write_png=bool(opts.marks_png),
                        move_gpr=bool(opts.marks_file_gpr),
                        move_jpg=bool(opts.marks_file_jpg)),
+        tz_name=tz_name, tz=_zone(tz_name),
         progress=(lambda f, m="": progress(0.95 + f * 0.05, m))
         if progress else None,
         cancel=cancel)

@@ -206,12 +206,17 @@ def render_track(
 
 
 def save_track_png(rec: Reconstruction, path: Path, **kw) -> Path:
-    """Render and write one transect. Light palette, for viewing off-screen."""
+    """Render and write one transect. Light palette, for viewing off-screen.
+
+    Published rather than renamed into place, for the same reason the marks
+    CSV is: Dropbox denies the rename while it still holds the old file.
+    """
+    from .fsutil import publish
+
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     kw.setdefault("style", TrackStyle.light())
     im = render_track(rec, **kw)
     tmp = path.with_name(path.name + ".part")
     im.save(tmp, "PNG")
-    tmp.replace(path)
-    return path
+    return publish(tmp, path)

@@ -121,14 +121,40 @@ The spacing is yours to set — 1 m by default, but 0.5 m or 2 m work the same
 way. A pause adds no distance: the track is still drawn across it, faintly, but
 the marks stop and pick up where surveying resumes.
 
+### The marks CSV
+
+One row per mark. The transect is the filename and the mark's ordinal is the
+row number, so neither is repeated in every row.
+
+| Column | What it is |
+|---|---|
+| `Distance_m` | how far along the transect this mark sits. Kept rather than an ordinal because it stays right at any interval — at 0.5 m spacing mark 7 is 3.5 m, not 7 |
+| `Time`, `Datetime_UTC`, `Epoch` | when the vehicle crossed that distance, local / UTC / seconds |
+| `Image` | the frame given to this mark. Blank if none was close enough |
+| `Image_offset_s` | how far apart in time the mark and that frame are. Bounded by the capture cadence, so about half of it at worst — under ~1.5 s for 3 s capture |
+| `Image_step_m` | how far the vehicle travelled between the previous mark's frame and this one's. **0 on the first**, and near the interval after that. Measured between the *frames*, not the marks: the marks are exactly an interval apart by construction, so that would read 1.000 every time |
+| `Image_cumulative_m` | the running total of `Image_step_m`, from the first frame |
+| `DVLx`, `DVLy` | where the mark is, metres north and east of the transect start |
+| `Distance_source`, `Source_scale` | which channel measured the distance, and the calibration applied to it |
+| `Quality`, `Note` | `good`, `ok` or `poor`, and why |
+
+`Image_cumulative_m` ends about one interval short of the last `Distance_m`,
+because it starts at the first frame rather than at zero. A gap between the two
+that is larger than that is worth a look: it means the chosen frames are
+drifting against the marks.
+
 The frames that sit on a mark are **moved** into `meters/` inside `GPR`, so a
 transect folder keeps the few frames the analysis wants apart from the many it
-does not. Tick *Also file edited JPGs* and `JPG_edited/meters/` is filled the
-same way, once those exports exist. Moving is not editing — nothing is
-re-encoded and no JPEG generation is spent — which is what makes it safe inside
-`JPG_edited`. It does move frames that downstream ML reads, so it stays off
-unless asked. Re-running is safe: frames already filed are left where they are,
-and `meters/` is searched when the marks are worked out again.
+does not. Tick *Also file JPGs* and `JPG_preview/meters/` and
+`JPG_edited/meters/` are filled the same way — a mark is the same mark in
+either, and filing one without the other would leave the two views of a
+transect disagreeing about which frames matter. The edited folder fills
+whenever those exports exist, so re-running after a Lightroom pass picks them
+up. Moving is not editing — nothing is re-encoded and no JPEG generation is
+spent — which is what makes it safe inside `JPG_edited`. It does move frames
+that downstream ML reads, so it stays off unless asked. Re-running is safe:
+frames already filed are left where they are, and `meters/` is searched when
+the marks are worked out again.
 
 **Which frame a mark gets.** The nearest in time, and **each frame is used at
 most once**. That second rule matters: where marks fall closer together than

@@ -353,6 +353,7 @@ def import_photos(
     store: TelemetryStore | None = None,
     options: ImportOptions | None = None,
     style: ph.BandStyle | None = None,
+    tz_name: str | None = None,
     progress: ProgressCB | None = None,
     cancel=None,
 ) -> ImportReport:
@@ -436,6 +437,7 @@ def import_photos(
     if opts.meter_marks and store is not None:
         rep.marks = mm.run_for_flight(
             flight, windows, store, mark_options(opts),
+            tz_name=tz_name, tz=_zone(tz_name),
             progress=(lambda f, m="": progress(0.95 + f * 0.05, m))
             if progress else None,
             cancel=cancel)
@@ -445,6 +447,17 @@ def import_photos(
     if progress:
         progress(1.0, f"imported {rep.copied_jpg} JPG, {rep.copied_gpr} GPR")
     return rep
+
+
+def _zone(name: str | None):
+    """The plan's timezone, or None to leave written times in UTC."""
+    if not name:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(name)
+    except Exception:
+        return None
 
 
 def mark_options(opts: ImportOptions) -> mm.MarkOptions:

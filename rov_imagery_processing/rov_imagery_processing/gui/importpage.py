@@ -160,7 +160,7 @@ class ImportPage(ctk.CTkFrame):
                     ).grid(row=0, column=3, padx=(0, 18))
         self._check(self.marks_opts, "Track PNG", self.v_marks_png
                     ).grid(row=0, column=4)
-        self._check(self.marks_opts, "Also file edited JPGs",
+        self._check(self.marks_opts, "Also file JPGs",
                     self.v_marks_jpg).grid(row=0, column=5, padx=(18, 0))
         self.marks_run = button(self.marks_opts, "Run on this flight",
                                 self._run_marks, "ghost", width=150)
@@ -471,6 +471,7 @@ class ImportPage(ctk.CTkFrame):
 
         flight, cfg, scan = self.app.flight_dir, self.app.cfg, self.scan
         style = None
+        tz_name = plan.timezone
 
         read_windows = self._read_windows(plan)
 
@@ -495,9 +496,10 @@ class ImportPage(ctk.CTkFrame):
                         marks_csv=opts.marks_csv, marks_png=opts.marks_png,
                         marks_file_gpr=opts.marks_file_gpr,
                         marks_file_jpg=opts.marks_file_jpg),
-                    progress=sub, cancel=cancel)
+                    tz_name=tz_name, progress=sub, cancel=cancel)
             return ingest.import_photos(scan, flight, windows, store=store,
                                         options=opts, style=style,
+                                        tz_name=tz_name,
                                         progress=sub, cancel=cancel)
 
         self.app.submit(work, f"{doing} {p.on_transect} frame(s)…")

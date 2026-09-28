@@ -27,14 +27,30 @@ from rov_imagery_processing.gui.shell import TabStrip  # noqa: E402
 NAMES = ["Flight", "Import", "Process", "Video"]
 
 
-@pytest.fixture
-def strip():
-    """A four-tab strip on a hidden window, or a skip if Tk cannot start."""
+@pytest.fixture(scope="module")
+def root():
+    """One hidden window for the whole module.
+
+    Tk does not enjoy having roots created and destroyed repeatedly in one
+    process -- doing it per test made Tcl fail to initialize partway through
+    the run, and the fixture then skipped rather than failed, which quietly
+    took the regression guard with it. One root, torn down at the end.
+    """
     try:
-        root = ctk.CTk()
-        root.withdraw()
-    except Exception as ex:                       # no display
+        win = ctk.CTk()
+        win.withdraw()
+    except Exception as ex:                       # genuinely no display
         pytest.skip(f"no display: {ex}")
+    yield win
+    try:
+        win.destroy()
+    except Exception:
+        pass
+
+
+@pytest.fixture
+def strip(root):
+    """A fresh four-tab strip inside the shared window."""
     holder = ctk.CTkFrame(root)
     holder.grid(row=0, column=0, sticky="nsew")
     bar = TabStrip(root, holder, on_select=lambda _n: None)
@@ -43,10 +59,11 @@ def strip():
     try:
         yield root, bar, pages
     finally:
-        try:
-            root.destroy()
-        except Exception:
-            pass
+        for widget in (bar, holder):
+            try:
+                widget.destroy()
+            except Exception:
+                pass
 
 
 def _pump(root, ms: int) -> None:

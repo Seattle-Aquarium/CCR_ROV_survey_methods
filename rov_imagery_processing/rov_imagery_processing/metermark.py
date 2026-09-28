@@ -425,6 +425,10 @@ class MarkMatch:
     mark: Mark
     stem: str | None = None
     offset_s: float = float("nan")
+    #: When the chosen frame was taken. `offset_s` is the size of the gap to
+    #: the mark; this is the instant itself, which is what the per-frame
+    #: distances are measured between.
+    image_epoch: float | None = None
 
     @property
     def matched(self) -> bool:
@@ -463,7 +467,8 @@ def choose_frames(
             out.append(MarkMatch(mark))
             continue
         times.pop(j)
-        out.append(MarkMatch(mark, pool.pop(j)[1], d))
+        when, stem = pool.pop(j)
+        out.append(MarkMatch(mark, stem, d, image_epoch=when))
     return out
 
 
@@ -579,10 +584,13 @@ def reconstruct(
 #  Writing it out
 # --------------------------------------------------------------------------
 
+#: One row per mark. The transect is the filename, and the mark's ordinal is
+#: the row number, so neither is repeated in the file. ``Distance_m`` is kept
+#: rather than the ordinal because it stays right when the interval is not 1 m.
 CSV_COLUMNS = (
-    "Transect_ID", "Mark_number", "Distance_m", "Time", "Datetime_UTC",
-    "Epoch", "Image", "Image_offset_s", "DVLx", "DVLy",
-    "Distance_source", "Source_scale", "Quality", "Note",
+    "Distance_m", "Time", "Datetime_UTC", "Epoch",
+    "Image", "Image_offset_s", "Image_step_m", "Image_cumulative_m",
+    "DVLx", "DVLy", "Distance_source", "Source_scale", "Quality", "Note",
 )
 
 #: Filenames written beside each transect's imagery.
@@ -591,13 +599,23 @@ PNG_SUFFIX = "_track.png"
 
 
 def write_marks_csv(rec: Reconstruction, path: Path, *, tz=None) -> Path:
-    """One row per mark. Column naming follows the transect CSVs."""
+    """One row per mark. Column naming follows the transect CSVs.
+
+    Published rather than renamed into place: these folders live in Dropbox,
+    which holds the old file while it uploads and denies the rename outright.
+    Returns where the file actually landed.
+    """
     from datetime import datetime, timezone  # noqa: PLC0415
+
+    from .fsutil import publish  # noqa: PLC0415
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".part")
     src = rec.track.source if rec.track else None
+
+    track = rec.track
+    prev_s = anchor_s = None
 
     with open(tmp, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
@@ -605,18 +623,33 @@ def write_marks_csv(rec: Reconstruction, path: Path, *, tz=None) -> Path:
         for m in rec.matches:
             dt_utc = datetime.fromtimestamp(m.mark.epoch, timezone.utc)
             local = dt_utc.astimezone(tz) if tz else dt_utc
+
+            # How far the vehicle went between this frame and the one before
+            # it, read off the same distance curve the marks came from. Blank
+            # where there is no frame: there is nothing to measure between.
+            step = cumulative = ""
+            if m.matched and m.image_epoch is not None and track is not None:
+                s_here = float(np.interp(m.image_epoch, track.t, track.s))
+                if prev_s is None:
+                    anchor_s = s_here
+                    step = cumulative = "0.000"
+                else:
+                    step = f"{s_here - prev_s:.3f}"
+                    cumulative = f"{s_here - anchor_s:.3f}"
+                prev_s = s_here
+
             w.writerow([
-                rec.name, m.mark.number, f"{m.mark.distance_m:.3f}",
+                f"{m.mark.distance_m:.3f}",
                 local.strftime("%H:%M:%S"),
                 dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
                 f"{m.mark.epoch:.3f}",
                 m.stem or "", "" if not m.matched else f"{m.offset_s:.2f}",
+                step, cumulative,
                 f"{m.mark.x:.3f}", f"{m.mark.y:.3f}",
                 src.key if src else "", f"{src.scale:.4f}" if src else "",
                 m.mark.quality, m.mark.note,
             ])
-    tmp.replace(path)
-    return path
+    return publish(tmp, path)
 
 
 # --------------------------------------------------------------------------
@@ -743,6 +776,11 @@ def file_marked_frames(
     otherwise never written to. It does relocate frames that downstream ML
     reads, so the JPG side is opt-in.
 
+    ``move_jpg`` covers both JPG folders: the previews, which are what gets
+    looked at, and the edited exports, which are what gets analysed. A mark is
+    the same mark in either, so filing one and not the other would leave the
+    two views of a transect disagreeing about which frames matter.
+
     Returns (files moved, warnings). Re-running is harmless: a frame already
     in ``meters/`` is left alone.
     """
@@ -752,7 +790,9 @@ def file_marked_frames(
     if not stems:
         return 0, warnings
 
-    wanted = [(layout.GPR, move_gpr), (layout.JPG_EDITED, move_jpg)]
+    wanted = [(layout.GPR, move_gpr),
+              (layout.JPG_PREVIEW, move_jpg),
+              (layout.JPG_EDITED, move_jpg)]
     for sub, on in wanted:
         folder = tdir / sub
         if not on or not folder.is_dir():
