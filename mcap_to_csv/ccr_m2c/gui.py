@@ -110,6 +110,11 @@ class TransectBlock:
     def __init__(self, parent, index: int, on_remove):
         self.on_remove = on_remove
         self.window_rows: list[dict] = []
+        #: Pauses inside this transect, as loaded from a survey plan. This
+        #: window has no editor for them -- UTC's does -- but a plan's pauses
+        #: must not be lost on the way through here, or the same file would
+        #: give a different CSV depending on which program opened it.
+        self.pauses: list[tuple[str, str]] = []
 
         self.frame = ttk.Frame(parent, relief="groove", borderwidth=1)
         self.frame.pack(fill="x", padx=4, pady=4)
@@ -494,6 +499,7 @@ class App:
             self.add_transect()
             block = self.transect_blocks[-1]
             block.transect_id_var.set(spec.transect_id)
+            block.pauses = list(spec.pauses)
             first, *rest = spec.windows
             block.window_rows[0]["start_var"].set(first[0])
             block.window_rows[0]["end_var"].set(first[1])
@@ -504,6 +510,10 @@ class App:
 
         notes = "\n".join(f"- {w}" for w in plan.warnings)
         message = f"Loaded {site}."
+        n_pauses = sum(len(t.pauses) for t in site.transects)
+        if n_pauses:
+            message += (f" {n_pauses} pause(s) come with it and will be marked "
+                        f"in Survey_state.")
         if notes:
             messagebox.showwarning("Plan loaded with notes", f"{message}\n\n{notes}")
         else:
@@ -568,7 +578,7 @@ class App:
                 messagebox.showerror("Missing input",
                                      f"Transect {block.index}: please enter a Transect ID.")
                 return None
-            specs.append(TransectSpec(transect_id, windows))
+            specs.append(TransectSpec(transect_id, windows, pauses=list(block.pauses)))
 
         seen: set[str] = set()
         for spec in specs:

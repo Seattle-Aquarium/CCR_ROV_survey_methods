@@ -28,6 +28,7 @@ appended after that point.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -118,6 +119,46 @@ OUTPUT_COLUMNS = [
     SURVEY_STATE_COLUMN,
 ]
 
+#: How a transect's own name is joined to the survey prefix.
+_ORDINAL = "T"
+
+
+def make_transect_id(prefix: str, number: int, name: str = "") -> str:
+    """The full Transect_ID, and the CSV filename with it.
+
+    A survey is identified by a code that is the same for every transect in it
+    -- ``EBM_W25`` -- and the transects are then just T1, T2, T3. Typing the
+    whole thing out per transect is how ``EBM_W25_T3`` ends up next to
+    ``EBM_W25_T4`` with one of them spelt ``EMB``, and nothing downstream can
+    tell that the two belong to the same survey.
+
+    So the prefix is given once and the ordinal is filled in:
+
+        >>> make_transect_id("EBM_W25", 1)
+        'EBM_W25_T1'
+        >>> make_transect_id("EBM_W25", 2, "T2")     # a name from the plan
+        'EBM_W25_T2'
+        >>> make_transect_id("EBM_W25", 3, "deep_pass")
+        'EBM_W25_deep_pass'
+        >>> make_transect_id("", 4)                  # no prefix given
+        'T4'
+        >>> make_transect_id("EBM_W25", 5, "EBM_W25_T5")   # already qualified
+        'EBM_W25_T5'
+    """
+    prefix = (prefix or "").strip().rstrip("_")
+    name = (name or "").strip()
+
+    if not name:
+        name = f"{_ORDINAL}{number}"
+    if not prefix:
+        return name
+    # Idempotent: re-running over a plan whose names are already qualified must
+    # not produce EBM_W25_EBM_W25_T1.
+    if name == prefix or name.startswith(prefix + "_"):
+        return name
+    return f"{prefix}_{name}"
+
+
 _FILENAME_INVALID_CHARS = re.compile(r'[<>:"/\\|?*]')
 
 
@@ -154,6 +195,8 @@ class TransectResult:
     jumps: int = 0
     message: str = ""
     warnings: list[str] = field(default_factory=list)
+    #: What the transect looked like, for the summary table: see transect_stats.
+    stats: dict[str, float | None] = field(default_factory=dict)
 
     @property
     def window_desc(self) -> str:
@@ -196,23 +239,138 @@ def dvl_steps(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
     return dx, dy, np.sqrt(dx ** 2 + dy ** 2)
 
 
+def path_length_m(lat: pd.Series, lon: pd.Series) -> float | None:
+    """Metres travelled along a lat/lon track, jitter-suppressed like the DVL.
+
+    Equirectangular per step: at transect scale the error against a true
+    geodesic is microns. Steps under MIN_STEP_M are dropped for the same reason
+    they are in dvl_steps -- a stationary vehicle must not walk up distance out
+    of a noisy fix. This is exactly what makes the GPS figure interesting: a
+    surface fix jitters by metres, and the excess over the DVL's figure is a
+    direct measure of that noise.
+    """
+    la = pd.to_numeric(lat, errors="coerce").to_numpy(dtype=float)
+    lo = pd.to_numeric(lon, errors="coerce").to_numpy(dtype=float)
+    ok = np.isfinite(la) & np.isfinite(lo) & (la != 0) & (lo != 0)
+    la, lo = la[ok], lo[ok]
+    if len(la) < 2:
+        return None
+    m_per_deg = 111_320.0
+    dn = np.diff(la) * m_per_deg
+    de = np.diff(lo) * m_per_deg * np.cos(np.radians(la[:-1]))
+    step = np.hypot(dn, de)
+    return float(step[step >= MIN_STEP_M].sum())
+
+
+def transect_stats(df: pd.DataFrame, dvl_distance_m: float) -> dict[str, float | None]:
+    """The figures a survey lead wants at a glance, per transect.
+
+    Depths are reported as positive metres below the surface, which is how
+    people say them, even though the column is negative-down.
+    """
+    def col(name: str) -> pd.Series:
+        return (pd.to_numeric(df.get(name), errors="coerce").dropna()
+                if name in df.columns else pd.Series(dtype=float))
+
+    depth, alt = col("Depth"), col("Altitude")
+    return {
+        "duration_s": float(len(df)),
+        "depth_shallow_m": -float(depth.max()) if len(depth) else None,
+        "depth_deep_m": -float(depth.min()) if len(depth) else None,
+        "alt_min_m": float(alt.min()) if len(alt) else None,
+        "alt_max_m": float(alt.max()) if len(alt) else None,
+        "alt_mean_m": float(alt.mean()) if len(alt) else None,
+        "dist_dvl_m": dvl_distance_m,
+        "dist_ekf_m": path_length_m(df.get("EKFlat"), df.get("EKFlon"))
+                      if "EKFlat" in df.columns else None,
+        "dist_gps_m": path_length_m(df.get("Latitude"), df.get("Longitude"))
+                      if "Latitude" in df.columns else None,
+    }
+
+
+def format_stats_table(results: Sequence[TransectResult]) -> list[str]:
+    """One aligned row per transect, for the run log and the GUI."""
+    done = [r for r in results if r.path and r.stats]
+    if not done:
+        return []
+    def f(v, d=1, w=6):
+        return f"{v:{w}.{d}f}" if v is not None else f"{'--':>{w}}"
+
+    head = (f"   {'transect':<14}{'time':>7}  {'depth m':>13}  {'altitude m':>20}  "
+            f"{'distance m  DVL':>17}{'EKF':>8}{'GPS':>8}")
+    sub = (f"   {'':<14}{'min':>7}  {'shallow   deep':>13}  {'min    max   mean':>20}  "
+           f"{'':>17}{'':>8}{'':>8}")
+    L = [head, sub]
+    for r in done:
+        st = r.stats
+        L.append(
+            f"   {r.transect_id[:14]:<14}{st['duration_s']/60:7.1f}  "
+            f"{f(st['depth_shallow_m'])}  {f(st['depth_deep_m'])}  "
+            f"{f(st['alt_min_m'], 2)} {f(st['alt_max_m'], 2)} {f(st['alt_mean_m'], 2)}  "
+            f"{f(st['dist_dvl_m'], 1, 17)}{f(st['dist_ekf_m'], 1, 8)}{f(st['dist_gps_m'], 1, 8)}"
+        )
+    return L
+
+
+#: How far the surface fix must move across a dive before it counts as
+#: tracking. A Water Linked UGPS with no lock injects one coordinate for the
+#: whole recording, giving a span of exactly zero; any real fix jitters further
+#: than this even when the vehicle is still.
+LIVE_FIX_SPAN_M = 1.0
+
+
+def has_live_fix(df: pd.DataFrame, min_span_m: float = LIVE_FIX_SPAN_M) -> bool:
+    """Did the surface fix actually move over this dive?
+
+    This decides how the DVL track is anchored, and the two answers are far
+    apart.
+
+    With a fix that tracks, each transect is seeded at its own -- the DVL's
+    drift is then bounded by one transect instead of accumulating across the
+    whole dive. On 2025-08-14 that is the difference between a DVL track 7 m
+    from the GPS and one 114 m from it, because the later transects had an
+    hour of dead reckoning behind them.
+
+    With a fix that never moves, seeding per transect would put every transect
+    on the same coordinate and throw away the separation the DVL did measure.
+    Those dives have to be propagated as a single track from one seed.
+    """
+    lat = pd.to_numeric(df.get("Latitude"), errors="coerce")
+    lon = pd.to_numeric(df.get("Longitude"), errors="coerce")
+    ok = lat.notna() & lon.notna() & (lat != 0) & (lon != 0)
+    if ok.sum() < 2:
+        return False
+    lat, lon = lat[ok], lon[ok]
+    metres_per_deg = 111_320.0
+    span = math.hypot(
+        (lat.max() - lat.min()) * metres_per_deg,
+        (lon.max() - lon.min()) * metres_per_deg
+        * math.cos(math.radians(float(lat.mean()))),
+    )
+    return span > min_span_m
+
+
 def georeference_dvl(
     df_tran: pd.DataFrame,
-    manual_origin: tuple[float, float] | None = None,
+    origin: tuple[float, float] | None = None,
 ) -> tuple[pd.DataFrame, pd.Series, str | None]:
     """Turn relative DVL North/East metres into a geodesic lat/lon track.
 
     Returns the frame with ``DVLlat``/``DVLlon`` filled, the per-step distance,
     and a warning if there was no fix to seed from.
 
-    ``manual_origin`` is a last resort: ``(lat, lon)`` for the very first row,
-    used only when neither a surface GPS fix nor an EKF fix appears anywhere in
-    the frame. It exists for the case a dive never got either -- the EKF origin
-    was never actually applied even though ORIGIN_LAT/ORIGIN_LON were set on
-    the vehicle beforehand, which is silent and produces exactly this kind of
-    all-blank track. A real fix, wherever one exists, is always preferred: this
-    is the operator's own starting coordinate, not a measurement, so it is
-    never allowed to override or blend with an actual GPS or EKF position.
+    ``origin`` is a (lat, lon) to seed from instead of the recording's own fix.
+    Without a USBL the vehicle's position has to be typed into the DVL page in
+    BlueOS before arming, and a dive flown after forgetting that has a perfectly
+    good DVL track with nothing to hang it on. The origin is the vessel's
+    position at the time, entered after the fact -- or the ORIGIN_LAT/ORIGIN_LON
+    the vehicle was given, when the EKF never actually adopted them, which is
+    silent and produces exactly this kind of all-blank track.
+
+    Either way it is the operator's own coordinate, not a measurement, so the
+    warning returned with it says the track is dead reckoning. Whether to pass
+    one at all is the caller's decision: `has_live_fix` and `pipeline.run` keep
+    a tracking fix from ever being overridden by it.
     """
     df_tran = df_tran.copy()
     for c in ("DVLlat", "DVLlon"):
@@ -224,34 +382,40 @@ def georeference_dvl(
         df_tran["DVLx"] = df_tran["DVLx"] - float(df_tran["DVLx"].iloc[0])
         df_tran["DVLy"] = df_tran["DVLy"] - float(df_tran["DVLy"].iloc[0])
 
-    # Seed at the first valid surface fix, falling back to the EKF.
-    seed_idx, use_ekf = None, False
-    gps_mask = df_tran["Latitude"].map(_finite_nz) & df_tran["Longitude"].map(_finite_nz)
-    if gps_mask.any():
-        seed_idx = gps_mask.idxmax()
-    else:
-        ekf_mask = df_tran["EKFlat"].map(_finite_nz) & df_tran["EKFlon"].map(_finite_nz)
-        if ekf_mask.any():
-            seed_idx, use_ekf = ekf_mask.idxmax(), True
-
     seed_warning = None
-    if seed_idx is not None:
-        lat0 = df_tran.at[seed_idx, "EKFlat" if use_ekf else "Latitude"]
-        lon0 = df_tran.at[seed_idx, "EKFlon" if use_ekf else "Longitude"]
-        df_tran.loc[:seed_idx, ["DVLlat", "DVLlon"]] = [lat0, lon0]
-        df_tran[["DVLlat", "DVLlon"]] = df_tran[["DVLlat", "DVLlon"]].ffill()
-    elif manual_origin is not None and all(_finite_nz(v) for v in manual_origin):
-        seed_idx = df_tran.index[0]
-        df_tran.loc[:seed_idx, ["DVLlat", "DVLlon"]] = list(manual_origin)
+    if origin is not None:
+        # A typed origin anchors the very first row; everything else is walked
+        # from there. It beats whatever the recording carries, because the only
+        # reason to type one is that the recording's own is missing or wrong.
+        df_tran.loc[df_tran.index[0], ["DVLlat", "DVLlon"]] = [origin[0], origin[1]]
         df_tran[["DVLlat", "DVLlon"]] = df_tran[["DVLlat", "DVLlon"]].ffill()
         seed_warning = (
-            f"no GPS or EKF fix anywhere in this dive; DVL track dead-reckoned "
-            f"from the operator's origin ({manual_origin[0]:.6f}, "
-            f"{manual_origin[1]:.6f}) instead -- position is right relative to "
-            f"itself but the whole track can sit off the true location and "
-            f"rotates with any compass error")
+            f"DVL track dead-reckoned from the operator's origin "
+            f"({origin[0]:.6f}, {origin[1]:.6f}) instead of a fix from the "
+            f"recording -- position is right relative to itself but the whole "
+            f"track can sit off the true location and rotates with any compass "
+            f"error")
     else:
-        seed_warning = "no GPS or EKF fix to seed lat/lon"
+        # Seed at the first valid surface fix, falling back to the EKF.
+        seed_idx, use_ekf = None, False
+        gps_mask = (df_tran["Latitude"].map(_finite_nz)
+                    & df_tran["Longitude"].map(_finite_nz))
+        if gps_mask.any():
+            seed_idx = gps_mask.idxmax()
+        else:
+            ekf_mask = (df_tran["EKFlat"].map(_finite_nz)
+                        & df_tran["EKFlon"].map(_finite_nz))
+            if ekf_mask.any():
+                seed_idx, use_ekf = ekf_mask.idxmax(), True
+
+        if seed_idx is not None:
+            lat0 = df_tran.at[seed_idx, "EKFlat" if use_ekf else "Latitude"]
+            lon0 = df_tran.at[seed_idx, "EKFlon" if use_ekf else "Longitude"]
+            df_tran.loc[:seed_idx, ["DVLlat", "DVLlon"]] = [lat0, lon0]
+            df_tran[["DVLlat", "DVLlon"]] = df_tran[["DVLlat", "DVLlon"]].ffill()
+        else:
+            seed_warning = ("no GPS or EKF fix to seed lat/lon -- give the "
+                            "vessel's position as the origin to anchor the track")
 
     dx, dy, step_dist = dvl_steps(df_tran)
 
@@ -305,7 +469,7 @@ def export_transect(
     dvl_source: str = "",
     site_frame: bool = False,
     pauses: Sequence[tuple[str, str]] = (),
-    manual_origin: tuple[float, float] | None = None,
+    origin: tuple[float, float] | None = None,
 ) -> TransectResult:
     """Filter to the transect's window(s), build the track, write one CSV.
 
@@ -321,10 +485,10 @@ def export_transect(
     needs the rows to still be there. Distance is accumulated over the
     surveying rows only, because it is survey effort that it stands for.
 
-    ``manual_origin`` only matters when ``site_frame`` is False: it is passed
-    to `georeference_dvl` as this transect's own last-resort seed, for the
-    (unusual) case the dive-wide pass in `pipeline.run` failed outright and
-    this transect is being seeded on its own.
+    ``origin`` only matters when ``site_frame`` is False: it is passed to
+    `georeference_dvl` as this transect's own seed, for the (unusual) case the
+    dive-wide pass in `pipeline.run` failed outright and this transect is being
+    seeded on its own.
     """
     result = TransectResult(transect_id=transect_id, transect_number=transect_num,
                             windows=list(windows))
@@ -359,7 +523,7 @@ def export_transect(
             df_tran["DVLy"] = df_tran["DVLy"] - float(df_tran["DVLy"].iloc[0])
         seed_warning = None
     else:
-        df_tran, step_dist, seed_warning = georeference_dvl(df_tran, manual_origin)
+        df_tran, step_dist, seed_warning = georeference_dvl(df_tran, origin)
     if seed_warning:
         result.warnings.append(seed_warning)
 
@@ -391,6 +555,9 @@ def export_transect(
     result.rows = len(df_tran)
     result.distance_m = float(np.nansum(surveying))
     result.mean_step_m = float(np.nanmean(surveying)) if len(surveying) else 0.0
+    # The summary is survey effort too: a pause spent at the surface must not
+    # become the transect's shallowest depth or its longest GPS wander.
+    result.stats = transect_stats(df_tran[~paused_mask.to_numpy()], result.distance_m)
     result.jumps = int((step_dist > JUMP_THRESH).sum())
     result.message = (
         f"Transect {transect_num} ({transect_id}, {result.window_desc}): "

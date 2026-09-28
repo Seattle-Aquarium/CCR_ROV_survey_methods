@@ -57,9 +57,10 @@ class TransectPage(ctk.CTkFrame):
 
         # ---- 1. what will be read ------------------------------------
         c1 = Card(body, "1.  Recordings",
-                  "The .mcap files found in this flight. Several are normal — "
-                  "BlueOS starts a new one every time recording restarts, and "
-                  "they are read as one continuous dive.")
+                  "The telemetry found in this flight — .mcap from BlueOS 1.5 "
+                  "onwards, .tlog from before it. Several files are normal and "
+                  "are read as one continuous dive; the two formats can even be "
+                  "mixed, which a dive spanning an upgrade will be.")
         c1.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.found = label(c1.body, "No flight folder selected yet.", muted=True)
         self.found.grid(row=0, column=0, sticky="w")
@@ -90,15 +91,37 @@ class TransectPage(ctk.CTkFrame):
             text_color=T.TEXT, dropdown_font=T.FONT_BODY)
         self.station.grid(row=0, column=1, sticky="w", padx=(12, 0), pady=4)
 
-        label(c3.body, "Save to").grid(row=1, column=0, sticky="w", pady=4)
+        label(c3.body, "Transect ID prefix").grid(row=1, column=0, sticky="w", pady=4)
+        self.prefix_entry = entry(c3.body, "e.g. EBM_W25", width=280)
+        self.prefix_entry.grid(row=1, column=1, sticky="w", padx=(12, 0), pady=4)
+        label(c3.body,
+              "Each transect becomes <prefix>_T1, _T2 … in the Transect_ID column "
+              "and the filename. Left blank, the site name is used.",
+              muted=True).grid(row=2, column=1, sticky="w", padx=(12, 0))
+
+        label(c3.body, "Save to").grid(row=3, column=0, sticky="w", pady=4)
         self.out_entry = entry(c3.body, "<flight>/transects", width=520)
-        self.out_entry.grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=4)
+        self.out_entry.grid(row=3, column=1, sticky="ew", padx=(12, 0), pady=4)
 
         self.make_map = ctk.CTkCheckBox(
             c3.body, text="Also build a Leaflet map of these transects",
             font=T.FONT_BODY, text_color=T.TEXT)
         self.make_map.select()
-        self.make_map.grid(row=2, column=1, sticky="w", padx=(12, 0), pady=(8, 4))
+        self.make_map.grid(row=4, column=1, sticky="w", padx=(12, 0), pady=(8, 4))
+
+        # Without a USBL the vehicle's position has to be typed into the DVL
+        # page in BlueOS before arming. Forget, and the dive has a perfectly
+        # good DVL track with nothing to hang it on. This anchors it afterwards.
+        label(c3.body, "Origin (lat, lon)").grid(row=5, column=0, sticky="w",
+                                                 pady=(10, 4))
+        orow = ctk.CTkFrame(c3.body, fg_color="transparent")
+        orow.grid(row=5, column=1, sticky="w", padx=(12, 0), pady=(10, 4))
+        self.origin_lat = entry(orow, "47.6176", width=130)
+        self.origin_lat.pack(side="left")
+        self.origin_lon = entry(orow, "-122.3610", width=130)
+        self.origin_lon.pack(side="left", padx=(8, 0))
+        label(orow, "vessel position at arming; only if it was not set in BlueOS",
+              muted=True).pack(side="left", padx=(10, 0))
 
         # ---- 4. run ---------------------------------------------------
         c4 = Card(body, "4.  Extract",
@@ -115,6 +138,17 @@ class TransectPage(ctk.CTkFrame):
                ).pack(side="left", padx=8)
         self.note = label(c4.body, "", muted=True)
         self.note.grid(row=1, column=0, sticky="w", pady=(8, 0))
+
+        # What each transect looked like, once written. Three distances on
+        # purpose: the GPS one is inflated by surface-fix jitter, and the gap
+        # to the DVL's figure is a direct measure of that noise.
+        c4.body.grid_columnconfigure(0, weight=1)
+        self.summary_box = ctk.CTkTextbox(c4.body, height=150, font=T.FONT_MONO,
+                                          fg_color=T.FIELD_BG, text_color=T.TEXT,
+                                          border_width=1, border_color=T.BORDER,
+                                          corner_radius=6, wrap="none")
+        self.summary_box.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        self._set_summary("Nothing extracted yet.")
 
         # ---- 5. sensor health -----------------------------------------
         c5 = Card(body, "5.  Sensor health",
@@ -146,6 +180,33 @@ class TransectPage(ctk.CTkFrame):
 
     # ------------------------------------------------------------------
 
+    def _set_summary(self, text: str) -> None:
+        self.summary_box.configure(state="normal")
+        self.summary_box.delete("1.0", "end")
+        self.summary_box.insert("1.0", text)
+        self.summary_box.configure(state="disabled")
+
+    def _origin(self) -> tuple[float, float] | None:
+        """The typed origin, or None if both fields are empty.
+
+        Half an origin, or one out of range, is refused rather than guessed at:
+        a swapped lat/lon would put the transect in the Southern Ocean, and the
+        map would look perfectly plausible while it did.
+        """
+        lat_s = self.origin_lat.get().strip()
+        lon_s = self.origin_lon.get().strip()
+        if not lat_s and not lon_s:
+            return None
+        try:
+            lat, lon = float(lat_s), float(lon_s)
+        except ValueError:
+            raise ValueError("Origin needs both latitude and longitude, in "
+                             "decimal degrees.") from None
+        if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+            raise ValueError(f"Origin {lat}, {lon} is out of range "
+                             "(latitude -90..90, longitude -180..180).")
+        return lat, lon
+
     def _set_health(self, text: str) -> None:
         self.health_box.configure(state="normal")
         self.health_box.delete("1.0", "end")
@@ -158,16 +219,40 @@ class TransectPage(ctk.CTkFrame):
             messagebox.showerror(APP_NAME, _MISSING)
             return
         disc = getattr(self.app, "discovery", None)
-        mcaps = list(disc.mcaps) if disc else []
+        mcaps = list(disc.telemetry) if disc else []
         if not mcaps:
-            messagebox.showinfo(APP_NAME, "Select a flight folder with .mcap "
-                                          "recordings first.")
+            messagebox.showinfo(APP_NAME, "Select a flight folder with .mcap or "
+                                          ".tlog telemetry first.")
             return
 
         from ccr_m2c.health import read_health
+        from ccr_m2c.pipeline import TransectSpec
+        from ccr_m2c.transect import make_transect_id
+
+        # Scope the report to the transects as well as the whole dive. Most of a
+        # dive is transit -- on 2026-09-02, 85 minutes of recording held about 42
+        # minutes of transect -- so whole-dive dropout counts describe the
+        # surface intervals between them rather than the part being analysed.
+        # The plan is already on screen; not passing it made this page report
+        # numbers nobody could act on.
+        specs: list[TransectSpec] = []
+        try:
+            for site in self.app._plan().sites:
+                specs.extend(
+                    TransectSpec(
+                        make_transect_id(
+                            self.prefix_entry.get().strip() or site.name,
+                            n, t.name),
+                        [(t.start_tc, t.end_tc)],
+                        pauses=[(p.start_tc, p.end_tc) for p in t.pauses])
+                    for n, t in enumerate(site.transects, start=1)
+                    if t.start_tc and t.end_tc
+                )
+        except Exception:
+            specs = []          # an unfinished plan still gets the dive-wide view
 
         def work(progress, cancel):
-            return read_health(mcaps, progress=progress)
+            return read_health(mcaps, transects=specs, progress=progress)
 
         def done(report) -> None:
             # Back on the main thread, so the textbox can be touched safely.
@@ -191,15 +276,15 @@ class TransectPage(ctk.CTkFrame):
     def refresh(self) -> None:
         """Re-read the flight and plan. Called whenever this page is shown."""
         disc = getattr(self.app, "discovery", None)
-        mcaps = list(disc.mcaps) if disc else []
+        mcaps = list(disc.telemetry) if disc else []
 
         if not self.app.flight_dir:
             self.found.configure(text="No flight folder selected yet — "
                                       "choose one on Aboard ROV.")
         elif not mcaps:
             self.found.configure(
-                text="No .mcap files in this flight. They normally sit in a "
-                     "logs/ folder beside the video.")
+                text="No .mcap or .tlog telemetry in this flight. It normally "
+                     "sits in a logs/ folder beside the video.")
         else:
             total_mb = sum(m.stat().st_size for m in mcaps) / 1e6
             names = "\n".join(f"    {m.name}" for m in mcaps[:6])
@@ -247,14 +332,16 @@ class TransectPage(ctk.CTkFrame):
             messagebox.showerror(APP_NAME, _MISSING)
             return
         pipeline, tide = mod
+        from ccr_m2c.transect import make_transect_id
 
         if not self.app.flight_dir:
             messagebox.showinfo(APP_NAME, "Select a flight folder first.")
             return
         disc = getattr(self.app, "discovery", None)
-        mcaps = list(disc.mcaps) if disc else []
+        mcaps = list(disc.telemetry) if disc else []
         if not mcaps:
-            messagebox.showinfo(APP_NAME, "No .mcap files were found in this flight.")
+            messagebox.showinfo(APP_NAME, "No .mcap or .tlog telemetry was found "
+                                          "in this flight.")
             return
 
         plan = self.app._plan()
@@ -273,9 +360,19 @@ class TransectPage(ctk.CTkFrame):
         station_id = dict(tide.STATIONS).get(choice)      # None = skip
         out_root = self._out_dir()
         want_map = bool(self.make_map.get())
+        try:
+            origin = self._origin()
+        except ValueError as ex:
+            messagebox.showerror(APP_NAME, str(ex))
+            return
         # Transect names repeat across sites ("T1" at each), so several sites in
         # one flight need the site in the filename or they overwrite each other.
-        prefix = len(sites) > 1
+        id_prefix = self.prefix_entry.get().strip()
+        # Several sites in one flight still get their own folder, so two
+        # sites sharing a prefix cannot overwrite each other's CSVs.
+        per_site_folder = len(sites) > 1
+
+        results_by_site: list = []
 
         def work(progress, cancel):
             reports: list[str] = []
@@ -286,14 +383,23 @@ class TransectPage(ctk.CTkFrame):
                 base = i / len(sites)
                 span = 1.0 / len(sites)
 
+                # The survey code is typed once and the ordinal filled in, so
+                # every transect in a survey carries the same prefix and a
+                # mistyped one cannot separate two of them. The pauses go
+                # alongside rather than being cut out of the windows: the rows
+                # stay in the CSV and are marked, so an analysis can drop them
+                # and a check on the recording still sees an unbroken stretch
+                # of telemetry.
+                stem = id_prefix or site.name
                 specs = [
                     pipeline.TransectSpec(
-                        f"{site.name}_{t.name}" if prefix else t.name,
+                        make_transect_id(stem, n, t.name),
                         [(t.start_tc, t.end_tc)],
+                        pauses=[(p.start_tc, p.end_tc) for p in t.pauses],
                     )
-                    for t in site.transects
+                    for n, t in enumerate(site.transects, start=1)
                 ]
-                out = Path(out_root) / site.name if prefix else Path(out_root)
+                out = Path(out_root) / site.name if per_site_folder else Path(out_root)
 
                 result = pipeline.run(
                     mcaps,
@@ -303,8 +409,10 @@ class TransectPage(ctk.CTkFrame):
                     save_location=out,
                     transects=specs,
                     make_map=want_map,
+                    origin=origin,
                     progress=lambda f, m, b=base, s=span: progress(b + s * f, m),
                 )
+                results_by_site.append((site.name, result))
                 reports.append(f"{site.name}: " + "; ".join(
                     result.summary_lines()[0:1]))
                 for r in result.results:
@@ -317,5 +425,22 @@ class TransectPage(ctk.CTkFrame):
                     reports.append(f"   ! {w}")
             return reports
 
-        if self.app.submit(work, "Extracting transect CSVs"):
+        def done(_reports) -> None:
+            # Back on the main thread. The table lives on this page rather than
+            # in the footer log, which scrolls away under whatever runs next.
+            from ccr_m2c.transect import format_stats_table
+            blocks: list[str] = []
+            for name, result in results_by_site:
+                table = format_stats_table(result.results)
+                if table:
+                    if len(results_by_site) > 1:
+                        blocks.append(name)
+                    blocks.extend(table)
+                    blocks.append("")
+            self._set_summary("\n".join(blocks).strip() or "No transects were written.")
+            n = sum(len(r.saved) for _name, r in results_by_site)
+            self.note.configure(text=f"Wrote {n} transect CSV(s).")
+
+        if self.app.submit(work, "Extracting transect CSVs", on_done=done):
             self.note.configure(text="Running — progress is in the footer.")
+            self._set_summary("Extracting...")

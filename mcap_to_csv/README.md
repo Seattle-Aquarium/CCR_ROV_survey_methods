@@ -172,11 +172,88 @@ and stays blank unless the recording carries that message.
 
 ---
 
+## What the vehicle was: `--params`
+
+```bash
+python -m ccr_m2c --params logs/*.BIN logs/*.mcap      # firmware + parameters
+python -m ccr_m2c --params logs/*.BIN --grep RNGFND    # just the rangefinder
+python -m ccr_m2c --params logs/*.BIN --all            # every parameter
+```
+
+A survey CSV records what the ROV measured. This records the machine that
+measured it, so that when two dives disagree months later you can check whether
+anything about the vehicle changed between them.
+
+**Give it the `.BIN` logs.** The autopilot's dataflash log writes every
+parameter at boot and an explicit version record, unconditionally. An mcap only
+carries parameters a ground station happened to download during that recording:
+on 2026-09-02 the `.BIN` held all 1,038 and `ArduSub V4.5.0 (03c12698)`, while
+the mcap from the same dive held 6 and no version at all. Pass both and the
+`.BIN` supplies the configuration while the mcap supplies the BlueOS side —
+board, OS and kernel, which the `.BIN` does not carry.
+
+Reading `.BIN` files needs `pymavlink`. It is not a dependency of this package;
+without it the `.BIN` is skipped with a note and the mcap is used instead.
+
+The report never lets a partial answer look complete. An mcap-only run says
+`6 of the vehicle's 1038 were captured -- a partial download`, a missing version
+explains that `AUTOPILOT_VERSION` is a reply rather than a broadcast, and the
+BlueOS release is reported as not recorded rather than guessed at from the
+Debian version underneath it.
+
+---
+
+## Older .tlog recordings
+
+Dives from before BlueOS 1.5 recorded telemetry as `.tlog`, and those are read
+the same way:
+
+```bash
+python -m ccr_m2c logs/*.tlog --site EBM --date 20240924 --out ./out     --prefix EBM_W25 --transect 11:30:00-11:45:00 --transect 12:00:00-12:15:00
+```
+
+The two formats meet at the point the MAVLink frames are parsed — a tlog reader
+yields the same `(type, fields, time)` the mcap readers do — so the per-second
+folding, depth precedence, transect cutting, tide standardisation, map and health
+report are all shared. The same 45 columns come out either way, and a dive split
+across the upgrade can mix both in one run.
+
+Three things need translating on the way in, and are:
+
+* pymavlink returns enums as integers where an mcap carries their names, so a fix
+  type would otherwise read `3` from one file and `GPS_FIX_TYPE_3D_FIX` from the
+  other.
+* A tlog has no channel list, so which sources it carries has to be found by
+  reading some of it. That decision picks altitude and speed for the whole dive,
+  and getting it wrong lets two sources feed one column at once.
+* A tlog interleaves every system on the link, so the sending system is read from
+  the frame header and the autopilot preferred, exactly as the topic names let an
+  mcap do.
+
+Only compositing still needs an `.mcap`: a tlog carries telemetry but no video.
+
+## Naming the transects
+
+Give the survey code once and let the ordinal be filled in:
+
+```bash
+--prefix EBM_W25 --transect 11:30:00-11:45:00      # -> EBM_W25_T1
+```
+
+The ID lands in the `Transect_ID` column and is the CSV's filename. A
+`--transect` may still name itself (`T9=11:00:00-11:10:00` becomes
+`EBM_W25_T9`), and applying a prefix that is already there does not double it,
+so reprocessing a flight is safe.
+
 ## Checking the navigation: `--health`
 
 ```bash
-python -m ccr_m2c --health logs/*.mcap
+python -m ccr_m2c --health logs/*.mcap                      # whole dive
+python -m ccr_m2c --health logs/*.mcap --plan utc_plan.json  # and per transect
 ```
+
+**Pass `--plan` (or `--transect`) or you only get the whole dive**, which on a
+real flight is mostly transit and says little about the part being analysed.
 
 The transects are only as good as the navigation behind them, and a recording
 says a great deal about that. This reports which aiding sources the EKF actually
@@ -209,11 +286,18 @@ seconds — a completely different, and actually actionable, picture.
 Given a plan (or `--transect`), the report adds a per-transect breakdown and
 judges the dropout warnings on the transects alone.
 
-One judgement is built in. Without GPS or a locked USBL, ArduSub reports the
-**AHRS** health bit unhealthy for the whole dive: it means "no absolute
-position", not "the attitude solution is broken". Flagging that as a fault would
-cry wolf on every survey the team flies, so it is annotated instead of raised —
-unless the dive *did* have an absolute fix, in which case it is a real concern.
+One judgement is built in. ArduSub's **AHRS** health bit is not the EKF's
+opinion of itself. The autopilot clears it for either of two reasons: the EKF
+is unhealthy, *or* the accelerometer calibration does not match the fitted IMU
+(the saved `INS_ACC_ID` is not the accelerometer the board found, so the
+calibration is treated as absent). The EKF's own status flags are ANDed with
+its health, so the two can be told apart: an attitude flag valid all dive while
+the bit is unhealthy rules the EKF out, and the report says so — *redo the
+6-position accelerometer calibration* — rather than reporting a fault it cannot
+see. This vehicle has shown exactly that on every recording since 2026-08-26,
+with and without a USBL fix. It is not the missing EKF origin: the 2026-09-02
+Jack Block dive had a locked USBL, an absolute position and the same bit down
+for 100% of the dive.
 
 ---
 
@@ -259,32 +343,59 @@ locked, which gives an independent fix to compare against.
 
 ---
 
-## Where the transects sit relative to each other
+## Where the transects sit on the map
 
-The DVL track is dead reckoning, so it has to be pinned to a real coordinate
-somewhere. The obvious place is each transect's first surface fix — which is
-what the tlog workflow did, and what this tool did at first.
+The DVL track is dead reckoning: a chain of measured steps with no coordinate of
+its own. Something has to pin it to the earth, and what that is decides both
+how accurate the track is and how it is built.
 
-It is wrong whenever the USBL has not locked. A Water Linked unit with no fix
-reports **one static position for the whole dive**, so every transect gets
-seeded at the identical coordinate and they stack on top of one another. Their
-real separation is lost — even though the DVL measured it. The autopilot's local
-frame runs continuously *between* transects as well as during them, so the
-distance from the end of one to the start of the next is known.
+**With a USBL that locked**, the surface fix tracks the vehicle. Each transect is
+anchored to its own first fix, so the DVL's drift is bounded by that transect —
+a few metres across ten minutes — rather than accumulating across the whole dive.
+On the 2025-08-14 Pocket Beach dive, anchoring the later transects to the dive's
+first fix instead put them **100 m** from their GPS; anchored to their own, they
+start on it and drift 4–18 m by the end.
 
-So the track is propagated once across the whole dive from a single seed, and
-each transect keeps its slice. On the 2026-08-26 Centennial Park dive that is
-the difference between three transects piled on one point and T2 starting where
-T1 ended, with T3 about 80 m east.
+**Without a USBL**, the DVL page in BlueOS needs the vessel's position typed in
+before arming. The extension then injects that one coordinate for the whole
+dive. It cannot anchor a transect, so the dive is propagated as a single track
+from it and each transect keeps its slice — which preserves the transects'
+separation (the autopilot's local frame runs continuously *between* them, so
+that distance was measured) but not their absolute position.
 
-`DVLx`/`DVLy` are still re-zeroed to each transect's start afterwards, so those
-columns mean exactly what they did in the tlog workflow, and `Distance` still
-measures only the transect itself. Only `DVLlat`/`DVLlon` change.
+**If the origin was never typed in**, the recording has a good DVL track and no
+coordinates at all. Give it the vessel's position afterwards:
 
-What this does **not** fix is absolute accuracy: with a static surface fix the
-whole set can still be offset from the true position, and the shape rotates with
-any compass error. It is the geometry between transects that becomes
-trustworthy, not the position on the earth.
+```bash
+python -m ccr_m2c logs/*.mcap --plan utc_plan.json --origin 47.6176,-122.3610
+```
+
+or the **Origin** fields on UTC's Transects page. A typed origin beats a static
+fix — the only reason to type one is that the recording's own is missing or
+wrong — and is ignored, with a note, when the fix was tracking, since a USBL
+knows where the vehicle was and a typed origin does not.
+
+The run log says which of the three applied.
+
+### What the accuracy then depends on
+
+Only the USBL case measures position. The other two are dead reckoning from one
+point, and three things set how far the track ends up from the truth:
+
+| | Effect on the track | Measured on this vehicle |
+|---|---|---|
+| **The origin** | shifts the whole set, rigidly | whatever the vessel's GPS was good to |
+| **The compass** | rotates the whole set about the origin | EKF vs DCM yaw disagree by 12° median, 16–38° at p95 |
+| **DVL drift** | grows along the track with time | ~2 mm/s of velocity bias; ~6 m over a 37-minute dive on the one axis that can be checked |
+
+The compass is the one to worry about. A 12° yaw error moves the far end of a
+100 m transect **21 m** sideways, and no amount of good DVL data corrects it —
+the steps are right, the direction they are laid down in is not. `--health`
+reports `compass_variance` and the EKF-vs-DCM yaw gap for exactly this reason.
+
+`DVLx`/`DVLy` are re-zeroed to each transect's start in every case, so those
+columns and `Distance` mean what they did in the tlog workflow. Only
+`DVLlat`/`DVLlon` depend on which anchoring applied.
 
 ---
 
@@ -344,20 +455,22 @@ Altitude, Width, Area_m2,
 Water_temp_C,
 Battery_V, Battery_A, Battery_W, Battery_mAh_used, Battery_Wh_used,
 Lights_pct, Cam_tilt,
-Relative_alt_m, VFR_alt, NEDz, Pressure_abs_hPa, Messages
+Relative_alt_m, VFR_alt, NEDz, Pressure_abs_hPa, Messages,
+Survey_state
 ```
 
 The three coordinate pairs sit together, because comparing them is the whole
 point of having all three. `Width` and `Area_m2` sit with `Altitude`, which they
-are computed from. The raw depth inputs go last: they are there for checking a
-suspicious `Depth`, not for analysis.
+are computed from. The raw depth inputs go near the end: they are there for checking a
+suspicious `Depth`, not for analysis. `Survey_state` is last on purpose,
+so every column before it keeps the position it has always had.
 
-> **This order differs from `tlog_to_csv.py`.** The columns are the same 44 and
-> the names are unchanged, so anything selecting by name — the R plotting
+> **This order differs from `tlog_to_csv.py`.** Its 44 columns are all here
+> with their names unchanged, plus `Survey_state`, so anything selecting by name — the R plotting
 > scripts, `pandas` merges, the VIAME join — is unaffected. Only a consumer
 > reading by column *number* would care, and nothing in this repository does.
 
-**[COLUMNS.md](COLUMNS.md) documents all 44** — what each one means, which
+**[COLUMNS.md](COLUMNS.md) documents all 45** — what each one means, which
 MAVLink message it came from, and whether it was read from a sensor, fused by the
 EKF, computed here, or scaled by a camera-calibration constant. The short version:
 

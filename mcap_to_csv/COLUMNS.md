@@ -4,7 +4,7 @@ Every column in a transect CSV, what it means, and where the number actually
 came from. Read the **Origin** column before trusting a figure: it is the
 difference between a measurement and an estimate.
 
-44 columns, one row per second, local times in US/Pacific.
+45 columns, one row per second, local times in US/Pacific.
 
 ## Six kinds of number
 
@@ -51,7 +51,7 @@ unaffected; only a consumer reading by column number would care.
 | `Longitude` | As above. | `GPS_RAW_INT.lon` ÷ 1e7 | Direct | last |
 | `EKFlat` | Fused global position. **Blank whenever the EKF has no absolute fix**, which is every dive without a locked USBL. | `GLOBAL_POSITION_INT.lat` ÷ 1e7 | Fused | last |
 | `EKFlon` | As above. | `GLOBAL_POSITION_INT.lon` ÷ 1e7 | Fused | last |
-| `DVLlat` | The DVL track as coordinates. Propagated once across the whole dive, so transects keep their true separation. Seeded from the dive's first GPS or EKF fix; if the dive never has either, seeded instead from `pipeline.run`'s `manual_origin` when the caller supplies one (the vehicle's own ORIGIN_LAT/ORIGIN_LON, say) — blank only when neither exists. | geodesic walk of the `DVLx`/`DVLy` steps from that seed | Computed | — |
+| `DVLlat` | The DVL track as coordinates. Anchored to each transect's own surface fix when that fix is tracking, so the DVL's drift is bounded by the transect. When the fix never moved, or there was none, the dive is propagated as one track instead, which keeps the transects' true separation but not their absolute position; that track is seeded from an origin when one is given (typed on the Transects page or with `--origin`, or the vehicle's own ORIGIN_LAT/ORIGIN_LON as `pipeline.run`'s `manual_origin`), otherwise from the dive's first GPS or EKF fix. Blank only when none of these exist. | geodesic walk of the `DVLx`/`DVLy` steps from that seed | Computed | — |
 | `DVLlon` | As above. | as above | Computed | — |
 | `GPS_fix_type` | Fix state of the acoustic tracker. `NO_GPS` means the positions are dead reckoning. | `GPS_RAW_INT.fix_type` | Direct | last |
 | `GPS_satellites` | Locator count the tracker reports. | `GPS_RAW_INT.satellites_visible` | Direct | last |

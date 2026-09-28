@@ -64,7 +64,7 @@ items long however many tools accumulate.
 | | **Vehicle & files** | Ask BlueOS what the vehicle is, check it is fit to dive, and copy the right recordings onto a portable drive. [Read-only](#aboard-the-rov) — nothing on the ROV is written to or deleted. |
 | | **Monitoring** | Record [the laptop](#monitoring-the-topside-while-it-flies) at 1 Hz and [the tether at 10](#the-tether-from-both-ends) for the length of a flight, and snapshot the vehicle's parameters and software versions at arming and disarming. Starts and stops itself with the ROV. Also checks the topside network before the dive, which is the one check that cannot be run afterwards. |
 | **2 · Flight report** | **Flight summary** | Read the whole day back — every recording, the topside logs, the parameter snapshots — work out [what happened](#the-flight-report), and write a branded PDF that travels with the flight folder. |
-| | **Transects** | Cut the `.mcap` telemetry into [one CSV per transect](#transects-mcap-to-csv), plus a map of the site, and [report how the navigation behaved](#sensor-health). |
+| | **Transects** | Cut the telemetry — `.mcap` from BlueOS 1.5 onwards, `.tlog` before it — into [one CSV per transect](#transects-mcap-or-tlog-to-csv), plus a map of the site, and [report how the navigation behaved](#sensor-health). |
 | | **Recording health** | Check each `.mcap` for damage, repair the ones the vehicle never closed, and — [when a recording is beyond saving](#when-a-recording-fails) — read telemetry from the autopilot's own `.BIN` log instead. |
 | **3 · Photos** | **Import photos** | Pull stills off the camera card straight into transect folders, renamed and bannered. Copies from a card; moves from inside the flight. |
 | | **Process photos** | Develop a folder of GoPro `.GPR` raws through Lightroom Classic: crop to the survey size, remove chromatic aberration, AI Denoise, export 16-bit ProPhoto TIFs. |
@@ -664,6 +664,37 @@ to find that out — before imagery is filed and a card is wiped.
   windows</a> rather than judging the whole file.</sub>
 </p>
 
+#### Pauses
+
+Sometimes the vehicle is on transect and something goes wrong — Cockpit
+disarms, the video glitches, a minute goes on getting the ROV back where it
+was. That minute is inside the transect but was not surveyed, and its imagery
+must not be filed as though it were.
+
+**+ Add pause**, under each transect's *end* box, adds a start and an end
+beside the transect's own times. Add as many as a transect needs. The row then
+reads, for example, *10.5 min surveying · 1.5 min paused*.
+
+A pause has to be inside its transect, has to run forwards, and cannot overlap
+another; anything else is an error on the row rather than something quietly
+clipped, because a pause typed against the wrong transect is the mistake most
+worth catching. Times run on the transect's own clock, so a transect through
+local midnight carries its pauses with it.
+
+What a pause changes, everywhere the plan is read:
+
+| | |
+| --- | --- |
+| **GoPro stills** | a frame taken during a pause matches no transect, so it is handled as off-transect — kept in `off_transect/`, or left behind, by the policy on the import page |
+| **GoPro video** | the per-transect trim and the composite skip the paused footage and join across it. The telemetry under the picture skips with it, so the overlay stays on the frame it belongs to |
+| **per-transect CSV** | every row is **kept** and marked in the `Survey_state` column (`transect` / `pause`), so an analysis can filter and a check on the recording still sees an unbroken stretch of telemetry. `Distance` and the summary table count only the surveying rows |
+| **1 Hz telemetry CSV** | same, in a `survey_state` column |
+| **the dive profile, sensor health** | not affected: which recordings cover a transect is a question about when the flight happened, not about what was surveyed |
+
+A transect with no pauses behaves in every respect exactly as it always did,
+and a `utc_plan.json` written before pauses existed opens unchanged. The pauses
+are saved in the same file, as a `pauses` list on each transect.
+
 > Transect names must be **unique across the whole plan**, not just within one
 > site, and a reused name is now rejected by validation. Imagery is filed by
 > transect name alone, so two sites that both call a transect `T1` land in one
@@ -814,10 +845,10 @@ believed. Two tools, and a third report inside the first.
 
 | Tool | Answers |
 |---|---|
-| **Transects** | What the telemetry says — [one CSV per transect](#transects-mcap-to-csv), a map of the site, and [how the instruments behaved](#sensor-health). |
+| **Transects** | What the telemetry says — [one CSV per transect](#transects-mcap-or-tlog-to-csv), a map of the site, and [how the instruments behaved](#sensor-health). |
 | **Recording health** | Whether the `.mcap` *file* is intact, [what to do when it is not](#when-a-recording-fails), and how to fall back to [the autopilot's own log](#reading-the-autopilots-own-log). |
 
-### Transects (mcap to CSV)
+### Transects (mcap or tlog to CSV)
 
 The **Transects** page runs the extractor in [`mcap_to_csv/`](../mcap_to_csv/)
 against the flight that is already open. It reads the survey plan from
@@ -828,6 +859,50 @@ disagrees with the footage.
 
 It writes one CSV per transect plus a Leaflet map of the site. Column meanings
 and provenance are in [COLUMNS.md](../mcap_to_csv/COLUMNS.md).
+
+**Older flights work too.** Dives recorded before BlueOS 1.5 kept their telemetry
+in `.tlog` files, and those are read the same way — the two formats meet at the
+point the MAVLink frames are parsed, so everything after that is shared and a
+tlog produces exactly the same 45 columns. A dive that spans the upgrade can even
+mix them; they are merged on one timeline. Only compositing still needs an
+`.mcap`, because a tlog carries no video.
+
+#### If the origin was never set in BlueOS
+
+Without a USBL, the vehicle's position has to be typed into the DVL page in
+BlueOS before arming; that is what pins the DVL's dead reckoning to the earth.
+Forget, and the dive comes back with a perfectly good track and no coordinates.
+
+The **Origin (lat, lon)** fields on the Transects page fix that after the fact.
+Enter the vessel's position at arming, in decimal degrees, and the track is
+anchored there. Leave them blank for any dive where BlueOS had the origin or the
+USBL was locked — a typed origin is ignored, with a note in the log, whenever the
+recording's own fix was tracking, because a USBL knows where the vehicle was and
+a typed origin does not.
+
+What the track's accuracy then rests on, in order of how much it usually
+matters: the **compass** (a yaw error rotates the whole set about the origin —
+12° moves the far end of a 100 m transect 21 m sideways), **DVL drift** (a few
+metres over a ten-minute transect), and the **origin** itself (shifts everything
+rigidly). Sensor health reports the compass figures for exactly this reason.
+
+#### What each transect looked like
+
+After an extraction the Extract card shows one row per transect: duration,
+shallowest and deepest point, altitude above the seabed (min, max, mean), and
+the distance travelled **three ways** — from the DVL track, the EKF track and
+the GPS track.
+
+The three distances are meant to disagree. The GPS figure sums every jitter of
+the surface fix and comes out several times the DVL's — on the 2025-08-14 Pocket
+Beach dive, 361 m of GPS path for 68 m of transect. That gap is a direct measure
+of how noisy the fix was; the DVL figure is the length of the transect.
+
+**Transect IDs.** Give the survey code once in *Transect ID prefix* — `EBM_W25` —
+and each transect becomes `EBM_W25_T1`, `EBM_W25_T2`, in both the `Transect_ID`
+column and the filename. Left blank, the site name is used. Naming them by hand
+per transect is how `EBM_W25_T3` ends up beside `EMB_W25_T4`, with nothing
+downstream able to tell the two belong to one survey.
 
 `run_UTC.bat` installs the extractor alongside UTC. If the page reports it
 missing, install it by hand:
@@ -1203,7 +1278,9 @@ VIAME and percent-cover joins.
 
 One row per second across the whole recorded span, so descents, ascents and
 between-transect maneuvering stay in the record. Rows outside a transect are
-labeled `off_transect`.
+labeled `off_transect`; a `survey_state` column says `transect`, `pause` or
+`off_transect` for every second, so a paused minute keeps its transect name and
+still says nothing was being surveyed in it.
 
 Columns: UTC and TC-25 time, date, project/site/transect, **power (V × A)**,
 voltage, current, depth, altitude, pressure, water temperature, heading, roll,
@@ -1219,7 +1296,7 @@ leaves blanks rather than a flat line, so a dead sensor cannot look healthy.
 
 ## The transect CSV columns
 
-What the **Transects** step writes: 44 columns, one row per second, local times
+What the **Transects** step writes: 45 columns, one row per second, local times
 in US/Pacific. Grouped by what they are for — what and when, where, how it was
 moving, how deep, what the camera saw, then power, pilot settings, and the raw
 inputs behind the derived columns.
@@ -1264,12 +1341,12 @@ between a measurement and an estimate:
 | `Longitude` | As above. | `GPS_RAW_INT.lon` ÷ 1e7 | Direct | last |
 | `EKFlat` | Fused global position. **Blank whenever the EKF has no absolute fix**, which is every dive without a locked USBL. | `GLOBAL_POSITION_INT.lat` ÷ 1e7 | Fused | last |
 | `EKFlon` | As above. | `GLOBAL_POSITION_INT.lon` ÷ 1e7 | Fused | last |
-| `DVLlat` | The DVL track as coordinates. Propagated once across the whole dive, so transects keep their true separation. Seeded from the dive's first GPS or EKF fix; if the dive never has either, seeded instead from `pipeline.run`'s `manual_origin` when the caller supplies one (the vehicle's own ORIGIN_LAT/ORIGIN_LON, say) — blank only when neither exists. | geodesic walk of the `DVLx`/`DVLy` steps from that seed | Computed | — |
+| `DVLlat` | The DVL track as coordinates. Anchored to each transect's own surface fix when that fix is tracking, so the DVL's drift is bounded by the transect. When the fix never moved, or there was none, the dive is propagated as one track instead, which keeps the transects' true separation but not their absolute position; that track is seeded from an origin when one is given (typed on the Transects page or with `--origin`, or the vehicle's own ORIGIN_LAT/ORIGIN_LON as `pipeline.run`'s `manual_origin`), otherwise from the dive's first GPS or EKF fix. Blank only when none of these exist. | geodesic walk of the `DVLx`/`DVLy` steps from that seed | Computed | — |
 | `DVLlon` | As above. | as above | Computed | — |
 | `GPS_fix_type` | Fix state of the acoustic tracker. `NO_GPS` means the positions are dead reckoning. | `GPS_RAW_INT.fix_type` | Direct | last |
 | `GPS_satellites` | Locator count the tracker reports. | `GPS_RAW_INT.satellites_visible` | Direct | last |
-| `DVLx` | Meters north of the transect start. Re-zeroed at each transect. | `LOCAL_POSITION_NED.x` when recorded — else `VISION_POSITION_DELTA` integrated and rotated by `ATTITUDE.yaw` | Fused / Computed | last |
-| `DVLy` | Meters east of the transect start. | `LOCAL_POSITION_NED.y`, or the same integration | Fused / Computed | last |
+| `DVLx` | Metres north of the transect start. Re-zeroed at each transect. | `LOCAL_POSITION_NED.x` when recorded — else `VISION_POSITION_DELTA` integrated and rotated by `ATTITUDE.yaw` | Fused / Computed | last |
+| `DVLy` | Metres east of the transect start. | `LOCAL_POSITION_NED.y`, or the same integration | Fused / Computed | last |
 | `DVL_source` | Which of the two fed `DVLx`/`DVLy` on this dive. | this tool | Computed | — |
 | `DVL_confidence` | The DVL's own confidence in its bottom lock, as a percentage. | `VISION_POSITION_DELTA.confidence` | Direct | mean |
 
@@ -1281,13 +1358,13 @@ between a measurement and an estimate:
 | `Roll` | Degrees. | `ATTITUDE.roll` → degrees | Fused | mean |
 | `Pitch` | Degrees. | `ATTITUDE.pitch` → degrees | Fused | mean |
 | `Velocity_mps` | Speed over ground. Cleaner than the HUD's figure, which carries filter spikes. | `VISION_POSITION_DELTA` horizontal magnitude ÷ its own `time_delta_usec`; falls back to `VFR_HUD.groundspeed` | Direct | mean |
-| `Distance` | Meters traveled during this second. Sum it for transect length. | change in `DVLx`/`DVLy` from the previous row; steps under 2 cm count as zero | Computed | — |
+| `Distance` | Metres travelled during this second. Sum it for transect length. | change in `DVLx`/`DVLy` from the previous row; steps under 2 cm count as zero | Computed | — |
 
 **Depth**
 
 | Column | What it is | Where it comes from | Origin | Per second |
 | --- | --- | --- | --- | --- |
-| `Depth` | Meters, **negative down**. | first available of `VFR_HUD.alt` (< −0.5), `GLOBAL_POSITION_INT.relative_alt` ÷ 1000, −`LOCAL_POSITION_NED.z`, or derived from `SCALED_PRESSURE2` | Fused | last |
+| `Depth` | Metres, **negative down**. | first available of `VFR_HUD.alt` (< −0.5), `GLOBAL_POSITION_INT.relative_alt` ÷ 1000, −`LOCAL_POSITION_NED.z`, or derived from `SCALED_PRESSURE2` | Fused | last |
 | `Depth_std` | Seabed depth on the MLLW datum, so dives at different tide stages compare. | −`Altitude` + `Depth` + NOAA water level | External / Computed | — |
 | `Depth_Source` | Which of those four answered, row by row. | this tool | Computed | — |
 
@@ -1295,9 +1372,9 @@ between a measurement and an estimate:
 
 | Column | What it is | Where it comes from | Origin | Per second |
 | --- | --- | --- | --- | --- |
-| `Altitude` | Meters above the seabed. Drives `Width` and `Area_m2`. | `RANGEFINDER.distance` — the DVL A50's own range; falls back to `DISTANCE_SENSOR` id 0 ÷ 100 | Direct | mean |
-| `Width` | Meters of seabed across the frame. | `1.10 m × (Altitude ÷ 0.82 m)` — scales linearly with altitude | **Calibrated** | mean of samples |
-| `Area_m2` | Square meters of seabed in the frame, at that instant. | `0.99 m² × (Altitude ÷ 0.82 m)²` — scales with the square of altitude | **Calibrated** | mean of samples |
+| `Altitude` | Metres above the seabed. Drives `Width` and `Area_m2`. | `RANGEFINDER.distance` — the DVL A50's own range; falls back to `DISTANCE_SENSOR` id 0 ÷ 100 | Direct | mean |
+| `Width` | Metres of seabed across the frame. | `1.10 m × (Altitude ÷ 0.82 m)` — scales linearly with altitude | **Calibrated** | mean of samples |
+| `Area_m2` | Square metres of seabed in the frame, at that instant. | `0.99 m² × (Altitude ÷ 0.82 m)²` — scales with the square of altitude | **Calibrated** | mean of samples |
 
 **The water**
 
@@ -1412,17 +1489,25 @@ the data being analyzed.
 
 ### One judgement is built in
 
-Without GPS or a locked USBL, ArduSub reports the **AHRS** health bit unhealthy
-for the entire dive. It means *"no absolute position"*, not *"the attitude
-solution is broken"*. Raising that as a fault would fire on every survey the team
-flies and teach everyone to ignore the list, so it is annotated instead — unless
-the dive did have an absolute fix, where it is a real concern.
+ArduSub's **AHRS** health bit is not the EKF's opinion of itself. The autopilot
+clears it for either of two reasons: the EKF is unhealthy, *or* the
+accelerometer calibration does not match the fitted IMU (the saved
+`INS_ACC_ID` is not the accelerometer the board found, so the calibration is
+treated as absent). The EKF's own status flags are ANDed with its health, so
+the report can tell the two apart: an attitude flag valid all dive while the bit
+is unhealthy rules the EKF out, and the concern then says *redo the 6-position
+accelerometer calibration* rather than reporting a fault it cannot see. This
+vehicle has shown exactly that on every recording since 2026-08-26, with and
+without a USBL fix.
 
 From a terminal, the same report:
 
 ```bash
 python -m ccr_m2c --health logs/*.mcap --plan surveys.json
 ```
+
+Without `--plan` the command reports the whole dive only. The **Transects**
+page always passes the plan it already has, so its report is scoped either way.
 
 ---
 

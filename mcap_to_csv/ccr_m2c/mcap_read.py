@@ -54,6 +54,8 @@ from mcap.reader import make_reader
 from mcap.records import Channel, Message
 from mcap.stream_reader import StreamReader
 
+from .tlog_read import is_tlog, iter_tlog, probe_tlog, scan_types
+
 log = logging.getLogger(__name__)
 
 ProgressCB = Callable[[float, str], None]
@@ -208,6 +210,12 @@ def probe_mcaps(paths: Sequence[Path | str]) -> list[McapInfo]:
     out: list[McapInfo] = []
     for p in paths:
         info = McapInfo(Path(p))
+        if is_tlog(p):
+            # A tlog prefixes every record with its own timestamp, so the span
+            # comes from the first and last of those rather than from an index.
+            info.start, info.end, info.error = probe_tlog(p)
+            out.append(info)
+            continue
         try:
             with open(p, "rb") as f:
                 s = make_reader(f).get_summary()
@@ -338,6 +346,11 @@ def available_types(paths: Sequence[Path]) -> set[str]:
     """
     found: set[str] = set()
     for p in paths:
+        if is_tlog(p):
+            # A tlog has no channel list; the only way to know what it carries
+            # is to read some of it.
+            found.update(scan_types(p, WANTED_TYPES))
+            continue
         try:
             with open(p, "rb") as fh:
                 found.update(select_channels(make_reader(fh)))
@@ -774,18 +787,28 @@ def read_mcaps(
                      + (f"/{expected:,}" if expected else "") + f" messages{tail}")
 
         try:
-            with open(path, "rb") as fh:
-                reader = make_reader(fh)
-                chosen = select_channels(reader)
-                if not chosen:
-                    warnings.append(f"{path.name}: no MAVLink topics, skipped")
-                    done_bytes += size
-                    continue
-                expected = _expected_messages(reader, set(chosen.values()))
-                for mt, m, t in _iter_indexed(reader, chosen):
+            if is_tlog(path):
+                # A tlog has no index and no message count, so progress is
+                # estimated from the file's size rather than a total.
+                for mt, m, t in iter_tlog(path, WANTED_TYPES):
                     nread += 1
-                    report(nread, expected)
+                    report(nread, 0, " (tlog)")
                     feed(mt, m, t)
+                if not nread:
+                    warnings.append(f"{path.name}: no usable MAVLink frames")
+            else:
+                with open(path, "rb") as fh:
+                    reader = make_reader(fh)
+                    chosen = select_channels(reader)
+                    if not chosen:
+                        warnings.append(f"{path.name}: no MAVLink topics, skipped")
+                        done_bytes += size
+                        continue
+                    expected = _expected_messages(reader, set(chosen.values()))
+                    for mt, m, t in _iter_indexed(reader, chosen):
+                        nread += 1
+                        report(nread, expected)
+                        feed(mt, m, t)
 
         except Exception as ex:
             first = _brief(ex)
@@ -794,6 +817,8 @@ def read_mcaps(
                 # carry on; re-reading it sequentially now would double-count
                 # every message already folded in.
                 warnings.append(f"{path.name} stopped early: {first}")
+            elif is_tlog(path):
+                warnings.append(f"{path.name}: unreadable ({first})")
             else:
                 # Nothing came out at all, which means the summary or the chunk
                 # index is unusable -- the signature of a recording that was cut
@@ -818,7 +843,7 @@ def read_mcaps(
         done_bytes += size
 
     if not buckets:
-        raise ValueError("No MAVLink telemetry parsed from the .mcap file(s).")
+        raise ValueError("No MAVLink telemetry parsed from the recording(s).")
 
     df, depth_sources = _to_frame(buckets)
     dvl_source = ("LOCAL_POSITION_NED" if use_lpn
@@ -890,9 +915,10 @@ DEPTH_PRECEDENCE: tuple[tuple[str, str, str, str], ...] = (
      "the autopilot's own baro depth"),
     ("VFR_HUD", "alt", "VFR_alt",
      "the HUD's altitude field, which on some vehicles is a fixed offset"),
-    ("LOCAL_POSITION_NED", "z", "NEDz", "the EKF's local-frame z"),
+    ("LOCAL_POSITION_NED", "z", "NEDz",
+     "the EKF's local-frame z, positive-down and negated here"),
     ("SCALED_PRESSURE2", "press_abs", "Pressure_abs_hPa",
-     "the external pressure sensor"),
+     "the external pressure sensor, converted through a seawater column"),
 )
 
 

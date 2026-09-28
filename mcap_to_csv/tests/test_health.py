@@ -69,18 +69,46 @@ def test_reports_an_absolute_fix_when_the_ekf_had_one(builder):
     assert not any("dead reckoning" in c for c in rep.concerns())
 
 
-def test_the_ahrs_bit_is_not_cried_wolf_over_without_gps(builder):
-    """ArduSub reports AHRS unhealthy on every no-GPS dive; that is not a fault."""
+def test_an_ahrs_bit_down_while_the_ekf_was_up_is_the_accel_calibration(builder):
+    """The bit is cleared for an unhealthy EKF or for an accelerometer
+    calibration that does not match the IMU. EKF flags are ANDed with the
+    filter's health, so a valid attitude the whole time rules the EKF out."""
     rep = read_health([build(builder(), health=f"{MAG} | {VISION}")])   # AHRS missing
 
     assert rep.unhealthy[AHRS] == pytest.approx(100.0)
-    assert not any("AHRS" in c for c in rep.concerns())     # explained, not alarmed
-    assert "expected with no GPS/USBL" in "\n".join(rep.lines())
+    assert rep.ekf_healthy_pct == pytest.approx(100.0)
+    assert rep.ahrs_bit_is_the_accel_cal
+    verdict = next(c for c in rep.concerns() if c.startswith("AHRS"))
+    assert "INS_ACC_ID" in verdict and "accelerometer" in verdict
+    assert "accelerometer-calibration check" in "\n".join(rep.lines())
 
 
-def test_the_ahrs_bit_is_a_real_concern_when_there_was_a_fix(builder):
+def test_the_verdict_does_not_depend_on_the_fix(builder):
+    """Seen on 2026-09-02 with a locked USBL and on 2026-08-26 without one:
+    the fix has nothing to do with it, and the report must not say it does."""
     rep = read_health([build(builder(), flags=AIDED, health=f"{MAG} | {VISION}")])
-    assert any("AHRS" in c for c in rep.concerns())
+    assert rep.had_absolute_position
+    assert rep.ahrs_bit_is_the_accel_cal
+    text = "\n".join(rep.concerns() + rep.lines())
+    assert "no absolute position" not in text and "expected with no GPS" not in text
+
+
+def test_an_ahrs_bit_down_with_the_ekf_down_is_the_filter(builder):
+    """No attitude flag means the EKF called itself unhealthy; then the bit
+    is reporting the filter, and the calibration is not the story."""
+    rep = read_health([build(builder(), flags="EKF_UNINITIALIZED",
+                             health=f"{MAG} | {VISION}")])
+    assert rep.ekf_healthy_pct == 0.0
+    assert not rep.ahrs_bit_is_the_accel_cal
+    verdict = next(c for c in rep.concerns() if c.startswith("AHRS"))
+    assert "filter itself was unhealthy" in verdict
+    assert "INS_ACC_ID" not in verdict
+
+
+def test_a_healthy_ahrs_bit_says_nothing_about_calibration(builder):
+    rep = read_health([build(builder())])
+    assert not rep.ahrs_bit_is_the_accel_cal
+    assert not any("AHRS" in c for c in rep.concerns())
 
 
 def test_an_unhealthy_dvl_is_named_in_plain_language(builder):

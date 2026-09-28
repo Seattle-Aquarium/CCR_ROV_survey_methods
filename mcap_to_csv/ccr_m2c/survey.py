@@ -11,7 +11,8 @@ file works in both without editing:
           "project": "testing",
           "date": "2026-08-26",
           "transects": [
-            {"name": "T1", "start_tc": "12:19:57", "end_tc": "12:28:42"}
+            {"name": "T1", "start_tc": "12:19:57", "end_tc": "12:28:42",
+             "pauses": [{"start_tc": "12:22:00", "end_tc": "12:23:10"}]}
           ]
         }
       ],
@@ -19,7 +20,10 @@ file works in both without editing:
     }
 
 ``start_tc``/``end_tc`` are local wall-clock times, which is what the transect
-windows in this tool are too, so they carry straight across.
+windows in this tool are too, so they carry straight across. ``pauses`` --
+stretches inside the transect during which nothing was being surveyed -- are
+optional, and carry across the same way: the rows stay in the CSV and are
+marked in ``Survey_state`` (see ``transect.py``).
 
 A plan may hold several sites. Each becomes its own output folder, because a
 site is the unit the map is drawn for -- transects from two different places on
@@ -119,7 +123,17 @@ def load_plan(path: Path | str) -> SurveyPlan:
             if start >= end:
                 raise ValueError(
                     f"{path.name}: {name}/{tname} starts at {start} and ends at {end}")
-            site.transects.append(TransectSpec(tname, [(start, end)]))
+            pauses: list[tuple[str, str]] = []
+            for j, pz in enumerate(t.get("pauses") or [], start=1):
+                where = f"{name}/{tname} pause {j}"
+                a = _parse_time(pz.get("start_tc"), where)
+                b = _parse_time(pz.get("end_tc"), where)
+                if not (start <= a < b <= end):
+                    raise ValueError(
+                        f"{path.name}: {where} ({a}-{b}) is not inside "
+                        f"{tname} ({start}-{end})")
+                pauses.append((a, b))
+            site.transects.append(TransectSpec(tname, [(start, end)], pauses=pauses))
 
         if not site.transects:
             plan.warnings.append(f"site {name!r} has no transects; skipped")

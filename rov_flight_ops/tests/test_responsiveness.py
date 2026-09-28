@@ -78,9 +78,9 @@ def _run_warm(app, seconds: float = 4.0) -> list[str]:
     opened: list[str] = []
     real = app.nav.select
 
-    def watched(name, notify=True):
+    def watched(name, notify=True, *, by_user=True):
         opened.append(name)
-        return real(name, notify)
+        return real(name, notify, by_user=by_user)
 
     app.nav.select = watched                      # type: ignore[method-assign]
     try:
@@ -91,6 +91,10 @@ def _run_warm(app, seconds: float = 4.0) -> list[str]:
             app.update()
             time.sleep(0.005)
         opened.clear()
+        # The warm-up stands down once anybody has chosen a tab, and this test
+        # -- or an earlier one on the shared window -- did exactly that. A
+        # fresh start-up is what is being simulated here.
+        app.nav._chosen = False
         app.nav.warm()
         want = set(app.nav.sections)
         deadline = time.monotonic() + seconds

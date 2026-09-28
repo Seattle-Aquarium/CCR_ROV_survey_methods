@@ -26,6 +26,8 @@ from .mcap_read import probe_mcaps, read_mcaps
 from .pipeline import TransectSpec, run
 from .survey import load_plan
 from .tide import STATIONS
+from .transect import make_transect_id
+from .vehicle import read_vehicle
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +35,7 @@ log = logging.getLogger(__name__)
 #: report on stdout and `> run.log` captures the report without the spinner.
 _CR = "\r"
 _CLEAR = " " * 78
+NL = "\n"
 
 
 def _spin(fraction: float, message: str) -> None:
@@ -58,10 +61,12 @@ def _expand(patterns: list[str]) -> list[Path]:
 
 def _parse_transect(spec: str) -> TransectSpec:
     """``ID=HH:MM:SS-HH:MM:SS[,HH:MM:SS-HH:MM:SS]`` -> a TransectSpec."""
-    if "=" not in spec:
-        raise argparse.ArgumentTypeError(
-            f"--transect needs ID=start-end, got {spec!r}")
-    name, _, windows = spec.partition("=")
+    if "=" in spec:
+        name, _, windows = spec.partition("=")
+    else:
+        # With --prefix given, the ID is filled in from the ordinal, so a bare
+        # time window is enough: --transect 10:07:41-10:13:50
+        name, windows = "", spec
     pairs: list[tuple[str, str]] = []
     for chunk in windows.split(","):
         chunk = chunk.strip()
@@ -77,13 +82,39 @@ def _parse_transect(spec: str) -> TransectSpec:
     return TransectSpec(name.strip(), pairs)
 
 
+def _parse_origin(text: str) -> tuple[float, float]:
+    """``47.6176,-122.3610`` -> (lat, lon), with the ranges checked so a swapped
+    pair fails here rather than putting a transect in the Southern Ocean."""
+    try:
+        lat_s, lon_s = text.split(",")
+        lat, lon = float(lat_s), float(lon_s)
+    except ValueError as ex:
+        raise argparse.ArgumentTypeError(
+            f"--origin needs LAT,LON in decimal degrees, got {text!r}") from ex
+    if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+        raise argparse.ArgumentTypeError(
+            f"--origin {text!r} is out of range (lat -90..90, lon -180..180)")
+    return lat, lon
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="ccr_m2c",
         description="Turn BlueOS .mcap recordings into per-transect CSVs and a map.")
-    p.add_argument("inputs", nargs="*", help=".mcap files or globs")
+    p.add_argument("inputs", nargs="*",
+                   help=".mcap files or globs; --params also accepts .BIN logs")
     p.add_argument("--inspect", action="store_true",
                    help="print what the recordings contain, then exit")
+    p.add_argument("--params", action="store_true",
+                   help="report the vehicle's firmware and parameters, then exit; "
+                        "give it the .BIN logs as well as the .mcap files, since "
+                        "the .BIN carries the complete parameter set")
+    p.add_argument("--grep", metavar="TEXT",
+                   help="with --params, show only parameters whose name contains "
+                        "this")
+    p.add_argument("--all", action="store_true",
+                   help="with --params, show every parameter rather than the "
+                        "notable ones")
     p.add_argument("--health", action="store_true",
                    help="report what the EKF was using and how the sensors behaved, "
                         "then exit")
@@ -99,9 +130,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--plan", metavar="JSON",
                    help="survey plan (the same file UTC uses); supplies the site, "
                         "date and transects, so --site/--date/--transect are not needed")
+    p.add_argument("--prefix", default="", metavar="CODE",
+                   help="survey code prefixed to every Transect_ID, so "
+                        "--prefix EBM_W25 names them EBM_W25_T1, EBM_W25_T2 ...; "
+                        "a --transect may then give only its time window")
     p.add_argument("--prefix-site", action="store_true",
                    help="with --plan, name the CSVs <site>_<transect> rather than "
                         "<transect>; use when one folder holds several sites")
+    p.add_argument("--origin", type=_parse_origin, metavar="LAT,LON",
+                   help="the vessel's position at arming, for a dive flown "
+                        "without a USBL where the origin was not typed into "
+                        "BlueOS first; anchors the DVL track after the fact")
     p.add_argument("--no-map", action="store_true", help="skip the Leaflet map")
     p.add_argument("--no-tide", action="store_true",
                    help="skip the NOAA lookup; Depth_std is left blank")
@@ -117,7 +156,10 @@ def _inspect(paths: list[Path]) -> int:
         if i.error:
             print(f"  ERROR: {i.error}")
         else:
-            print(f"  {i.messages:,} messages, {i.path.stat().st_size / 1e6:,.0f} MB")
+            size = f"{i.path.stat().st_size / 1e6:,.0f} MB"
+            # A tlog carries no message count; only an mcap's summary has one,
+            # and printing "0 messages" for a 41 MB file reads as a failure.
+            print(f"  {i.messages:,} messages, {size}" if i.messages else f"  {size}")
 
     good = [i.path for i in infos if i.usable]
     if not good:
@@ -174,6 +216,12 @@ def main(argv: list[str] | None = None) -> int:
         print("no .mcap files given", file=sys.stderr)
         return 2
 
+    if args.params:
+        rep = read_vehicle(paths, progress=_spin)
+        print(_CLEAR, end=_CR, file=sys.stderr)
+        print(NL.join(rep.lines(grep=args.grep or "", full=args.all)))
+        return 0
+
     if args.health:
         # With a plan or --transect, the report also scopes itself to the
         # transects: most of a dive is transit, and whole-dive dropout
@@ -208,10 +256,14 @@ def main(argv: list[str] | None = None) -> int:
             # Each site gets its own folder: the map is drawn per site, and one
             # map spanning two locations is mostly empty ocean.
             out = Path(args.out) / site.name if len(plan.sites) > 1 else Path(args.out)
-            transects = site.transects
-            if args.prefix_site:
-                transects = [TransectSpec(f"{site.name}_{t.transect_id}", t.windows)
-                             for t in transects]
+            # --prefix wins; --prefix-site is the older way of saying "put the
+            # site in front", and still applies when no code is given.
+            stem = args.prefix or (site.name if args.prefix_site else "")
+            transects = [
+                TransectSpec(make_transect_id(stem, n, t.transect_id), t.windows,
+                             pauses=t.pauses)
+                for n, t in enumerate(site.transects, start=1)
+            ]
             result = run(
                 paths,
                 site_name=site.name,
@@ -220,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
                 save_location=out,
                 transects=transects,
                 make_map=not args.no_map,
+                origin=args.origin,
                 progress=_spin,
             )
             print(file=sys.stderr)
@@ -240,8 +293,12 @@ def main(argv: list[str] | None = None) -> int:
         survey_date=args.date,
         station_id=None if args.no_tide else args.station,
         save_location=args.out,
-        transects=args.transect,
+        transects=[
+            TransectSpec(make_transect_id(args.prefix, n, t.transect_id), t.windows)
+            for n, t in enumerate(args.transect, start=1)
+        ],
         make_map=not args.no_map,
+        origin=args.origin,
         progress=_spin,
     )
     print(file=sys.stderr)

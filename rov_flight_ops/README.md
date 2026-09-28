@@ -576,8 +576,10 @@ EBM West, where `ORIGIN_LAT`/`ORIGIN_LON` were set correctly before arming
 each time but the EKF never logged adopting an origin (no `ORGN` event; see
 `binlog.read_origin_params`) -- this page reads whichever of the flight's own
 `.BIN` logs has an origin, ORGN-confirmed or just the raw parameters, and
-passes it to the extractor as `manual_origin`. The output warns when the
-origin was never actually confirmed by the autopilot, because the resulting
+passes it to the extractor as `manual_origin`. The extractor uses it only when
+the recording's own surface fix was not tracking -- missing, or one static
+coordinate for the whole dive -- and leaves it unused, without comment, when the
+fix was. The output warns when the origin was never actually confirmed by the autopilot, because the resulting
 map is dead reckoning from that starting point, not a verified fix: right
 relative to itself, but the whole track can sit off the true location and
 rotates with any compass error. See `mcap_to_csv/ccr_m2c/transect.py`'s

@@ -24,7 +24,9 @@ from .tide import add_empty_tide, fetch_tide_dataframe, merge_tide
 from .transect import (
     TransectResult,
     export_transect,
+    format_stats_table,
     georeference_dvl,
+    has_live_fix,
     whole_log_window,
 )
 
@@ -74,6 +76,9 @@ class RunResult:
                 lines.append(f"{r.transect_id} ({r.window_desc}) -> {r.path.name}")
             else:
                 lines.append(f"{r.transect_id} ({r.window_desc}): SKIPPED (no data)")
+        table = format_stats_table(self.results)
+        if table:
+            lines += [""] + table
         if self.map_path:
             lines += ["", f"Map: {self.map_path.name}"]
         if not self.tide_ok:
@@ -95,17 +100,26 @@ def run(
     save_location: Path | str,
     transects: Sequence[TransectSpec],
     make_map: bool = True,
+    origin: tuple[float, float] | None = None,
     manual_origin: tuple[float, float] | None = None,
     progress: ProgressCB | None = None,
     on_log: LogCB | None = None,
 ) -> RunResult:
     """Read the recordings, cut them into transects, write CSVs and a map.
 
-    ``manual_origin`` is ``(lat, lon)`` to dead-reckon the whole dive from when
-    it never got a real GPS or EKF fix at all -- typically because ORIGIN_LAT/
-    ORIGIN_LON were set on the vehicle before arming but nothing on board
-    actually turned them into an EKF origin. Ignored the moment any real fix
-    exists anywhere in the dive; see `transect.georeference_dvl`.
+    ``origin`` is the vessel's (lat, lon) at arming, for a dive flown without
+    a USBL and without the origin having been typed into BlueOS first. It
+    anchors the DVL track after the fact. Ignored when the recording's own fix
+    was tracking, since a USBL knows where the vehicle was and a typed origin
+    does not.
+
+    ``manual_origin`` is the same anchor, offered rather than chosen: the
+    ORIGIN_LAT/ORIGIN_LON read back from the vehicle's own BIN log, which were
+    set correctly before arming on dives where nothing on board ever turned
+    them into an EKF origin. A caller hands it over whether or not the
+    recording turns out to need it, so it is used under exactly the conditions
+    ``origin`` is, and when it is not needed nothing is said. ``origin`` wins if
+    both are given; see `transect.georeference_dvl`.
     """
     def say(msg: str) -> None:
         log.info(msg)
@@ -166,23 +180,55 @@ def run(
     # its slice. DVLx/DVLy are still re-zeroed per transect afterwards, so those
     # columns mean exactly what they did in the tlog workflow.
     step(0.74, "building the dive track")
+    # How the DVL track gets its coordinates. Seeding each transect at its own
+    # fix keeps the DVL's drift bounded by that transect; propagating one track
+    # across the dive keeps the transects' true separation. Which is right
+    # depends entirely on whether the surface fix was tracking.
     site_frame = False
-    try:
-        df_all, _steps, seed_warning = georeference_dvl(df_all, manual_origin)
-        if seed_warning:
-            say(f"  ! {seed_warning}")
-            result.warnings.append(seed_warning)
-        # A warning from a manual origin is informational, not a failure: the
-        # dive-wide track it produced is still real and still the one worth
-        # keeping continuous across transects. Only "no GPS or EKF fix to seed
-        # lat/lon" -- no manual_origin either -- leaves DVLlat entirely blank,
-        # and that is the one case each transect should fall back to seeding
-        # (and failing) on its own, rather than re-propagate a column of NaN.
-        site_frame = df_all["DVLlat"].notna().any()
-    except Exception as ex:
-        result.warnings.append(f"dive-wide track failed ({ex}); "
-                               "each transect will be seeded on its own")
-        say(f"  ! {result.warnings[-1]}")
+    offered = origin is None and manual_origin is not None
+    if offered:
+        origin = manual_origin
+    if has_live_fix(df_all):
+        say("Surface fix is tracking; each transect is anchored to its own. "
+            "The DVL's drift is then bounded by the transect rather than "
+            "accumulating across the dive.")
+        if origin is not None and not offered:
+            note = ("an origin was given but the recording's own fix was "
+                    "tracking, so the origin was not used")
+            say(f"  ! {note}")
+            result.warnings.append(note)
+        # Also keeps it away from the per-transect seeding below, which would
+        # otherwise let an origin override the very fix it defers to here.
+        origin = None
+    else:
+        try:
+            df_all, _steps, seed_warning = georeference_dvl(df_all, origin=origin)
+            if seed_warning:
+                say(f"  ! {seed_warning}")
+                result.warnings.append(seed_warning)
+            # A warning is not a failure when a track came out of it: an origin
+            # is the operator's coordinate rather than a measurement, so it is
+            # reported, but the dive-wide track it produced is still real and
+            # still the one worth keeping continuous across transects. Only
+            # "no GPS or EKF fix to seed lat/lon" leaves DVLlat entirely blank,
+            # and that is the one case each transect should fall back to
+            # seeding (and failing) on its own, rather than re-propagate a
+            # column of NaN.
+            site_frame = bool(df_all["DVLlat"].notna().any())
+            if site_frame:
+                if origin is not None:
+                    say(f"Track anchored at the origin given: "
+                        f"{origin[0]:.6f}, {origin[1]:.6f}. The dive is "
+                        "propagated as one DVL track from there.")
+                else:
+                    say("Surface fix never moved, so it cannot anchor a "
+                        "transect. The dive is propagated as one DVL track "
+                        "instead, which keeps the transects' separation but "
+                        "not their absolute position.")
+        except Exception as ex:
+            result.warnings.append(f"dive-wide track failed ({ex}); "
+                                   "each transect will be seeded on its own")
+            say(f"  ! {result.warnings[-1]}")
 
     # ---- 4. transects -----------------------------------------------------
     specs = list(transects)
@@ -198,7 +244,7 @@ def run(
         r = export_transect(
             df_all, spec.windows, i, spec.transect_id, site_name,
             transects_folder, dvl_source=read.dvl_source, site_frame=site_frame,
-            pauses=spec.pauses, manual_origin=manual_origin,
+            pauses=spec.pauses, origin=origin,
         )
         say(r.message)
         for w in r.warnings:
