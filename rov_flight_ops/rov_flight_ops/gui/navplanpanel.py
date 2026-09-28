@@ -245,7 +245,7 @@ class PlanPanel(ctk.CTkFrame):
                         unit="°T")
             r += 1
             self._pick(r, "Anchor", "anchor_corner",
-                       ("centre", "1", "2", "3", "4"))
+                       ("center", "1", "2", "3", "4"))
             r += 1
             if isinstance(f, P.Grid):
                 self._field(r, "Lane spacing", "spacing_m",

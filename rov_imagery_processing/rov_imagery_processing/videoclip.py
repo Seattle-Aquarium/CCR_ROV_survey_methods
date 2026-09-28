@@ -331,7 +331,7 @@ def trim_flight(
 
     for i, r in enumerate(todo):
         if cancel is not None and cancel.is_set():
-            raise ff.CancelledError("cancelled")
+            raise ff.CancelledError("canceled")
         d = clip_dir(flight, r.transect.name)
         out = d / clip_name(r)
         sub = (lambda f, m="", i=i: progress((i + f) / len(todo), m)) \

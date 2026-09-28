@@ -31,7 +31,7 @@ from ..telemetry_cache import cache_dir_for, plan_windows
 from . import theme as T
 from .widgets import Card, button, entry, label
 
-_STATUS_COLOUR = {
+_STATUS_COLOR = {
     "ok": T.TEXT_MUTED,
     "truncated": T.WARN,
     "unreadable": T.WARN,
@@ -412,7 +412,7 @@ class HealthPage(ctk.CTkFrame):
             label(row, gb, True).grid(row=0, column=1, sticky="w", padx=(0, 12))
             label(row, span, True).grid(row=0, column=2, sticky="w", padx=(0, 12))
             st = ctk.CTkLabel(row, text=r.status, font=T.FONT_BODY, anchor="w",
-                              text_color=_STATUS_COLOUR.get(r.status, T.TEXT))
+                              text_color=_STATUS_COLOR.get(r.status, T.TEXT))
             st.grid(row=0, column=3, sticky="w", padx=(0, 12))
             label(row, self._telemetry_cell(r), True).grid(
                 row=0, column=4, sticky="w")

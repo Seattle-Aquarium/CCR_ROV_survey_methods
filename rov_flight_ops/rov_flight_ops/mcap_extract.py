@@ -82,7 +82,7 @@ WANTED: dict[str, tuple[str, ...]] = {
     "SYSTEM_TIME":         ("time_unix_usec",),
 }
 
-#: These carry a value we synthesise rather than copy verbatim.
+#: These carry a value we synthesize rather than copy verbatim.
 SPECIAL = ("NAMED_VALUE_FLOAT", "STATUSTEXT", "BATTERY_STATUS", "HEARTBEAT",
            "DISTANCE_SENSOR")
 
@@ -716,7 +716,7 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
                         topics = None
                         if not keep:
                             warnings.append(
-                                f"{mpath.name}: nothing recognisable, skipped")
+                                f"{mpath.name}: nothing recognizable, skipped")
                             done_bytes += mpath.stat().st_size
                             continue
                     else:
@@ -725,7 +725,7 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
                         topics = list(chosen.values()) + video_topics
                         if not topics:
                             warnings.append(
-                                f"{mpath.name}: nothing recognisable, skipped")
+                                f"{mpath.name}: nothing recognizable, skipped")
                             done_bytes += mpath.stat().st_size
                             continue
 

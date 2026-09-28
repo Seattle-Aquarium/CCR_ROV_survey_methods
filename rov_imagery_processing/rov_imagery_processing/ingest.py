@@ -26,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import layout
+from . import metermark as mm
 from . import photos as ph
 from .telemetry import TelemetryStore
 
@@ -272,6 +273,19 @@ class ImportOptions:
     #: transect time is only recoverable while this copy exists.
     include_off_transect: bool = True
 
+    #: Work out which frame sits at each meter along the transect, once the
+    #: imagery is in place. Off by default: it is an extra pass over the
+    #: telemetry and not every flight wants it.
+    meter_marks: bool = False
+    meter_interval_m: float = 1.0
+    #: Outputs, each written beside that transect's own imagery.
+    marks_csv: bool = False
+    marks_png: bool = False
+    #: File the matched frames into GPR/meters/, and optionally
+    #: JPG_edited/meters/ as well.
+    marks_file_gpr: bool = True
+    marks_file_jpg: bool = False
+
 
 def plan_import(
     scan: CardScan,
@@ -312,6 +326,7 @@ class ImportReport:
     transects: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    marks: mm.MarkReport | None = None
 
     def summary(self) -> str:
         lines = [f"Imported into {len(self.transects)} transect folder(s): "
@@ -325,6 +340,8 @@ class ImportReport:
             lines.append(f"  already present, skipped: {self.skipped}")
         if self.failed:
             lines.append(f"  failed: {self.failed}")
+        if self.marks is not None:
+            lines.append(self.marks.summary())
         return "\n".join(lines)
 
 
@@ -347,6 +364,8 @@ def import_photos(
     opts = options or ImportOptions()
     if opts.banner_previews and opts.copy_jpg and store is None:
         raise ValueError("bannering previews needs telemetry; pass `store`")
+    if opts.meter_marks and store is None:
+        raise ValueError("meter marks need telemetry; pass `store`")
 
     flight = Path(flight)
     rep = ImportReport()
@@ -358,7 +377,7 @@ def import_photos(
     for i, f in enumerate(wanted):
         if cancel is not None and cancel.is_set():
             from .ffmpeg_tools import CancelledError
-            raise CancelledError("cancelled")
+            raise CancelledError("canceled")
 
         if f.transect:
             tdir = layout.ensure_transect(flight, f.transect)
@@ -410,6 +429,31 @@ def import_photos(
 
     rep.transects.sort(key=layout.transect_sort_key)
     rep.warnings.extend(scan.warnings)
+
+    # Marks come last, once the frames are on disk: they are handed out
+    # against what is really in the transect folder, not what we meant to put
+    # there, so a frame that failed to copy cannot be assigned to a meter.
+    if opts.meter_marks and store is not None:
+        rep.marks = mm.run_for_flight(
+            flight, windows, store, mark_options(opts),
+            progress=(lambda f, m="": progress(0.95 + f * 0.05, m))
+            if progress else None,
+            cancel=cancel)
+        rep.warnings.extend(rep.marks.warnings)
+        rep.errors.extend(rep.marks.errors)
+
     if progress:
         progress(1.0, f"imported {rep.copied_jpg} JPG, {rep.copied_gpr} GPR")
     return rep
+
+
+def mark_options(opts: ImportOptions) -> mm.MarkOptions:
+    """The meter-mark settings carried on an ImportOptions."""
+    return mm.MarkOptions(
+        enabled=bool(opts.meter_marks),
+        interval_m=float(opts.meter_interval_m or 1.0),
+        write_csv=bool(opts.marks_csv),
+        write_png=bool(opts.marks_png),
+        move_gpr=bool(opts.marks_file_gpr),
+        move_jpg=bool(opts.marks_file_jpg),
+    )

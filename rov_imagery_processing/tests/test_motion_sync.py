@@ -35,7 +35,7 @@ def _texture(seed: int = 3, n: int = 220) -> np.ndarray:
 
 
 def _view(tex: np.ndarray, deg: float, dx: float = 0.0, dy: float = 0.0) -> np.ndarray:
-    """A THUMB-sized window on the texture, rotated `deg` about its centre."""
+    """A THUMB-sized window on the texture, rotated `deg` about its center."""
     th = np.radians(deg)
     c, s = np.cos(th), np.sin(th)
     h, w = M.THUMB_H, M.THUMB_W
@@ -59,7 +59,7 @@ def _yaw_profile(seconds: float, seed: int = 7) -> tuple[np.ndarray, np.ndarray]
 
 
 def _footage(yaw_t, yaw_v, seconds, label_s, offset_s, sign=1.0):
-    """Frames at RATE labelled as starting `label_s` into the telemetry, but
+    """Frames at RATE labeled as starting `label_s` into the telemetry, but
     really shot `offset_s` later than that."""
     tex = _texture()
     tau = np.arange(0, seconds, 1 / M.RATE)
@@ -85,7 +85,7 @@ def test_measure_finds_the_clock_offset():
     rot = M.rotation_rate(frames)
     ms = M.measure(tau, rot, EPOCH + yaw_t, yaw_v, EPOCH + 60.0)
 
-    # the footage starts at vehicle time 60 + 34.8 but is labelled 60
+    # the footage starts at vehicle time 60 + 34.8 but is labeled 60
     assert ms.checked and ms.confident, ms.message
     assert ms.offset_s == pytest.approx(34.8, abs=0.2)
     assert all(abs(h - 34.8) < 1.0 for h in ms.halves_s)

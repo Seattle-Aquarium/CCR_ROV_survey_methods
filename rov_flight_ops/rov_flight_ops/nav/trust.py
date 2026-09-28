@@ -25,7 +25,7 @@ from __future__ import annotations
 from .model import Quality
 
 #: Track states, worst last. The order is the precedence used when a run of
-#: track points is summarised.
+#: track points is summarized.
 ABSOLUTE = "absolute"
 RELATIVE = "relative"
 DEGRADED = "degraded"
@@ -107,7 +107,7 @@ def acoustic_line(s, now: float) -> str:
 def track_state(s, now: float, *, profile_key: str = "") -> tuple[str, str]:
     """(state, sentence) for the position being plotted right now.
 
-    This is what colours the track. It is a judgement about *this* position,
+    This is what colors the track. It is a judgement about *this* position,
     not about the health of any one sensor, which is why a fresh DVL and a
     stale estimator can still come out degraded.
     """
@@ -143,8 +143,8 @@ def track_state(s, now: float, *, profile_key: str = "") -> tuple[str, str]:
     return RELATIVE, note
 
 
-def summarise(states) -> str:
-    """The worst state in a run, for labelling a stretch of track."""
+def summarize(states) -> str:
+    """The worst state in a run, for labeling a stretch of track."""
     rank = {ABSOLUTE: 0, RELATIVE: 1, DEGRADED: 2, NO_AIDING: 3, UNKNOWN: 4}
     worst = None
     for st in states:

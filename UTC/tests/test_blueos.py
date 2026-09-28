@@ -1,7 +1,7 @@
 """Asking the ROV what it offers.
 
 This runs against a small fake BlueOS rather than a real vehicle, so it can
-run in CI and on a desk. What it pins down is the behaviour that matters in
+run in CI and on a desk. What it pins down is the behavior that matters in
 the field: the probe never raises, never writes to the vehicle, and reports
 honestly when it cannot reach one — because a tool that throws a traceback on
 a wet deck is worse than no tool.
@@ -38,7 +38,7 @@ DISKS = [
      "available_space_B": 4_509_715_660, "total_space_B": 30 * 2 ** 30},
 ]
 
-#: The shape BlueOS actually publishes, copied from this programme's own
+#: The shape BlueOS actually publishes, copied from this program's own
 #: recordings of 3 September 2026. `FrequencyCapping` is the Pi capping its
 #: clock because it is hot; nothing here is an under-voltage event.
 PLATFORM = {"Ok": {"model": "Raspberry Pi 4 B", "raspberry": {
@@ -55,7 +55,7 @@ PARAMS = {"RNGFND1_TYPE": 21.0, "BARO_PRIMARY": 1.0, "SCHED_LOOP_RATE": 200.0}
 
 #: A File Browser session token. The real vehicle hands one out to anybody who
 #: GETs /api/login -- no credentials -- and it carries create, modify and
-#: delete permissions. This programme uses none of them.
+#: delete permissions. This program uses none of them.
 FB_TOKEN = "eyJhbGciOiJIUzI1NiJ9.fake.token"
 
 #: A recorder folder as File Browser reports it: two recordings and the
@@ -95,7 +95,7 @@ def _mcap_head() -> bytes:
 MCAP_BYTES = _mcap_head() + bytes(4096)
 
 #: ArduPilot's own flight logs. The parameter set for a flight is written into
-#: the head of each, which is why this programme never has to ask the
+#: the head of each, which is why this program never has to ask the
 #: autopilot for it.
 DATAFLASH_ITEMS = [
     {"name": "00000080.BIN", "size": 6_815_744, "isDir": False,
@@ -375,7 +375,7 @@ def test_the_span_read_asks_for_a_range_and_gets_one(vehicle):
                                          "recorder_20260906_213623.mcap",
                                          FB_TOKEN),
                     headers={"Range": "bytes=0-1023"}, binary=True, limit=1024)
-    assert a.status == 206, "the vehicle must honour a range request"
+    assert a.status == 206, "the vehicle must honor a range request"
 
 
 def test_something_that_is_not_an_mcap_gives_no_span(vehicle, monkeypatch):
@@ -511,7 +511,7 @@ def test_the_whole_transport_only_ever_reads(vehicle):
 
     The token this uses carries delete rights. Nothing here may exercise them:
     a bug that destroys the only copy of a dive is the one failure this
-    programme must not have.
+    program must not have.
     """
     SEEN.clear()
     token = blueos.file_token(vehicle)

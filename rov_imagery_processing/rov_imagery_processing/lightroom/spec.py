@@ -74,11 +74,11 @@ class CropImpossible(ValueError):
 
 def crop_fractions(src_w: int, src_h: int,
                    out_w: int = CROP_W, out_h: int = CROP_H) -> CropRect:
-    """A centred crop that Lightroom will round to exactly `out_w` x `out_h`.
+    """A centered crop that Lightroom will round to exactly `out_w` x `out_h`.
 
-    Centred rather than corner-anchored because the ROV camera points straight
+    Centered rather than corner-anchored because the ROV camera points straight
     down: the subject is the middle of the frame, and trimming evenly keeps the
-    optical centre in the centre of the delivered TIF.
+    optical center in the center of the delivered TIF.
 
     The naive fractions are quantised to the six decimals Lightroom keeps, which
     can move the rounded size by a pixel; when it does, the right and bottom
@@ -104,7 +104,7 @@ def crop_fractions(src_w: int, src_h: int,
         return rect
 
     # Quantisation cost us a pixel. Walk the far edge -- never the near one, so
-    # the crop stays anchored where the centring put it -- until it lands.
+    # the crop stays anchored where the centering put it -- until it lands.
     right = _settle(left, right, src_w, out_w, "width")
     bottom = _settle(top, bottom, src_h, out_h, "height")
     rect = CropRect(left, top, right, bottom)
@@ -165,7 +165,7 @@ class RawReport:
     denoised: int = 0
     exported: int = 0
     skipped: int = 0
-    cancelled: bool = False
+    canceled: bool = False
     seconds: float = 0.0
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -179,6 +179,6 @@ class RawReport:
             lines.append(f"  already present, skipped: {self.skipped}")
         if self.seconds:
             lines.append(f"  took {self.seconds / 60:.1f} min")
-        if self.cancelled:
+        if self.canceled:
             lines.append("  STOPPED before finishing")
         return "\n".join(lines)

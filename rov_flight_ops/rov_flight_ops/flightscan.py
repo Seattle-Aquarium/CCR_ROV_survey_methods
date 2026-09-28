@@ -206,7 +206,7 @@ _GCS_HEARTBEAT = re.compile(r"^mavlink/(\d+)/(\d+)/HEARTBEAT$")
 
 
 def read_recording(path: Path, *, deep: bool = True) -> Recording:
-    """Summarise one `.mcap`. Read-only, and never raises.
+    """Summarize one `.mcap`. Read-only, and never raises.
 
     `deep=False` reads only the summary block -- span, counts, channels -- at
     a cost of milliseconds. The default also walks the autopilot's own

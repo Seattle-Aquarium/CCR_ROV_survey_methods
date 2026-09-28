@@ -1,8 +1,8 @@
 """
 Seattle Aquarium theming for CustomTkinter.
 
-CustomTkinter accepts ``(light, dark)`` tuples for any colour, and switches
-between them when the appearance mode changes. So every colour here is defined
+CustomTkinter accepts ``(light, dark)`` tuples for any color, and switches
+between them when the appearance mode changes. So every color here is defined
 as a pair and the toggle costs nothing at runtime.
 
 Both schemes come from the brand palette and respect the guidelines'
@@ -46,7 +46,7 @@ FIELD_BORDER = (brand.STONE_TINTS[20], "#37567F")
 #
 # Montserrat's weights are separate Windows families, so the weight travels in
 # the family name. Do not add a "bold" style alongside -- Tk already reports
-# Montserrat SemiBold as bold, and asking for both synthesises a double-bold.
+# Montserrat SemiBold as bold, and asking for both synthesizes a double-bold.
 #
 # The guidelines also specify tracking per level; Tk exposes no letter-spacing
 # control, so that part is print-only and is deliberately not attempted here.
@@ -90,14 +90,14 @@ PAD = 12
 HEADER_BG = SURFACE
 RAIL_BG = SURFACE
 
-#: The three-colour bright gradient dividing the banner from the work below.
+#: The three-color bright gradient dividing the banner from the work below.
 #: Deliberately the full bright range -- Algae through Seafoam into Purple
 #: Star -- because it is the one place the whole palette gets to show at once.
 RULE_GRADIENT = brand.BRIGHT_GRADIENTS_3["algae_seafoam_purple"]
 RULE_HEIGHT = 6
 
 #: The open tool's marker on the section strip: a small UI element, which is
-#: what the two-colour bright gradients are for.
+#: what the two-color bright gradients are for.
 STRIPE_GRADIENT = brand.BRIGHT_GRADIENTS["algae_seafoam"]
 
 #: How the open tool is marked on the section strip.
@@ -134,16 +134,16 @@ FONT_TAB_ON = (FAMILY_SEMIBOLD, 15)
 #  Chapter buttons
 # --------------------------------------------------------------------------
 #
-# Each chapter carries its own brand colour. Fathom is out -- it is the
+# Each chapter carries its own brand color. Fathom is out -- it is the
 # dark-mode window ground, and a button in it would be a hole. Everything else
-# is available, Algae included: it is the dark mode's action colour but the
+# is available, Algae included: it is the dark mode's action color but the
 # light mode's is Mediterranean, so it was never reserved in the way it first
 # appeared to be.
 #
 # The type on each is chosen by `ink_for`, not from a table, so a set can be
 # swapped here and the labels follow.
 
-#: name -> the four colours, in rail order.
+#: name -> the four colors, in rail order.
 CHAPTER_PALETTES = {
     # No Algae -- the set these started from, kept for comparison.
     "ocean": (brand.SALISH, brand.MEDITERRANEAN, brand.SEAFOAM,
@@ -163,9 +163,9 @@ CHAPTER_PALETTES = {
 }
 
 #: Salish, Algae, Seafoam, Mediterranean -- green through blue, all four cool
-#: ocean colours, so the rail reads as one family rather than four unrelated
+#: ocean colors, so the rail reads as one family rather than four unrelated
 #: chips. Chosen 2026-09-06 from the six trialled above.
-CHAPTER_COLOURS = CHAPTER_PALETTES["kelp"]
+CHAPTER_COLORS = CHAPTER_PALETTES["kelp"]
 
 #: Bigger than a standard button (which is 28px tall at radius 6), because
 #: these four are the roadmap rather than an action on a card.
@@ -183,18 +183,18 @@ CHAPTER_BTN_TOP = 18
 # plate's corner radius" -- the combination that was actually wanted -- could
 # not be asked for at all.
 
-#: How a chapter button is coloured. Every one of these keeps the chapter's
-#: colour somewhere, and none puts type *in* Algae or Seafoam, which measure
+#: How a chapter button is colored. Every one of these keeps the chapter's
+#: color somewhere, and none puts type *in* Algae or Seafoam, which measure
 #: 2.2:1 and 1.9:1 on a light ground.
 #:
-#:   solid    filled with the chapter's colour. The type is chosen against
+#:   solid    filled with the chapter's color. The type is chosen against
 #:            that fill by `ink_for`.
-#:   outline  surface fill, the colour in the border only, type theme-coloured
+#:   outline  surface fill, the color in the border only, type theme-colored
 #:            so it reads on either ground. Fills in when the chapter is open.
-#:   leftbar  surface fill with a colour bar down the leading edge -- quiet,
+#:   leftbar  surface fill with a color bar down the leading edge -- quiet,
 #:            and closest to a conventional nav rail.
 #:   ghost    outline, but the border stays neutral until you choose -- the
-#:            least colour of the four.
+#:            least color of the four.
 CHAPTER_BTN_STYLE = "outline"
 CHAPTER_BTN_STYLES = ("solid", "outline", "leftbar", "ghost")
 
@@ -207,7 +207,7 @@ CHAPTER_BTN_STYLES = ("solid", "outline", "leftbar", "ghost")
 CHAPTER_BTN_SHAPE = "plate"
 CHAPTER_BTN_SHAPES = ("soft", "plate", "pill", "square")
 
-#: Width of the colour bar in the "leftbar" treatment.
+#: Width of the color bar in the "leftbar" treatment.
 CHAPTER_BTN_BAR = 6
 
 
@@ -238,12 +238,12 @@ BANNER_LAYOUTS = ("inline", "stacked")
 
 #: How the roadmap's chapter numbers are drawn.
 #:
-#:   solid    a filled rounded square in the chapter's colour
+#:   solid    a filled rounded square in the chapter's color
 #:   soft     the same, smaller and with the number in a lighter weight
-#:   outline  a ring in the chapter's colour, the number in body ink
-#:   dot      a small colour disc, then the number in body ink beside it
-#:   bar      a short colour rule in place of a badge
-#:   plain    the number alone, in body ink -- no colour at all
+#:   outline  a ring in the chapter's color, the number in body ink
+#:   dot      a small color disc, then the number in body ink beside it
+#:   bar      a short color rule in place of a badge
+#:   plain    the number alone, in body ink -- no color at all
 BADGE_STYLE = "soft"
 BADGE_STYLES = ("solid", "soft", "outline", "dot", "bar", "plain")
 
@@ -251,12 +251,12 @@ BADGE_STYLES = ("solid", "soft", "outline", "dot", "bar", "plain")
 #: which read as a row of buttons rather than as numbering.
 BADGE_SCALE = 1.05
 
-#: How the programme name is set.
+#: How the program name is set.
 #:
 #:   bold     Montserrat Bold, title case
 #:   black    Montserrat ExtraBold, heavier
 #:   caps     upper case, medium weight
-#:   twotone  two words, the second in the accent colour
+#:   twotone  two words, the second in the accent color
 #:   light    Montserrat Light, title case -- quiet and wide
 TITLE_STYLE = "bold"
 TITLE_STYLES = ("bold", "black", "caps", "twotone", "light")
@@ -317,9 +317,9 @@ def logo_for(mode: str) -> str | None:
 
 
 def ink_for(ground: str) -> str:
-    """The brand colour that reads best as type on `ground`.
+    """The brand color that reads best as type on `ground`.
 
-    Used where a background is a brand colour rather than a theme surface --
+    Used where a background is a brand color rather than a theme surface --
     the chapter buttons, which each carry their own. Seafoam sits in the middle
     of the luminance range and takes dark type; Salish and Purple Star take
     White. Picking it by measurement rather than by a lookup means a palette

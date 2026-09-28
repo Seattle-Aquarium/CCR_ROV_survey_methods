@@ -11,7 +11,7 @@ install at a dock with no signal.
 The formulae are Vincenty's, with a documented spherical fallback for the one
 case Vincenty does not converge on (near-antipodal points, which cannot arise
 between an ROV and its own support vessel but is handled rather than hung).
-Agreement with geographiclib was checked to better than a millimetre over the
+Agreement with geographiclib was checked to better than a millimeter over the
 distances this program sees; the test suite pins a handful of those values.
 
 **Bearings here are true, clockwise from north, in degrees.** There is no
@@ -26,7 +26,7 @@ from __future__ import annotations
 import math
 
 # WGS-84.
-A = 6378137.0                     # semi-major axis, metres
+A = 6378137.0                     # semi-major axis, meters
 F = 1.0 / 298.257223563           # flattening
 B = A * (1.0 - F)                 # semi-minor axis
 
@@ -37,14 +37,14 @@ _MAX_ITER = 20
 _TOL = 1e-12
 
 #: Below this separation a bearing is not a direction, it is noise. Two points
-#: a centimetre apart have a perfectly well-defined bearing and it swings
+#: a centimeter apart have a perfectly well-defined bearing and it swings
 #: through 360 degrees as either one jitters, which on a display reads as a
 #: needle spinning. Callers are told "at/near target" instead.
 MIN_BEARING_M = 1.0
 
 
 def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Geodesic distance in metres."""
+    """Geodesic distance in meters."""
     return inverse(lat1, lon1, lat2, lon2)[0]
 
 
@@ -53,7 +53,7 @@ def initial_bearing_deg(lat1: float, lon1: float,
     """Initial bearing from 1 to 2, degrees true, or None if too close.
 
     *Initial*: on a geodesic the bearing changes along the path. Over the few
-    hundred metres between an ROV and its vessel the difference is far below
+    hundred meters between an ROV and its vessel the difference is far below
     the precision of anything steering by it, but the name is honest about
     which one this is.
     """
@@ -147,7 +147,7 @@ def _spherical(phi1: float, phi2: float, dlon: float) -> tuple[float, float, flo
 
 def destination(lat: float, lon: float, bearing_deg: float,
                 distance_m_: float) -> tuple[float, float]:
-    """Where you arrive going `bearing_deg` true for `distance_m_` metres.
+    """Where you arrive going `bearing_deg` true for `distance_m_` meters.
 
     Vincenty's direct method. Used to lay a dead-reckoned track down from a
     known origin, which is the whole of DVL-only mapping.
@@ -198,7 +198,7 @@ def destination(lat: float, lon: float, bearing_deg: float,
 
 def offset_ned(lat: float, lon: float, north_m: float, east_m: float
                ) -> tuple[float, float]:
-    """`lat`/`lon` moved by a local north/east displacement in metres.
+    """`lat`/`lon` moved by a local north/east displacement in meters.
 
     This is the one conversion that turns the EKF's local frame into something
     a map can draw, and getting its axes wrong is invisible: the track still
@@ -235,12 +235,12 @@ def angle_diff(a_deg: float, b_deg: float) -> float:
     return wrap180(a_deg - b_deg)
 
 
-def metres_per_degree(lat: float) -> tuple[float, float]:
-    """(metres per degree latitude, per degree longitude) at this latitude.
+def meters_per_degree(lat: float) -> tuple[float, float]:
+    """(meters per degree latitude, per degree longitude) at this latitude.
 
-    For the map's scale bar and for the pixels-per-metre a canvas needs. Not
+    For the map's scale bar and for the pixels-per-meter a canvas needs. Not
     used for positions -- those go through the geodesic functions -- because
-    this linearisation is only good over a few kilometres.
+    this linearisation is only good over a few kilometers.
     """
     phi = math.radians(lat)
     m_lat = (111132.92 - 559.82 * math.cos(2 * phi) + 1.175 * math.cos(4 * phi)
@@ -282,13 +282,13 @@ def tile_xy_to_latlon(x: float, y: float, zoom: int) -> tuple[float, float]:
 
 def zoom_for_span(lat: float, span_m: float, pixels: int,
                   tile_px: int = 256) -> int:
-    """The integer zoom whose tiles show `span_m` metres across `pixels`.
+    """The integer zoom whose tiles show `span_m` meters across `pixels`.
 
     Clamped to the range the chart and street services actually publish.
     """
     if span_m <= 0 or pixels <= 0:
         return 16
-    _, m_per_deg_lon = metres_per_degree(lat)
+    _, m_per_deg_lon = meters_per_degree(lat)
     if m_per_deg_lon <= 0:
         return 16
     deg = span_m / m_per_deg_lon

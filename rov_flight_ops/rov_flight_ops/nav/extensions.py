@@ -34,7 +34,7 @@ does not make it fresher; a cached identical reply must not reset an age. Both
 guarded below.
 
 **`GPS_INPUT.vdop` is not a dilution of precision.** The Water Linked UGPS
-extension puts the acoustic standard deviation *in metres* into that field.
+extension puts the acoustic standard deviation *in meters* into that field.
 Read as VDOP it is meaningless; read as what it is, it is the single most
 useful quality number the acoustic system produces.
 """
@@ -334,7 +334,7 @@ class VesselReader:
             out.send_rate = float(rate)
 
         lat, lon = data.get("latitude"), data.get("longitude")
-        # The extension initialises these to 0 and only ever overwrites them
+        # The extension initializes these to 0 and only ever overwrites them
         # from a GGA. A reply with gga_status false is carrying whatever was
         # there before -- on the first poll of the day, literally 0/0.
         if out.gga_ok and M.valid_latlon(lat, lon):
@@ -435,7 +435,7 @@ class AcousticStatus:
     because the collector is already reading the autopilot.
     """
 
-    #: The acoustic standard deviation in metres, out of `GPS_INPUT.vdop`.
+    #: The acoustic standard deviation in meters, out of `GPS_INPUT.vdop`.
     std_m: float | None = None
     fix_type: int | None = None
     satellites: int | None = None
@@ -455,7 +455,7 @@ def acoustic_from_gps_input(sample) -> AcousticStatus:
     The field meanings below are not the MAVLink standard ones -- they are what
     `waterlinked/blueos-ugps-extension` v1.0.7 puts there:
 
-    * `vdop` carries the **acoustic standard deviation in metres**, not a
+    * `vdop` carries the **acoustic standard deviation in meters**, not a
       vertical dilution of precision.
     * `hdop` carries the topside GNSS HDOP, or 1.0 when the extension was
       started with `--ignore_gps`, or 65535 when there is nothing.

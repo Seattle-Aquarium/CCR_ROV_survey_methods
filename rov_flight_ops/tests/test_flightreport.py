@@ -230,7 +230,7 @@ def _day_with(tmp_path, **kw):
 
 def test_a_clean_flight_says_the_laptop_kept_up(tmp_path):
     day = _day_with(tmp_path, seconds=600)
-    report = R.analyse(day)
+    report = R.analyze(day)
     titles = [f.title for f in report.findings]
     assert any("laptop kept up" in t for t in titles)
     assert not report.of(R.CRITICAL)
@@ -238,7 +238,7 @@ def test_a_clean_flight_says_the_laptop_kept_up(tmp_path):
 
 def test_outages_are_raised_and_counted(tmp_path):
     day = _day_with(tmp_path, seconds=600, dead=[(100, 200), (400, 430)])
-    report = R.analyse(day)
+    report = R.analyze(day)
     outages = [o for o in report.outages if o.seconds >= 2]
     assert len(outages) == 2
     assert any("went silent" in f.title for f in report.findings)
@@ -246,20 +246,20 @@ def test_outages_are_raised_and_counted(tmp_path):
 
 def test_flying_on_battery_is_noted(tmp_path):
     day = _day_with(tmp_path, seconds=120)
-    report = R.analyse(day)
+    report = R.analyze(day)
     assert any("battery" in f.title.lower() for f in report.findings)
 
 
 def test_tether_modem_not_installed_is_a_note_not_silence(tmp_path):
     day = _day_with(tmp_path, seconds=120)
-    report = R.analyse(day)
+    report = R.analyze(day)
     assert any("not available" in f.title.lower() for f in report.findings)
 
 
 def test_tether_modem_steady_rate_is_good_news(tmp_path):
     day = _day_with(tmp_path, seconds=120, tether_tx=170.0, tether_rx=176.0,
                      tether_remote_seen=True)
-    report = R.analyse(day)
+    report = R.analyze(day)
     assert any("held steady" in f.title.lower() for f in report.findings)
     assert not any("pulled apart" in f.title.lower() for f in report.findings)
 
@@ -269,20 +269,20 @@ def test_tether_modem_split_tx_rx_is_flagged(tmp_path):
     # often one wire of the pair not fully connected.
     day = _day_with(tmp_path, seconds=120, tether_tx=180.0, tether_rx=90.0,
                      tether_remote_seen=True)
-    report = R.analyse(day)
+    report = R.analyze(day)
     assert any("pulled apart" in f.title.lower() for f in report.findings)
 
 
 def test_tether_modem_losing_its_partner_is_flagged(tmp_path):
     day = _day_with(tmp_path, seconds=120, tether_tx=170.0, tether_rx=176.0,
                      tether_remote_seen=lambda i: i < 100)
-    report = R.analyse(day)
+    report = R.analyze(day)
     assert any("lost its partner" in f.title.lower() for f in report.findings)
 
 
 def test_an_empty_folder_reports_rather_than_raises(tmp_path):
     (tmp_path / "logs").mkdir()
-    report = R.analyse(S.scan(tmp_path, deep=False))
+    report = R.analyze(S.scan(tmp_path, deep=False))
     assert report.headline
     assert isinstance(report.findings, list)
 
@@ -290,7 +290,7 @@ def test_an_empty_folder_reports_rather_than_raises(tmp_path):
 def test_a_missing_folder_is_a_problem_not_an_exception(tmp_path):
     day = S.scan(tmp_path / "nope", deep=False)
     assert day.problems
-    assert R.analyse(day).headline
+    assert R.analyze(day).headline
 
 
 # --------------------------------------------------------------------------
@@ -332,7 +332,7 @@ def test_a_client_is_credited_with_the_outages_between_its_recordings():
     }
     day.monitors = [session]
 
-    report = R.analyse(day)
+    report = R.analyze(day)
     by_name = {p.name: p for p in report.gcs}
     cockpit, qgc = by_name["Cockpit"], by_name["QGroundControl"]
     # The whole 120 s outage lands on Cockpit and none of it on QGC.
@@ -348,7 +348,7 @@ def test_a_failsafe_message_names_the_disarm():
         base, base + 300, "255/240",
         [(base + 299, "WARNING", "MYGCS: 255, heartbeat lost"),
          (base + 299.5, "CRITICAL", "Lost manual control")])]
-    report = R.analyse(day)
+    report = R.analyze(day)
     assert len(report.disarms) == 1
     assert report.disarms[0].cause == "gcs failsafe"
     assert any("failsafe" in f.title.lower() for f in report.findings)
@@ -359,7 +359,7 @@ def test_a_recording_that_simply_ended_is_not_called_a_failsafe():
     day = S.FlightDay(folder=__import__("pathlib").Path("."))
     base = T0.timestamp()
     day.recordings = [_recording(base, base + 300, "255/190")]
-    report = R.analyse(day)
+    report = R.analyze(day)
     # A disarm with no recorded reason -- not a claim about who chose it.
     assert report.disarms[0].cause == "disarmed"
     assert not report.of(R.CRITICAL)
@@ -372,7 +372,7 @@ def test_a_recording_never_closed_is_not_attributed_to_anyone():
     rec = _recording(base, base + 300, "255/190")
     rec.closed = False
     day.recordings = [rec]
-    assert R.analyse(day).disarms[0].cause == "unexplained"
+    assert R.analyze(day).disarms[0].cause == "unexplained"
 
 
 def test_a_failsafe_early_in_the_dive_does_not_name_its_ending():
@@ -383,7 +383,7 @@ def test_a_failsafe_early_in_the_dive_does_not_name_its_ending():
     day.recordings = [_recording(
         base, base + 300, "255/240",
         [(base + 60, "WARNING", "MYGCS: 255, heartbeat lost")])]
-    report = R.analyse(day)
+    report = R.analyze(day)
     assert report.disarms[0].cause != "gcs failsafe"
     assert not any("failsafe" in f.title.lower() for f in report.findings)
 
@@ -394,12 +394,12 @@ def test_the_report_quotes_a_timeout_only_when_the_vehicle_recorded_one():
     day.recordings = [_recording(
         base, base + 300, "255/240",
         [(base + 299, "WARNING", "MYGCS: 255, heartbeat lost")])]
-    finding = next(f for f in R.analyse(day).findings if "failsafe" in f.title.lower())
+    finding = next(f for f in R.analyze(day).findings if "failsafe" in f.title.lower())
     assert "seconds" not in finding.detail
     snap = S.Snapshot(flight_id="2026-09-13_1300", path=None)
     snap.parameters = {"FS_GCS_TIMEOUT": 5.0}
     day.snapshots = {snap.flight_id: snap}
-    finding = next(f for f in R.analyse(day).findings if "failsafe" in f.title.lower())
+    finding = next(f for f in R.analyze(day).findings if "failsafe" in f.title.lower())
     assert "5 seconds" in finding.detail
 
 

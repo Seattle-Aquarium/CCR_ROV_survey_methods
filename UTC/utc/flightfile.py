@@ -360,7 +360,7 @@ def compare_with_previous(previous_path: Path, parameters: dict,
     }
 
 
-def summarise(record: dict) -> list[str]:
+def summarize(record: dict) -> list[str]:
     """The flight record as the handful of lines worth saying out loud."""
     out: list[str] = []
     changes = record.get("changes") or {}

@@ -39,7 +39,7 @@ from pathlib import Path
 ProgressCB = Callable[[float, str], None]
 
 #: FAT32 cannot store a file of this size or larger, however much room the
-#: drive reports free. Two of the recordings on this programme's own flights
+#: drive reports free. Two of the recordings on this program's own flights
 #: are past it (4.94 GiB and 4.41 GiB).
 FAT32_MAX = 2 ** 32
 
@@ -332,7 +332,7 @@ def fetch(
                 while True:
                     if cancel is not None and cancel.is_set():
                         from .ffmpeg_tools import CancelledError
-                        raise CancelledError("cancelled")
+                        raise CancelledError("canceled")
                     buf = src.read(chunk)
                     if not buf:
                         break
@@ -396,7 +396,7 @@ def from_vehicle(host: str, token: str = "",
             rec.start, rec.end = blueos.read_span(host, item["name"], token)
             if rec.start is not None and rec.end is None:
                 # No summary to read an end from -- estimate it from the size
-                # at the rate this programme's own dives write, so a recording
+                # at the rate this program's own dives write, so a recording
                 # can still be matched against a transect window.
                 rec.end = rec.start + rec.size / blueos.BYTES_PER_SECOND
         out.append(rec)

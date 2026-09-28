@@ -232,7 +232,7 @@ def _store(depths_m, t0=1_756_000_000.0, step=1.0) -> TelemetryStore:
     return st
 
 
-def test_depth_series_converts_to_metres_below_surface():
+def test_depth_series_converts_to_meters_below_surface():
     st = _store([0.0, 5.0, 10.0])
     t, d = depthplot.depth_series(st)
     assert list(np.round(d, 3)) == [0.0, 5.0, 10.0]

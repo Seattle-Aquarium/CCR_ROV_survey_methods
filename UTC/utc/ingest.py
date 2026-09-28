@@ -358,7 +358,7 @@ def import_photos(
     for i, f in enumerate(wanted):
         if cancel is not None and cancel.is_set():
             from .ffmpeg_tools import CancelledError
-            raise CancelledError("cancelled")
+            raise CancelledError("canceled")
 
         if f.transect:
             tdir = layout.ensure_transect(flight, f.transect)

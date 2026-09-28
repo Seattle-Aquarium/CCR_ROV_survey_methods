@@ -87,6 +87,6 @@ end
 boot('modules loaded')
 
 -- Nothing else happens here. The batch is started by the menu item in
--- Run.lua, because Lightroom only initialises a plugin when one of its
+-- Run.lua, because Lightroom only initializes a plugin when one of its
 -- declared entry points is used -- LrInitPlugin alone never fires.
 

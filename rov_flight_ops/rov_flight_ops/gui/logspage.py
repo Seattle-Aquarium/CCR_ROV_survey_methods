@@ -208,7 +208,7 @@ class LogsPage(ctk.CTkFrame):
         s = T.scale_of(self)
         style = ttk.Style(self)
         try:
-            style.theme_use("clam")        # the one theme that honours colours
+            style.theme_use("clam")        # the one theme that honors colors
         except tkinter.TclError:
             pass
         font = (T.FAMILY, -max(1, round(12 * s)))
@@ -382,7 +382,7 @@ class LogsPage(ctk.CTkFrame):
         """Work out, off the window's thread, which files are already copied.
 
         One stat per file -- thousands for a C3 folder, on a drive that may be
-        synchronising -- used to run inside every rebuild, which is every time
+        synchronizing -- used to run inside every rebuild, which is every time
         this tab is shown. The tree shows "checking…" until the answer comes
         back, and an answer for a flight folder or a listing that has since
         been replaced is dropped.

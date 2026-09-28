@@ -28,7 +28,7 @@ import customtkinter as ctk
 
 from .. import sidebyside
 from . import theme as T
-from .widgets import Card, button, entry, label, output_box
+from .widgets import Card, button, entry, label, output_box, transect_error
 
 
 class VideoPage(ctk.CTkFrame):
@@ -625,9 +625,7 @@ class VideoPage(ctk.CTkFrame):
         plan = self.app._plan()
         errs = plan.validate()
         if errs:
-            messagebox.showerror(self.app.title(),
-                                 "Fix the transects first:\n\n• "
-                                 + "\n• ".join(errs[:8]))
+            messagebox.showerror(self.app.title(), transect_error(errs))
             return
         do_trim = bool(self.v_trim.get())
         do_comp = bool(self.v_comp.get())

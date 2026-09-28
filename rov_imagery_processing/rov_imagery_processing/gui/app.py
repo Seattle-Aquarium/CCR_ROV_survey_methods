@@ -154,7 +154,7 @@ class App(Shell):
         return {"flight": self._flight_lamp(), "card": self._card_lamp()}
 
     def _flight_lamp(self) -> tuple[str, str]:
-        """Grey with no folder, a ring without transects, lit with them.
+        """Gray with no folder, a ring without transects, lit with them.
 
         The ring is the case worth having: a flight folder is chosen and looks
         right, but nothing has written its transects into it, so every tab
@@ -172,7 +172,7 @@ class App(Shell):
             return Lamp.OFF                # offline, or the drive went away
 
     def _card_lamp(self) -> tuple[str, str]:
-        """Grey until a page has scanned a source, then what it found.
+        """Gray until a page has scanned a source, then what it found.
 
         A ring means the source is still there but held nothing this program
         can use -- the wrong folder on the right card, most often, which is
@@ -353,8 +353,8 @@ class App(Shell):
             self.progress.set(1.0 if res.ok else self.progress.get())
             for line in res.summary().splitlines():
                 self._log(line)
-            if res.cancelled:
-                self.status.configure(text="Cancelled.")
+            if res.canceled:
+                self.status.configure(text="Canceled.")
             elif res.errors:
                 self.status.configure(text="Finished with errors — see the log.")
             else:

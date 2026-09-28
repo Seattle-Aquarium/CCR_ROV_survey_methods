@@ -24,7 +24,7 @@ def root(app):
     Tcl interpreters, and it does not survive contact with the rest of the
     suite: this module failed outright once the GUI tests began sharing a
     long-lived application. Creating and destroying a root per test was flaky
-    for related reasons -- Tcl intermittently failed to re-initialise
+    for related reasons -- Tcl intermittently failed to re-initialize
     ("couldn't read file auto.tcl"), the skip guard caught it, and tests
     guarding a real reported bug quietly did not run. A skipped test that
     looks like a passing one is worse than no test.

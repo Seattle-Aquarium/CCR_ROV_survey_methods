@@ -66,7 +66,7 @@ NET_CLASS_KEY = (r"SYSTEM\CurrentControlSet\Control\Class"
                  r"\{4D36E972-E325-11CE-BFC1-08002BE10318}")
 
 #: Driver settings worth reading back, and what each one is called when it is
-#: shown to a person. The names with a leading asterisk are the standardised
+#: shown to a person. The names with a leading asterisk are the standardized
 #: NDIS keywords; the others are vendor-specific and simply absent on an
 #: adapter that does not have them.
 #:
@@ -554,7 +554,7 @@ def watched(host: str = "192.168.2.2",
     That is the interface holding the vehicle's subnet, plus -- when that one
     is a bridge -- every physical Ethernet adapter that could be underneath
     it. A bridged member has no address of its own, which is exactly how it
-    is recognised here, and is also why the routing lookup never finds it.
+    is recognized here, and is also why the routing lookup never finds it.
 
     Erring towards including an adapter is deliberate. An extra column of
     zeroes costs nothing; the missing column is the one that would have
@@ -590,7 +590,7 @@ def arp(host: str = "192.168.2.2", source: str | None = None) -> str | None:
     """The vehicle's MAC address, or None when layer 2 cannot resolve it.
 
     `SendARP` answers from the cache when it can and puts a request on the
-    wire when it cannot, which is the behaviour wanted: a cached hit means
+    wire when it cannot, which is the behavior wanted: a cached hit means
     the entry is still valid, and a failure means the resolver has given up
     on the vehicle entirely. A ping cannot tell those apart.
     """

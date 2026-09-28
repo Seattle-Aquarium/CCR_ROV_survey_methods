@@ -5,14 +5,14 @@ Draw the desktop icon: the vehicle, seen head on, with its lights on.
     python assets/make_rov_icon.py --pick bold  # make that one the app's icon
 
 An original drawing of *our* vehicle -- a Blue Robotics heavy configuration in
-the state it is actually flown in: red enclosures either side of the centre
+the state it is actually flown in: red enclosures either side of the center
 tube, black float blocks with the red tape across them, the camera dome in the
 middle, and the two lights on their stainless arms pointing down and lit.
 
 **What an icon has to survive is being shrunk.** Windows asks for this at 256,
 and it also asks for it at 16, which is nine or ten usable pixels of vehicle.
-A photoreal render has nothing left at that size -- every edge greys into its
-neighbour and the result is a smudge. So each size is drawn rather than
+A photoreal render has nothing left at that size -- every edge grays into its
+neighbor and the result is a smudge. So each size is drawn rather than
 resampled from one bitmap, and each drops whatever it can no longer hold:
 
   * **full** (>= 96 px) -- thrusters, frame rails, dome highlight, tether
@@ -25,7 +25,7 @@ resampled from one bitmap, and each drops whatever it can no longer hold:
 black icon disappears on a dark desktop. The frame is drawn in a graphite that
 still reads as black against white while staying visible against navy, the red
 does most of the identifying work either way, and the `badge` options put the
-whole thing on a coloured ground where contrast is guaranteed.
+whole thing on a colored ground where contrast is guaranteed.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ SUPERSAMPLE = 4
 SIZES = (16, 20, 24, 32, 48, 64, 128, 256)
 
 # --------------------------------------------------------------------------
-#  colours
+#  colors
 # --------------------------------------------------------------------------
 
 #: The frame. Not black: see the note about wallpaper above.
@@ -74,9 +74,9 @@ LENS = "#FFE9A3"
 WHITE = "#FFFFFF"
 
 
-def _rgba(colour: str, alpha: int = 255) -> tuple[int, int, int, int]:
-    colour = colour.lstrip("#")
-    return (int(colour[0:2], 16), int(colour[2:4], 16), int(colour[4:6], 16),
+def _rgba(color: str, alpha: int = 255) -> tuple[int, int, int, int]:
+    color = color.lstrip("#")
+    return (int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16),
             alpha)
 
 
@@ -153,14 +153,14 @@ class Pen:
         Drawn through a gradient rather than as flat translucent wedges. Flat
         wedges are what made the first attempt beige: a pale yellow at half
         opacity over a light desktop is beige, and the same thing over navy is
-        olive. Keeping the colour saturated and varying only the *alpha* keeps
+        olive. Keeping the color saturated and varying only the *alpha* keeps
         it yellow on both, and a beam that fades is what a light looks like
         anyway.
         """
         from PIL import ImageChops
 
         fade = self._falloff(top)
-        for half, colour, peak in ((1.00, BEAM, 150), (0.42, BEAM_CORE, 215)):
+        for half, color, peak in ((1.00, BEAM, 150), (0.42, BEAM_CORE, 215)):
             cone = Image.new("L", self.im.size, 0)
             ImageDraw.Draw(cone).polygon(
                 [(self.u(cx - 7 * half), self.u(top)),
@@ -170,7 +170,7 @@ class Pen:
             mask = ImageChops.multiply(cone, fade)
             if peak * strength < 255:
                 mask = mask.point(lambda v, p=peak * strength: int(v * p / 255))
-            layer = Image.new("RGBA", self.im.size, _rgba(colour))
+            layer = Image.new("RGBA", self.im.size, _rgba(color))
             layer.putalpha(mask)
             self.im.alpha_composite(layer)
         self.d = ImageDraw.Draw(self.im)
@@ -182,13 +182,13 @@ class Pen:
 
         Laid out from the photograph, top to bottom: the two float blocks with
         the red tape across them, the corner thrusters behind their outer
-        ends, the two red enclosures flanking the centre tube, the camera dome
+        ends, the two red enclosures flanking the center tube, the camera dome
         between them, the frame down each side, and the two lamps on their
         stainless arms at the bottom, lit.
 
         Three things are deliberately *not* drawn to scale. The dome is a
         little larger than life, because below about 32 px an accurate one is
-        a single grey pixel. The gap between the enclosures is a little wider,
+        a single gray pixel. The gap between the enclosures is a little wider,
         to give the dome that room without burying it. And the whole vehicle
         is flattened slightly, because a wide shape survives reduction better
         than a square one -- a square silhouette at 16 px is a blob, and a
@@ -211,7 +211,7 @@ class Pen:
                 self.disc(cx, 66, 13, FRAME)
                 self.disc(cx, 66, 5, FRAME_LIT, edge=False)
 
-        # ---- the centre tube, seen end on -------------------------------
+        # ---- the center tube, seen end on -------------------------------
         # Its top is level with the float blocks', so the three of them read
         # as one row across the top of the vehicle. Standing it any higher,
         # or rounding its cap above them, turns it into a bottle neck.
@@ -234,7 +234,7 @@ class Pen:
             self.slab(x0, 52, x1, 74, RED, radius=3, edge=False)
 
         # ---- the enclosures either side of the tube ---------------------
-        # The biggest colour in the icon, and what carries it at 16 px.
+        # The biggest color in the icon, and what carries it at 16 px.
         for x0, x1 in ((44, 106), (150, 212)):
             self.slab(x0, 88, x1, 146, RED, radius=10)
             if self.full:                     # the gloss along the top edge
@@ -287,7 +287,7 @@ class Pen:
         its bottom corners with no arms between, and what is left is the five
         things that are still legible: the wide dark shape, two red bars
         across the top, two red blocks under them, the dome between, and the
-        two lights. Those five are also what somebody recognises the vehicle
+        two lights. Those five are also what somebody recognizes the vehicle
         by, which is why they are the five that are kept.
         """
         mirrored = self._mirror
@@ -318,13 +318,13 @@ class Pen:
 
     @staticmethod
     def _mirror(x: float) -> tuple[float, float]:
-        """A point and its reflection about the centre line."""
+        """A point and its reflection about the center line."""
         return (x, 256 - x)
 
     # ---- finishing ----------------------------------------------------
 
     def finish(self, margin_pct: float = 0.03) -> Image.Image:
-        """Crop to what was drawn, centre it, and reduce to the real size.
+        """Crop to what was drawn, center it, and reduce to the real size.
 
         The drawing does not fill its box -- the beams run to the bottom edge
         and there is air at the top -- and an icon adrift in the middle of its
@@ -341,13 +341,13 @@ class Pen:
         return square.resize((self.size, self.size), Image.LANCZOS)
 
 
-def _lighten(colour: str, amount: float) -> str:
-    colour = colour.lstrip("#")
-    rgb = [int(colour[i:i + 2], 16) for i in (0, 2, 4)]
+def _lighten(color: str, amount: float) -> str:
+    color = color.lstrip("#")
+    rgb = [int(color[i:i + 2], 16) for i in (0, 2, 4)]
     return "#" + "".join(f"{int(v + (255 - v) * amount):02x}" for v in rgb)
 
 
-def _badge(icon: Image.Image, colour: str, radius_pct: float = 0.22,
+def _badge(icon: Image.Image, color: str, radius_pct: float = 0.22,
            inset_pct: float = 0.09) -> Image.Image:
     """The icon on a rounded square, for contrast on any desktop.
 
@@ -366,8 +366,8 @@ def _badge(icon: Image.Image, colour: str, radius_pct: float = 0.22,
     rim = max(1, int(big * 0.018))
     d.rounded_rectangle([0, 0, big - 1, big - 1],
                         radius=int(big * radius_pct),
-                        fill=_rgba(colour),
-                        outline=_rgba(_lighten(colour, 0.30)), width=rim)
+                        fill=_rgba(color),
+                        outline=_rgba(_lighten(color, 0.30)), width=rim)
     out.alpha_composite(plate.resize((size, size), Image.LANCZOS))
 
     inset = max(1, int(size * inset_pct))

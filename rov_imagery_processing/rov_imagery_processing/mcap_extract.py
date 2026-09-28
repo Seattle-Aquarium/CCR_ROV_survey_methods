@@ -82,7 +82,7 @@ WANTED: dict[str, tuple[str, ...]] = {
     "SYSTEM_TIME":         ("time_unix_usec",),
 }
 
-#: These carry a value we synthesise rather than copy verbatim.
+#: These carry a value we synthesize rather than copy verbatim.
 SPECIAL = ("NAMED_VALUE_FLOAT", "STATUSTEXT", "BATTERY_STATUS", "HEARTBEAT",
            "DISTANCE_SENSOR")
 
@@ -100,6 +100,11 @@ MIN_INTERVAL: dict[str, float] = {
     "HEARTBEAT": 0.0,               # mode changes are rare and matter
     "NAMED_VALUE_FLOAT": 0.0,       # already slow (~2 Hz) and drives the sync check
     "DISTANCE_SENSOR": 0.0,         # interleaved per sensor id; decimating loses beams
+    # position_delta is the travel since the previous message, not a reading
+    # of anything. Every message dropped is distance deleted rather than
+    # sampled more coarsely -- decimating the DVL to 3 Hz measured a transect
+    # at half its true length.
+    "VISION_POSITION_DELTA": 0.0,
     "SYSTEM_TIME": 1.0,
 }
 
@@ -716,7 +721,7 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
                         topics = None
                         if not keep:
                             warnings.append(
-                                f"{mpath.name}: nothing recognisable, skipped")
+                                f"{mpath.name}: nothing recognizable, skipped")
                             done_bytes += mpath.stat().st_size
                             continue
                     else:
@@ -725,7 +730,7 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
                         topics = list(chosen.values()) + video_topics
                         if not topics:
                             warnings.append(
-                                f"{mpath.name}: nothing recognisable, skipped")
+                                f"{mpath.name}: nothing recognizable, skipped")
                             done_bytes += mpath.stat().st_size
                             continue
 
@@ -906,6 +911,21 @@ def _write_telemetry(tw, mt: str, t: float, raw: bytes) -> int:
         if v is not None and v != 65535:
             tw.writerow([ts, "BATTERY_STATUS.voltage_mv", v, ""])
             n += 1
+
+    # The DVL's travel since its own previous message, as scalars.
+    # position_delta and angle_delta arrive as arrays, which the generic loop
+    # below skips, so they are unpacked here. dx/dy are body-frame and already
+    # differential: summing their magnitudes is the DVL's own odometry, which
+    # is what `metermark` measures a transect with when LOCAL_POSITION_NED was
+    # never recorded.
+    if mt == "VISION_POSITION_DELTA":
+        pos = m.get("position_delta") or ()
+        ang = m.get("angle_delta") or ()
+        for key, seq, idx in (("dx", pos, 0), ("dy", pos, 1), ("dz", pos, 2),
+                              ("dyaw", ang, 2)):
+            if len(seq) > idx and isinstance(seq[idx], (int, float)):
+                tw.writerow([ts, f"VISION_POSITION_DELTA.{key}", seq[idx], ""])
+                n += 1
 
     # MAVLink's RANGEFINDER carries no status field, so a lost bottom lock
     # arrives as distance 0.0 -- indistinguishable from a reading except that

@@ -12,7 +12,7 @@ what had happened half a minute before the GoPro frame beneath them.
 ramped on camera and the chapter's own timecode to be readable. Neither holds
 for a transect trim flown with the lights steady, which is exactly the case
 that went unchecked. This check needs neither. Every turn the vehicle makes
-rotates the down-facing GoPro's picture about its centre at the rate the
+rotates the down-facing GoPro's picture about its center at the rate the
 autopilot reports in ``ATTITUDE.yawspeed``. So the picture's rotation is
 measured frame to frame, and the lag at which it best matches the yaw rate is
 the offset between the clocks.
@@ -99,7 +99,7 @@ def _sample(img: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> tuple[np.ndarray
 
 
 def rotation_between(a: np.ndarray, b: np.ndarray, iters: int = 6) -> float:
-    """Degrees `b` is rotated from `a` about the centre (counter-clockwise in
+    """Degrees `b` is rotated from `a` about the center (counter-clockwise in
     image coordinates), allowing for translation.
 
     Gauss-Newton on a rigid warp: a few iterations of a 3-parameter least
@@ -142,7 +142,7 @@ def rotation_rate(frames: np.ndarray, rate: float = RATE, cancel=None) -> np.nda
     out = np.zeros(len(frames))
     for i in range(1, len(frames)):
         if cancel is not None and i % 500 == 0 and cancel.is_set():
-            raise ff.CancelledError("cancelled")
+            raise ff.CancelledError("canceled")
         out[i] = rotation_between(frames[i - 1], frames[i]) * rate
     return out
 

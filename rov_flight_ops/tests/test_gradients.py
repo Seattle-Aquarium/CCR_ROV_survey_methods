@@ -4,11 +4,11 @@ Two separate concerns, both hermetic -- no window, no display, so this runs in
 CI alongside everything else.
 
 The first is that the gradient is the one the guidelines describe rather than a
-plain ramp: p.19 puts the second colour at 95 and the 50/50 blend at 70, and
-that bias is most of what keeps a two-colour background from reading as a flat
+plain ramp: p.19 puts the second color at 95 and the 50/50 blend at 70, and
+that bias is most of what keeps a two-color background from reading as a flat
 wash.
 
-The second is legibility on a brand colour. Each chapter button carries its
+The second is legibility on a brand color. Each chapter button carries its
 own, and the type on it is chosen by measuring rather than from a table -- so
 what has to hold is that the measuring works for every palette anyone might
 switch to, not just the one in use today.
@@ -39,10 +39,10 @@ def _px(img, x, y) -> tuple[int, int, int]:
 # --------------------------------------------------------------------------
 
 
-def test_a_two_colour_gradient_starts_and_ends_on_its_own_colours():
+def test_a_two_color_gradient_starts_and_ends_on_its_own_colors():
     img = G.render((200, 1), (brand.SALISH, brand.FATHOM), angle=0.0)
     assert G.sample(img, 0, 0) == brand.SALISH.lower()
-    # The second colour is reached at 95 and holds flat to the end.
+    # The second color is reached at 95 and holds flat to the end.
     assert G.sample(img, 199, 0) == brand.FATHOM.lower()
     assert G.sample(img, 191, 0) == brand.FATHOM.lower()
 
@@ -57,13 +57,13 @@ def test_the_blend_lands_at_seventy_percent_not_halfway():
     at_50 = _px(img, 500, 0)
     # 70 is where the even blend lands...
     assert max(abs(p - q) for p, q in zip(at_70, halfway, strict=True)) <= 2
-    # ...so the true midpoint is still nearer the first colour.
+    # ...so the true midpoint is still nearer the first color.
     d_first = sum(abs(p - q) for p, q in zip(at_50, a, strict=True))
     d_second = sum(abs(p - q) for p, q in zip(at_50, b, strict=True))
     assert d_first < d_second, "the gradient should hold Salish, then move"
 
 
-def test_a_three_colour_gradient_passes_through_its_middle_colour():
+def test_a_three_color_gradient_passes_through_its_middle_color():
     img = G.render((201, 1), (A, B, C), angle=0.0)
     assert G.sample(img, 0, 0) == A.lower()
     assert G.sample(img, 100, 0) == B.lower()
@@ -91,7 +91,7 @@ def test_a_gradient_is_rendered_once_per_size():
     assert G.render((123, 46), (A, B)) is not first
 
 
-def test_one_colour_is_not_a_gradient():
+def test_one_color_is_not_a_gradient():
     with pytest.raises(ValueError):
         G.render((10, 10), (A,))
 
@@ -112,7 +112,7 @@ NORMAL_TEXT = 4.5
 
 @pytest.mark.parametrize("mode,index", [("light", 0), ("dark", 1)])
 def test_the_banner_and_rail_read_on_their_flat_surfaces(mode, index):
-    """Both are flat, so these are ordinary two-colour checks -- but the
+    """Both are flat, so these are ordinary two-color checks -- but the
     surface is Pumice in light mode and a lifted Fathom in dark, which are as
     far apart as two grounds get."""
     for ground in (T.HEADER_BG[index], T.RAIL_BG[index]):
@@ -124,17 +124,17 @@ def test_the_banner_and_rail_read_on_their_flat_surfaces(mode, index):
 
 @pytest.mark.parametrize("palette", sorted(T.CHAPTER_PALETTES))
 def test_every_chapter_palette_carries_legible_type(palette):
-    """Each button is a brand colour, and `ink_for` picks the type by
+    """Each button is a brand color, and `ink_for` picks the type by
     measuring against it. This is the guard on that: swap the palette and the
     type follows, without anyone remembering to change it.
 
     Seafoam is the one that catches people out -- it sits mid-range, so White
     fails on it and Fathom is needed.
     """
-    for colour in T.CHAPTER_PALETTES[palette]:
-        ink = T.ink_for(colour)
-        assert brand.contrast(ink, colour) >= NORMAL_TEXT, (
-            f"{palette}: no legible type for {colour}")
+    for color in T.CHAPTER_PALETTES[palette]:
+        ink = T.ink_for(color)
+        assert brand.contrast(ink, color) >= NORMAL_TEXT, (
+            f"{palette}: no legible type for {color}")
 
 
 def test_seafoam_takes_dark_type_and_salish_takes_white():
@@ -148,7 +148,7 @@ def test_seafoam_takes_dark_type_and_salish_takes_white():
 def test_no_chapter_palette_uses_the_window_ground():
     """Fathom is the dark mode's window ground -- a button in it is a hole.
 
-    Algae is deliberately *not* excluded. It is the dark mode's action colour,
+    Algae is deliberately *not* excluded. It is the dark mode's action color,
     but the light mode's is Mediterranean, so it was never reserved the way it
     first appeared to be.
     """

@@ -63,7 +63,7 @@ def test_the_two_halves_of_the_split_have_different_scales():
     altitude increments across the midpoint.
 
     The upper half is the stretched one -- it spreads 0.7 m of altitude over
-    the same height the lower half gives 0.8 m -- so a tenth of a metre above
+    the same height the lower half gives 0.8 m -- so a tenth of a meter above
     the survey reference moves the icon further than a tenth below it.
     """
     below = G.survey_fraction(0.8) - G.survey_fraction(0.7)
@@ -90,10 +90,10 @@ def test_the_gauge_walks_the_acceptance_altitude_sequence(app, gui):
     gauge = G.AltitudeGauge(holder)
     t = 0.0
 
-    def feed(metres, dt=0.5):
+    def feed(meters, dt=0.5):
         nonlocal t
         t += dt
-        gauge.update_reading(M.good(metres, unit="m"), None, now=t)
+        gauge.update_reading(M.good(meters, unit="m"), None, now=t)
 
     feed(10.0)
     assert gauge.mode == "approach" and gauge._top == 12.0
@@ -188,7 +188,7 @@ def test_a_named_float_for_another_variable_is_not_a_target(app):
     assert got is prev.surftrak_target, "an unrelated variable changes nothing"
 
 
-def test_a_valid_target_is_taken_in_metres(app):
+def test_a_valid_target_is_taken_in_meters(app):
     from rov_flight_ops.nav.collector import NavCollector
     from rov_flight_ops.nav.mav2rest import Sample
 
@@ -216,7 +216,7 @@ def test_a_zero_range_is_no_bottom_lock_not_an_altitude_of_zero(app):
     assert "no bottom lock" in got.note
 
 
-def test_distance_sensor_centimetres_are_not_read_as_metres(app):
+def test_distance_sensor_centimeters_are_not_read_as_meters(app):
     """DISTANCE_SENSOR.current_distance is cm; RANGEFINDER.distance is m.
     Confusing them is a hundredfold error in the altitude an ROV flies at."""
     from rov_flight_ops.nav.collector import NavCollector
@@ -256,10 +256,10 @@ def test_a_waypoint_records_the_position_at_capture_not_at_naming(tmp_path):
     assert saved.lat == pytest.approx(47.62691)
 
 
-def test_cancelling_the_rename_keeps_the_point(tmp_path):
+def test_canceling_the_rename_keeps_the_point(tmp_path):
     store = waypoints.WaypointStore(tmp_path)
     wp = store.capture(_fix())
-    # No rename call at all -- which is what cancelling does.
+    # No rename call at all -- which is what canceling does.
     assert waypoints.WaypointStore(tmp_path).points[0].name == wp.name
     assert wp.name.startswith("WP ")
 
@@ -427,7 +427,7 @@ def test_a_replayed_dvl_dropout_shows_unknown_not_zero():
     assert "not zero" in s.speed.note
 
 
-def test_synthetic_data_is_labelled_everywhere_it_appears():
+def test_synthetic_data_is_labeled_everywhere_it_appears():
     frames = replay.synthetic_dive(seconds=30, hz=4)
     rc = replay.ReplayCollector(frames, synthetic=True)
     rc._publish(frames[10])
@@ -504,12 +504,12 @@ def _demo_plan(page):
     fresh.add(P.Line(anchor=a, name="Line 1", points=[(0.0, 0.0), (30.0, 0.0)]))
     fresh.add(P.Line(anchor=a, name="Polyline 1",
                      points=[(0.0, 0.0), (10.0, 5.0), (20.0, 0.0)]))
-    fresh.add(P.Rect(anchor=a, name="Rect 1", centre=(0.0, 0.0),
+    fresh.add(P.Rect(anchor=a, name="Rect 1", center=(0.0, 0.0),
                      length_m=30.0, width_m=20.0, rotation_deg=37.0))
-    fresh.add(P.Grid(anchor=a, name="Grid 1", centre=(0.0, 0.0),
+    fresh.add(P.Grid(anchor=a, name="Grid 1", center=(0.0, 0.0),
                      length_m=30.0, width_m=20.0, rotation_deg=37.0,
                      spacing_m=2.0))
-    fresh.add(P.Circle(anchor=a, name="Circle 1", centre=(0.0, 0.0),
+    fresh.add(P.Circle(anchor=a, name="Circle 1", center=(0.0, 0.0),
                        radius_m=12.0))
     fresh.add(P.Polygon(anchor=a, name="Polygon 1",
                         points=[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]))
@@ -539,10 +539,10 @@ class _FakeCanvas:
 class _FakeMap:
     """Just enough map for the editor: a projection at a chosen scale."""
 
-    def __init__(self, anchor, metres_per_pixel: float):
+    def __init__(self, anchor, meters_per_pixel: float):
         self.canvas = _FakeCanvas()
-        self.centre = (anchor.lat, anchor.lon)
-        self._a, self._mpp = anchor, metres_per_pixel
+        self.center = (anchor.lat, anchor.lon)
+        self._a, self._mpp = anchor, meters_per_pixel
 
     def xy(self, lat, lon):
         east, north = self._a.to_local(lat, lon)
@@ -553,11 +553,11 @@ class _FakeMap:
 
 
 @pytest.mark.parametrize(
-    "metres_per_pixel, wants_labels",
+    "meters_per_pixel, wants_labels",
     [(2.0, False),      # a 30 m edge is 15 px: nothing legible fits
-     (0.4, False),      # 75 px: the edges fit, the centre block does not
+     (0.4, False),      # 75 px: the edges fit, the center block does not
      (0.1, True)])      # 300 px: everything fits
-def test_dimensions_are_left_off_when_they_cannot_fit(metres_per_pixel,
+def test_dimensions_are_left_off_when_they_cannot_fit(meters_per_pixel,
                                                       wants_labels):
     """A 30 by 20 m box seen from far enough away has a few dozen pixels of
     edge, and five labels drawn into that space are a smudge rather than a
@@ -571,9 +571,9 @@ def test_dimensions_are_left_off_when_they_cannot_fit(metres_per_pixel,
     from rov_flight_ops.nav import plan as P
 
     a = P.Anchor(47.6075661, -122.3438752)
-    grid = P.Grid(anchor=a, name="EBM box", centre=(0.0, 0.0), length_m=30.0,
+    grid = P.Grid(anchor=a, name="EBM box", center=(0.0, 0.0), length_m=30.0,
                   width_m=20.0, rotation_deg=37.0, spacing_m=2.0)
-    fake = _FakeMap(a, metres_per_pixel)
+    fake = _FakeMap(a, meters_per_pixel)
     ed = navdraw.PlanEditor(fake)
     pts = [fake.xy(lat, lon) for lat, lon in grid.geo_points()]
     ed._draw_dimensions(grid, pts)
@@ -585,7 +585,7 @@ def test_dimensions_are_left_off_when_they_cannot_fit(metres_per_pixel,
         assert drawn.count("20.0 m") == 2, drawn
         assert any("600 m²" in x and "10 lanes @ 2 m" in x
                    for x in drawn), drawn
-    elif metres_per_pixel == 2.0:
+    elif meters_per_pixel == 2.0:
         assert drawn == [], drawn
     else:
         # Only the 30 m edges are long enough to carry a label -- and they
@@ -598,14 +598,14 @@ def test_dimensions_are_left_off_when_they_cannot_fit(metres_per_pixel,
 
 
 def test_a_grid_needs_more_room_for_its_block_than_a_rectangle():
-    """A rectangle's centre block is two lines and a grid's is three, so one
+    """A rectangle's center block is two lines and a grid's is three, so one
     threshold for both is wrong for one of them. At a scale where the
     rectangle can say what it is, the grid cannot yet."""
     from rov_flight_ops.gui import navdraw
     from rov_flight_ops.nav import plan as P
 
     a = P.Anchor(47.6075661, -122.3438752)
-    shape = dict(anchor=a, centre=(0.0, 0.0), length_m=30.0, width_m=20.0,
+    shape = dict(anchor=a, center=(0.0, 0.0), length_m=30.0, width_m=20.0,
                  rotation_deg=0.0)
     # 0.22 m per pixel: the 20 m edge is 91 px -- over two lines, under three.
     drawn = {}
@@ -756,9 +756,9 @@ def test_a_shape_outside_the_canvas_is_not_drawn():
 def test_the_readout_under_the_map_takes_only_the_height_it_needs(app):
     """An empty CTkFrame asks for its default 200 logical pixels.
 
-    The track-colour legend has no chips in it until there is a track, which
+    The track-color legend has no chips in it until there is a track, which
     is exactly the state the program opens in at the dock -- and that phantom
-    request left a third of a metre of blank screen between the map and the
+    request left a third of a meter of blank screen between the map and the
     guidance strip on a tall window, with the map shrunk to pay for it.
     """
     page = _nav_page(app)
@@ -865,7 +865,7 @@ def test_selecting_a_feature_fills_the_inspector(app):
 
 
 def test_the_page_claims_no_position_before_it_has_one(app):
-    """Nothing is initialised to a healthy-looking value.
+    """Nothing is initialized to a healthy-looking value.
 
     The flight HUDs are gone from this chapter, so what matters here is the
     position readout and the strip: with a collector that has never heard from
@@ -954,7 +954,7 @@ def test_choosing_a_start_site_writes_nothing_to_the_vehicle(app, monkeypatch):
 
     Selecting OTS, typing a custom start and switching profile are all local:
     the map moves, the coordinates are staged, and the vehicle is not told
-    anything. Initialising it is a separate step behind the write interlock.
+    anything. Initializing it is a separate step behind the write interlock.
     """
     from rov_flight_ops.gui import navdialogs
     from rov_flight_ops.nav import bundled
@@ -1309,7 +1309,7 @@ def test_the_map_draws_a_plan_without_a_vehicle(app):
             waypoints.Planned("EBM East", "point", [(47.62691, -122.39018)]),
             waypoints.Planned("T1", "line",
                               [(47.6269, -122.390), (47.6271, -122.394)])]
-        m.centre = (47.6270, -122.392)
+        m.center = (47.6270, -122.392)
         m.draw()
         items = m.canvas.find_all()
         assert items, "the map drew nothing at all"
@@ -1318,7 +1318,7 @@ def test_the_map_draws_a_plan_without_a_vehicle(app):
         assert "EBM East" in texts and "T1" in texts
         # Fit frames the plan even with no track at all.
         m.fit_track()
-        assert m.centre is not None
+        assert m.center is not None
     finally:
         cache.stop()
         holder.destroy()
@@ -1344,7 +1344,7 @@ def test_the_map_falls_back_to_a_grid_with_no_tiles(app):
         app.update()
         time.sleep(0.005)
     try:
-        m.centre = (47.6270, -122.392)
+        m.center = (47.6270, -122.392)
         m.draw()
         texts = " ".join(m.canvas.itemcget(i, "text")
                          for i in m.canvas.find_all()
@@ -1391,8 +1391,8 @@ def test_the_map_says_so_when_there_is_no_geographic_position(app):
         holder.destroy()
 
 
-def test_the_canvases_pick_the_right_half_of_a_theme_colour(app):
-    """`theme` stores every colour as a (light, dark) pair for CustomTkinter,
+def test_the_canvases_pick_the_right_half_of_a_theme_color(app):
+    """`theme` stores every color as a (light, dark) pair for CustomTkinter,
     which resolves them itself. A raw Tk canvas does not, so the gauges and
     the map have to pick the current mode's half -- and a canvas handed a
     tuple raises rather than drawing."""

@@ -1,6 +1,6 @@
 {
  "site": "Seattle Aquarium \u2014 Pier 59 / OTS",
- "centre": {
+ "center": {
   "lat": 47.6075661,
   "lon": -122.3438752
  },
@@ -23,7 +23,7 @@
    ],
    "source": "USGS The National Map (USGSImageryOnly)",
    "url": "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}",
-   "licence": "Public domain. A work of the U.S. Government under 17 U.S.C. 105; USGS National Map products carry no copyright restriction.",
+   "license": "Public domain. A work of the U.S. Government under 17 U.S.C. 105; USGS National Map products carry no copyright restriction.",
    "attribution": "USGS The National Map \u2014 public domain",
    "format": "jpg",
    "bytes": 413696,
@@ -38,7 +38,7 @@
    "osm_elements": 278,
    "source": "OpenStreetMap via Overpass API, rendered locally",
    "url": "https://overpass-api.de/api/interpreter",
-   "licence": "Rendered from OpenStreetMap data, \u00a9 OpenStreetMap contributors, licensed ODbL 1.0 (https://opendatacommons.org/licenses/odbl/). This rendering is a Produced Work and is distributed with the required attribution.",
+   "license": "Rendered from OpenStreetMap data, \u00a9 OpenStreetMap contributors, licensed ODbL 1.0 (https://opendatacommons.org/licenses/odbl/). This rendering is a Produced Work and is distributed with the required attribution.",
    "attribution": "\u00a9 OpenStreetMap contributors (ODbL), rendered locally",
    "format": "png",
    "bytes": 208896,

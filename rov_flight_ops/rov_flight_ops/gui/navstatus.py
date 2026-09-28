@@ -14,7 +14,7 @@ None of those is evidence that a particular sensor is being fused. So:
            cached HTTP reply is not mistaken for a new measurement.
 ``Valid``  the measurement itself says it means something: a bottom lock, a
            fix type above zero, a range greater than nought.
-``Fused``  the estimator's own behaviour supports it being used, with the
+``Fused``  the estimator's own behavior supports it being used, with the
            basis shown. **`?` when it cannot be established**, which is most
            of the time, because ArduPilot publishes aiding mode rather than
            per-instance fusion.
@@ -37,8 +37,8 @@ from ..nav import trust
 from ..nav.model import Quality
 from . import theme as T
 
-#: The glyph as well as the colour, always. A daylight-washed Rugged screen
-#: eats the colour first, and so does colour-vision deficiency.
+#: The glyph as well as the color, always. A daylight-washed Rugged screen
+#: eats the color first, and so does color-vision deficiency.
 YES = ("✓", T.OK)
 NO = ("✗", T.ERROR)
 PART = ("◐", T.WARN)
@@ -93,7 +93,7 @@ def _cfg(params: dict, name: str, want: float) -> tuple:
     return YES if abs(v - want) < 1e-6 else NO
 
 
-#: Re-exported, not reimplemented. The map colours its track from the same
+#: Re-exported, not reimplemented. The map colors its track from the same
 #: judgement this table prints, and two copies of "what is the aiding mode"
 #: drifting apart is what made 18 September hard to read.
 aiding_mode = trust.aiding_mode

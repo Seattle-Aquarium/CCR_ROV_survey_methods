@@ -1,5 +1,5 @@
 """
-Denoise one photo, then synchronise it onto the rest.
+Denoise one photo, then synchronize it onto the rest.
 
 AI Denoise has no SDK entry point, and as of Lightroom Classic 14.5 it has no
 batch entry point either: the Enhance dialog is gone, ``Photo > Enhance...``
@@ -40,7 +40,7 @@ _PANEL_TIMEOUT = 60.0
 #: ever delayed the report of something that was never going to happen.
 _ONE_PHOTO_TIMEOUT = 180.0
 
-#: How long the whole synchronised batch may take.
+#: How long the whole synchronized batch may take.
 _SYNC_TIMEOUT = 60 * 60
 
 _NOTICE_HINTS = ("moved to the detail panel", "have moved")
@@ -200,7 +200,7 @@ def _tick_denoise(pwa, pid: int, notes: list[str]) -> None:
     """Turn Denoise on, and prove it went on.
 
     Lightroom draws its own controls; a checkbox that reports itself to the
-    accessibility layer still may not respond to a click at its centre, and a
+    accessibility layer still may not respond to a click at its center, and a
     click that lands on the label rather than the box does nothing at all. The
     previous version clicked once and assumed -- which meant a batch waiting
     ten minutes for a computation that had never been asked for. So: try each
@@ -342,8 +342,8 @@ def _sync_to_all(pwa, pid: int, notes: list[str],
 
 def denoise_all(pid: int, *, total: int, wait_denoised,
                 amount: int = 50, log_dir: Path | None = None,
-                cancelled=None) -> list[str]:
-    """Denoise the first photo, then synchronise onto the whole folder.
+                canceled=None) -> list[str]:
+    """Denoise the first photo, then synchronize onto the whole folder.
 
     `wait_denoised(n, timeout)` must block until at least `n` photos report
     denoised in the catalog, returning False on timeout. Screen state is never
@@ -389,7 +389,7 @@ def denoise_all(pid: int, *, total: int, wait_denoised,
             f"{int(_ONE_PHOTO_TIMEOUT / 60)} minutes")
     notes.append("first photo denoised")
 
-    if cancelled is not None and cancelled():
+    if canceled is not None and canceled():
         return notes
     if total <= 1:
         return notes
@@ -401,5 +401,5 @@ def denoise_all(pid: int, *, total: int, wait_denoised,
             "Synchronize did not carry Denoise onto every photo. The catalog "
             "still shows some frames un-denoised, so the export was stopped "
             "rather than writing frames that only look processed.")
-    notes.append(f"Denoise synchronised onto all {total} photos")
+    notes.append(f"Denoise synchronized onto all {total} photos")
     return notes

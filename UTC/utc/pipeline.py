@@ -80,17 +80,17 @@ class RunResult:
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     elapsed_s: float = 0.0
-    cancelled: bool = False
+    canceled: bool = False
     photos: sorting.SortReport | None = None
 
     @property
     def ok(self) -> bool:
-        return not self.errors and not self.cancelled
+        return not self.errors and not self.canceled
 
     def summary(self) -> str:
         lines = []
-        if self.cancelled:
-            lines.append("Run cancelled.")
+        if self.canceled:
+            lines.append("Run canceled.")
         lines.append(f"{len(self.outputs)} composite(s) written "
                      f"in {self.elapsed_s / 60:.1f} min")
         for p in self.outputs:
@@ -159,7 +159,7 @@ def telemetry_csv_for(flight_dir: Path, cache_root: Path) -> tuple[Path | None, 
 
     One place decides this, because the answer is not "the cache's
     telemetry.csv": a flight whose mcap failed can be pointed at the
-    autopilot's dataflash log instead, and every caller has to honour that.
+    autopilot's dataflash log instead, and every caller has to honor that.
     Reading the cache file directly is how the banner tool ended up ignoring a
     BIN override the operator had explicitly chosen.
     """
@@ -491,7 +491,7 @@ def _run(
             per = 1.0 / len(jobs)
             for i, (r, rd) in enumerate(jobs):
                 if cancel is not None and cancel.is_set():
-                    raise ff.CancelledError("cancelled")
+                    raise ff.CancelledError("canceled")
                 base = i * per
                 label = f"{r.site.name}/{r.transect.name} {rd.label}"
 
@@ -514,7 +514,7 @@ def _run(
         st.finish("render", "composites complete")
 
     except ff.CancelledError:
-        res.cancelled = True
+        res.canceled = True
     except Exception as ex_:                      # unexpected: report, don't crash
         res.errors.append(f"{type(ex_).__name__}: {ex_}")
 

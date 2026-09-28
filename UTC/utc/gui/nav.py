@@ -9,11 +9,11 @@ rail four items long however many tools accumulate.
 
 Two things here are unusual for CustomTkinter.
 
-**The four are buttons, and each carries its own brand colour.** They are the
+**The four are buttons, and each carries its own brand color.** They are the
 roadmap, so they are drawn larger than a standard button, rounded, bordered and
 spaced apart rather than stacked as a list. The type on each is chosen by
 measuring against its own fill -- Seafoam takes dark type where Salish takes
-White -- so the palette in `theme.CHAPTER_COLOURS` can be swapped without
+White -- so the palette in `theme.CHAPTER_COLORS` can be swapped without
 anyone remembering to swap the type with it.
 
 **The rail is a canvas, not a column of CTkButtons.** Tk has no rounded
@@ -41,7 +41,7 @@ from . import gradients as G
 from . import theme as T
 
 #: Where the step numeral sits inside a chapter button, and the clearance
-#: kept between it and the centred name.
+#: kept between it and the centered name.
 BTN_NUM_X = 16
 BTN_PAD_X = 14
 #: Never narrower than this, however short the chapter names get.
@@ -140,8 +140,8 @@ class SectionStrip(ctk.CTkFrame):
         w = max(1, mark.winfo_width())
         h = max(1, mark.winfo_height())
         if style == "hairline":
-            colour = self._apply_appearance_mode(T.ACCENT)
-            mark.create_rectangle(0, h // 2, w, h, fill=colour, outline="")
+            color = self._apply_appearance_mode(T.ACCENT)
+            mark.create_rectangle(0, h // 2, w, h, fill=color, outline="")
             mark._photo = None          # noqa: SLF001
             return
         img = G.render((w, h), T.STRIPE_GRADIENT, angle=0.0)
@@ -280,7 +280,7 @@ class Navigator(ctk.CTkFrame):
         self._border_on = max(1, int(T.CHAPTER_BTN_BORDER_ON * s))
         self._top = int(T.CHAPTER_BTN_TOP * s)
         self._num_x = int(BTN_NUM_X * s)
-        # The name is centred, so the room the numeral takes has to be
+        # The name is centered, so the room the numeral takes has to be
         # reserved on *both* sides of it -- otherwise the longest name grows
         # leftward until it collides with the number.
         side = self._num_x + num_w + int(BTN_PAD_X * s)
@@ -293,14 +293,14 @@ class Navigator(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _redraw(self) -> None:
-        """Four buttons, each in its own brand colour, on a flat surface.
+        """Four buttons, each in its own brand color, on a flat surface.
 
         The rail is the roadmap through a survey day, so the four read as
         objects rather than as a list: rounded, bordered, larger than a
         standard button and spaced apart.
 
-        Each carries its own colour, and the type on it is chosen by measuring
-        against that colour rather than from a table -- Seafoam takes dark
+        Each carries its own color, and the type on it is chosen by measuring
+        against that color rather than from a table -- Seafoam takes dark
         type, Salish takes White, and a palette can be swapped without anyone
         remembering to swap the type with it.
         """
@@ -324,7 +324,7 @@ class Navigator(ctk.CTkFrame):
                      "hover" if name == self._hover else "off")
 
             fill, border, width, radius, bar, ink = self._button_look(
-                self._colour_for(ch.index), state, live, mode)
+                self._color_for(ch.index), state, live, mode)
 
             img = G.chip((btn_w, self._btn_h), fill=fill, border=border,
                          border_w=width, radius=radius, ground=ground)
@@ -333,7 +333,7 @@ class Navigator(ctk.CTkFrame):
             c.create_image(inset, y, image=photo, anchor="nw")
 
             if bar:
-                # A colour bar down the leading edge, clipped to the button's
+                # A color bar down the leading edge, clipped to the button's
                 # own corner radius so it does not poke out of the rounding.
                 bw = max(1, int(T.CHAPTER_BTN_BAR * self._scale))
                 c.create_rectangle(inset + width, y + radius // 2,
@@ -344,8 +344,8 @@ class Navigator(ctk.CTkFrame):
             cy = y + self._btn_h / 2
 
             # The numeral sits at a fixed inset so the four line up as a
-            # column -- they are the roadmap's step numbers, and centring them
-            # with their names left them ragged. The name is centred; the rail
+            # column -- they are the roadmap's step numbers, and centering them
+            # with their names left them ragged. The name is centered; the rail
             # is sized so it can never reach back to the numeral.
             c.create_text(inset + self._num_x, cy, anchor="w",
                           text=str(ch.index), font=self._font_num, fill=ink,
@@ -354,16 +354,16 @@ class Navigator(ctk.CTkFrame):
                           font=self._font_name if on else self._font_name_off,
                           fill=ink, tags=("row", f"row:{name}"))
 
-    def _button_look(self, colour: str, state: str, live: bool, mode):
+    def _button_look(self, color: str, state: str, live: bool, mode):
         """Fill, border, border width, radius, leading bar and ink.
 
         One place for all six styles, so a variant is a table entry rather
         than a branch scattered through the drawing code.
 
-        Two rules hold across every style. A disabled chapter loses its colour
-        entirely -- a greyed-out button that keeps a saturated fill still looks
+        Two rules hold across every style. A disabled chapter loses its color
+        entirely -- a grayed-out button that keeps a saturated fill still looks
         pressable. And type is never set *in* Algae or Seafoam: on a light
-        ground they measure 2.2:1 and 1.9:1, so the colour goes in a fill or a
+        ground they measure 2.2:1 and 1.9:1, so the color goes in a fill or a
         border and `ink_for` picks what sits on it.
         """
         style = T.CHAPTER_BTN_STYLE
@@ -377,20 +377,20 @@ class Navigator(ctk.CTkFrame):
             return surface, edge, 0, r, "", muted
 
         if style == "outline":
-            fill = colour if on else surface
-            return (fill, colour, b_on if (on or hover) else b, r, "",
-                    T.ink_for(colour) if on else text)
+            fill = color if on else surface
+            return (fill, color, b_on if (on or hover) else b, r, "",
+                    T.ink_for(color) if on else text)
 
         if style == "leftbar":
-            return (surface, colour if on else edge, b_on if on else b, r,
-                    colour, text if (on or hover) else muted)
+            return (surface, color if on else edge, b_on if on else b, r,
+                    color, text if (on or hover) else muted)
 
         if style == "ghost":
-            # Colour arrives only on the chapter you chose.
-            fill = colour if on else surface
-            return (fill, colour if (on or hover) else edge,
+            # Color arrives only on the chapter you chose.
+            fill = color if on else surface
+            return (fill, color if (on or hover) else edge,
                     b_on if on else b, r, "",
-                    T.ink_for(colour) if on else text)
+                    T.ink_for(color) if on else text)
 
         # "solid".
         if on:
@@ -399,14 +399,14 @@ class Navigator(ctk.CTkFrame):
             border, width = muted, b_on
         else:
             border, width = edge, b
-        return colour, border, width, r, "", T.ink_for(colour)
+        return color, border, width, r, "", T.ink_for(color)
 
     def _btn_y(self, index: int) -> int:
         """Top of the button for chapter `index` (1-based)."""
         return self._top + (index - 1) * (self._btn_h + self._gap)
 
-    def _colour_for(self, index: int) -> str:
-        palette = T.CHAPTER_COLOURS
+    def _color_for(self, index: int) -> str:
+        palette = T.CHAPTER_COLORS
         return palette[(index - 1) % len(palette)]
 
     def _text_w(self, text: str, font: tuple) -> int:
@@ -497,7 +497,7 @@ class Navigator(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def set_enabled(self, name: str, enabled: bool) -> None:
-        """Grey out one tool. Accepts a chapter name or a tool name."""
+        """Gray out one tool. Accepts a chapter name or a tool name."""
         if name in self._chapters:
             for s in self._chapters[name].sections:
                 self.set_enabled(s, enabled)

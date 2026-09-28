@@ -424,7 +424,7 @@ def test_gps_input_vdop_is_read_as_an_acoustic_standard_deviation():
     assert st.lat == pytest.approx(47.62691)
 
 
-def test_the_invalid_sentinels_are_recognised():
+def test_the_invalid_sentinels_are_recognized():
     sample = mav2rest.Sample(
         name="GPS_RAW_INT", fresh=True,
         message={"fix_type": 0, "vdop": 65535.0, "hdop": 65535.0,
@@ -502,7 +502,7 @@ def test_the_vessel_is_never_marked_as_fused_into_the_vehicle_position():
     assert "not the ROV" in rows["vessel_hdt"].detail
 
 
-def test_the_surftrak_fixit_orientation_damage_is_recognised():
+def test_the_surftrak_fixit_orientation_damage_is_recognized():
     """Surftrak Fixit v1.0.0-beta.2's `prb_bad_max` branch logs 'setting
     RNGFND1_MAX_CM to 5000' and calls set_param('RNGFND1_ORIENT', 5000).
     This program never calls it; it checks for the damage and names it."""

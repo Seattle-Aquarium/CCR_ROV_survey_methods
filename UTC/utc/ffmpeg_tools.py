@@ -147,7 +147,7 @@ def run(
             for line in proc.stdout:
                 if cancel is not None and cancel.is_set():
                     proc.kill()
-                    raise CancelledError("cancelled")
+                    raise CancelledError("canceled")
                 line = line.strip()
                 if line.startswith("out_time_us=") or line.startswith("out_time_ms="):
                     try:
@@ -162,7 +162,7 @@ def run(
             while proc.poll() is None:
                 if cancel is not None and cancel.is_set():
                     proc.kill()
-                    raise CancelledError("cancelled")
+                    raise CancelledError("canceled")
                 try:
                     proc.wait(timeout=0.25)
                 except subprocess.TimeoutExpired:
@@ -251,7 +251,7 @@ _nvenc_cache: dict[str, bool] = {}
 
 
 def nvenc_available(codec: str = "h264_nvenc", ffmpeg: str | None = None) -> bool:
-    """Whether an NVENC encoder actually initialises on this machine.
+    """Whether an NVENC encoder actually initializes on this machine.
 
     Listing the encoder is not enough -- ffmpeg advertises NVENC even without a
     usable NVIDIA GPU or driver, and it fails only at run time. So we do a

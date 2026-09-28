@@ -15,7 +15,7 @@ into it, and finding folders to work on later can never drift apart.
                 T1/
                     GPR/                sorted raws
                     JPG_preview/        sorted previews (banner applied in place)
-                    JPG_edited/         colour-corrected exports -- NEVER modified
+                    JPG_edited/         color-corrected exports -- NEVER modified
                     JPG_edited_banner/  generated banner copies of the above
                 off_transect/       optional home for stills outside every transect
         videos/
@@ -57,6 +57,10 @@ JPG_PREVIEW = "JPG_preview"
 JPG_EDITED = "JPG_edited"
 JPG_EDITED_BANNER = "JPG_edited_banner"
 
+#: Inside GPR/ and JPG_edited/: the frames that landed on a distance mark,
+#: kept apart from the rest of the transect's imagery.
+METERS = "meters"
+
 DOWNWARD = "downward"
 FORWARD = "forward"
 COMPOSITES = "composites"
@@ -71,7 +75,7 @@ BASE_DIRS: tuple[str, ...] = (
 )
 
 #: Per-transect subfolders. JPG_EDITED is created empty as a signpost: the team
-#: needs somewhere obvious to export colour-corrected frames to.
+#: needs somewhere obvious to export color-corrected frames to.
 TRANSECT_DIRS: tuple[str, ...] = (GPR, JPG_PREVIEW, JPG_EDITED)
 
 #: Folders that hold stills we may be asked to banner or strip.
@@ -102,7 +106,7 @@ def clean_flight_name(text: str) -> str:
     """Make a typed folder name safe without silently changing its meaning.
 
     Spaces become underscores and characters Windows rejects are dropped;
-    anything else is left alone, so the user's name is still recognisable.
+    anything else is left alone, so the user's name is still recognizable.
     """
     name = str(text).strip().replace(" ", "_")
     name = _SAFE.sub("", name)

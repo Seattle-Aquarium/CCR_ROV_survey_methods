@@ -181,7 +181,7 @@ def test_plan_roundtrip():
     assert q.sites[0].transects[0].end_tc == "13:10:00"
 
 
-def test_output_stem_sanitises():
+def test_output_stem_sanitizes():
     s = Site("Pier 62 / North", "Port of Seattle", "2026-08-24",
              [Transect("T1", "13:00:00", "13:10:00")])
     r = resolve_transect(s, s.transects[0], [_chapter("13:00:00", 1800)])

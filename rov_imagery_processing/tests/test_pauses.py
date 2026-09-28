@@ -254,7 +254,7 @@ def test_the_segments_carry_the_clock_they_belong_to():
     midnight = local_midnight_epoch(_site(t).date_obj(), TZ)
     assert r.segment_epoch(0) == midnight + 13 * 3600
     assert r.segment_epoch(1) == midnight + 13 * 3600 + 9 * 60
-    # Laid end to end -- the old behaviour -- the second piece would have
+    # Laid end to end -- the old behavior -- the second piece would have
     # started four minutes early.
     assert r.segment_epoch(1) != r.epoch_start + r.segments[0].dur_s
 

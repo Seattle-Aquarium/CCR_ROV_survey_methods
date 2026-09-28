@@ -185,7 +185,7 @@ class DayReport:
 # --------------------------------------------------------------------------
 
 
-def analyse(day: S.FlightDay) -> DayReport:
+def analyze(day: S.FlightDay) -> DayReport:
     """Turn a scanned folder into a decided one. Never raises."""
     report = DayReport(day=day)
     _find_disarms(day, report)
@@ -193,9 +193,9 @@ def analyse(day: S.FlightDay) -> DayReport:
     _match_disarms_to_outages(report)
     _find_reboots(day, report)
     _profile_gcs(day, report)
-    _summarise_topside(day, report)
-    _summarise_vehicle(day, report)
-    _summarise_parameters(day, report)
+    _summarize_topside(day, report)
+    _summarize_vehicle(day, report)
+    _summarize_parameters(day, report)
     _read_sensor_health(day, report)
     _raise_findings(day, report)
     _write_headline(report)
@@ -458,7 +458,7 @@ _PRESSURE = {
 }
 
 
-def _summarise_topside(day: S.FlightDay, report: DayReport) -> None:
+def _summarize_topside(day: S.FlightDay, report: DayReport) -> None:
     out: dict = {"sessions": len(day.monitors), "pressure": [], "stats": {}}
     if not day.monitors:
         report.topside = out
@@ -517,7 +517,7 @@ def _summarise_topside(day: S.FlightDay, report: DayReport) -> None:
 # ---- the vehicle ----------------------------------------------------------
 
 
-def _summarise_vehicle(day: S.FlightDay, report: DayReport) -> None:
+def _summarize_vehicle(day: S.FlightDay, report: DayReport) -> None:
     out: dict = {}
     temps: list[float] = []
     throttled = False
@@ -547,7 +547,7 @@ def _summarise_vehicle(day: S.FlightDay, report: DayReport) -> None:
 # ---- parameters and versions ----------------------------------------------
 
 
-def _summarise_parameters(day: S.FlightDay, report: DayReport) -> None:
+def _summarize_parameters(day: S.FlightDay, report: DayReport) -> None:
     out: dict = {"operator_changes": {}, "autopilot_changes": {},
                  "version_changes": {}, "failed_reads": [], "count": 0}
     for flight_id, snapshot in sorted(day.snapshots.items()):

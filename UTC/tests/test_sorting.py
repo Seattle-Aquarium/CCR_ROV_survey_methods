@@ -285,7 +285,7 @@ def test_edited_frames_are_never_modified_and_time_falls_back_to_the_name():
         )
         t1 = layout.transect_dir(root, "T1")
 
-        # the team exports colour-corrected frames, EXIF stripped
+        # the team exports color-corrected frames, EXIF stripped
         edited = t1 / layout.JPG_EDITED
         edited.mkdir(exist_ok=True)
         for src in sorted((t1 / layout.JPG_PREVIEW).glob("*.jpg")):

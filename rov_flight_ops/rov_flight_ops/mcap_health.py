@@ -223,7 +223,7 @@ def deep_scan(
             for schema, ch, msg in NonSeekingReader(f).iter_messages():
                 if cancel is not None and cancel.is_set():
                     from .ffmpeg_tools import CancelledError
-                    raise CancelledError("cancelled")
+                    raise CancelledError("canceled")
                 t = msg.log_time / 1e9
                 rep.topics.setdefault(ch.topic, Span()).add(t)
                 g = topic_group(ch.topic, schema.name if schema else "")
@@ -333,7 +333,7 @@ def repair_copy(
             while done < rep.health.good_end:
                 if cancel is not None and cancel.is_set():
                     from .ffmpeg_tools import CancelledError
-                    raise CancelledError("cancelled")
+                    raise CancelledError("canceled")
                 buf = src.read(min(chunk, rep.health.good_end - done))
                 if not buf:
                     break

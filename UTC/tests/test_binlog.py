@@ -44,9 +44,9 @@ def rows(msg):
 # --------------------------------------------------------------------------
 
 
-def test_depth_comes_from_ctun_in_millimetres():
-    """CTUN.Alt is metres, negative below the surface; the store wants the
-    same quantity in millimetres, as GLOBAL_POSITION_INT reports it."""
+def test_depth_comes_from_ctun_in_millimeters():
+    """CTUN.Alt is meters, negative below the surface; the store wants the
+    same quantity in millimeters, as GLOBAL_POSITION_INT reports it."""
     r = rows(Msg("CTUN", Alt=-10.5, CRt=-29))
     assert r["GLOBAL_POSITION_INT.relative_alt"] == pytest.approx(-10500.0)
     assert r["VFR_HUD.climb"] == pytest.approx(-0.29)

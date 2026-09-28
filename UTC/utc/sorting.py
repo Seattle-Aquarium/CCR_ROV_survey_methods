@@ -230,7 +230,7 @@ def sort_flight(
     for i, it in enumerate(items):
         if cancel is not None and cancel.is_set():
             from .ffmpeg_tools import CancelledError
-            raise CancelledError("cancelled")
+            raise CancelledError("canceled")
 
         if it.transect:
             tdir = layout.ensure_transect(flight, it.transect)

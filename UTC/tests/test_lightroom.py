@@ -45,7 +45,7 @@ def test_hero12_lands_on_the_protocol_size():
     assert r.size_in(*HERO12) == (CROP_W, CROP_H), r
 
 
-def test_crop_is_centred():
+def test_crop_is_centered():
     r = crop_fractions(*HERO12)
     assert abs((1.0 - r.right) - r.left) <= 2e-6, r
     assert abs((1.0 - r.bottom) - r.top) <= 2e-6, r
@@ -102,7 +102,7 @@ create table Adobe_imageDevelopSettings (
 """
 
 # Copied from a real denoised row in a 14.5.1 catalog: the Enhance filter and
-# the localisation key that carries the word the poller globs for.
+# the localization key that carries the word the poller globs for.
 _DENOISED_TEXT = ('s = { FilterList = { Filters = { { Name = "Enhance", '
                   'Title = "$$$/CRaw/Filter/Title/Denoise=Denoise" } } } }')
 # The trap: this mentions noise reduction but is not a Denoise. A case-blind

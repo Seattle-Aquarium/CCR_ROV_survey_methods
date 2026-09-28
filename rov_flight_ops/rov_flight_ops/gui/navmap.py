@@ -7,23 +7,23 @@ field laptop. Tiles are pasted as images, tracks are polylines decimated to
 the pixel, and the whole thing is one `delete("all")` and a few hundred items.
 
 **It degrades, in this order.** Chart tiles; then whatever tiles are cached;
-then a metre grid with a scale bar. The last of those is not a failure mode to
-apologise for: a grid, a north arrow, the ROV's track and the distance back to
+then a meter grid with a scale bar. The last of those is not a failure mode to
+apologize for: a grid, a north arrow, the ROV's track and the distance back to
 the start is most of what this map is for, and it works in a tunnel.
 
 **Nothing on it is drawn at a position it does not have.** A stale fix is
-drawn hollow and labelled with its age. A position with no geographic
+drawn hollow and labeled with its age. A position with no geographic
 reference at all -- a DVL-only dive before the origin is set -- puts the map
-into a local-metre view whose axes are labelled in metres from the start
+into a local-meter view whose axes are labeled in meters from the start
 point, and it says so rather than showing a latitude it cannot justify.
 
 **Tracks break rather than bridge.** An estimator reset, an origin change or a
 source change starts a new segment, and segments are never joined: the line
 between them would be a movement that did not happen.
 
-The track can be coloured by **seabed depth** -- depth below surface minus
+The track can be colored by **seabed depth** -- depth below surface minus
 altitude above bottom, which is the seabed under the vehicle, measured by the
-vehicle. At the metre scale these surveys work at, that is better bathymetry
+vehicle. At the meter scale these surveys work at, that is better bathymetry
 than any public source, and it accumulates for free over a survey day.
 """
 
@@ -51,14 +51,14 @@ MIN_SEGMENT_PX = 2.0
 MAX_DRAWN_POINTS = 4000
 
 #: Zoom limits. Beyond 19 no source has tiles; below 3 the survey is a dot.
-#: A colour per navigation state, for the track: (light, dark).
+#: A color per navigation state, for the track: (light, dark).
 #:
 #: Taken from the brand palette directly rather than through the semantic
 #: roles, because the roles collide where this needs them not to. `ok` and
 #: `accent` are both Algae in dark mode, so "acoustically aided" and
 #: "dead-reckoned" drew as the same green -- exactly the distinction the
-#: colouring exists to make. `warn` and `error` are both Coral in both modes.
-#: Picking from the palette keeps the Aquarium's colours without inheriting a
+#: coloring exists to make. `warn` and `error` are both Coral in both modes.
+#: Picking from the palette keeps the Aquarium's colors without inheriting a
 #: collision that was harmless everywhere else.
 #:
 #: Green is aided, blue is dead-reckoned, coral is trouble. "No aiding" shares
@@ -66,7 +66,7 @@ MAX_DRAWN_POINTS = 4000
 #: a track with no horizontal aiding is not a measured path -- and more robust
 #: on a Rugged screen in daylight, which loses saturation before it loses
 #: pattern.
-TRUST_COLOURS = {
+TRUST_COLORS = {
     TR.ABSOLUTE: ("#00795A", brand.ALGAE),        # Algae, darkened for white
     TR.RELATIVE: (brand.MEDITERRANEAN, brand.SEAFOAM),
     TR.DEGRADED: ("#B4472F", brand.CORAL),
@@ -84,7 +84,7 @@ def trust_dash(state: str):
     return TRUST_DASH.get(state)
 
 
-#: What each colour means, in words, for the legend and the guide.
+#: What each color means, in words, for the legend and the guide.
 TRUST_WORDS = {
     TR.ABSOLUTE: "acoustically aided",
     TR.RELATIVE: "dead-reckoned",
@@ -94,19 +94,19 @@ TRUST_WORDS = {
 }
 
 
-def trust_colour(state: str) -> str:
-    return _hex(TRUST_COLOURS.get(state, T.TEXT_MUTED))
+def trust_color(state: str) -> str:
+    return _hex(TRUST_COLORS.get(state, T.TEXT_MUTED))
 
 
 #: The chart pack stops at z19, but `TileCache` enlarges past a layer's top
 #: zoom, so the map is no longer limited to where the tiles stop. Two
 #: doublings further is 0.05 m per pixel: enough to place a vertex to a tenth
-#: of a metre, which is the scale these plans are actually drawn at. The
+#: of a meter, which is the scale these plans are actually drawn at. The
 #: basemap says "enlarged, not sharper" up there, and it means it.
 MIN_ZOOM, MAX_ZOOM = 3, 21
 
-#: A colour ramp for seabed depth, shallow to deep. Deliberately not a
-#: rainbow: a sequential ramp is read correctly by people who see colour
+#: A color ramp for seabed depth, shallow to deep. Deliberately not a
+#: rainbow: a sequential ramp is read correctly by people who see color
 #: differently, and a rainbow is not.
 DEPTH_RAMP = ("#C9E8F2", "#8FCBE0", "#4FA3C7", "#2A72A3", "#1A4A7A", "#122E55")
 
@@ -139,14 +139,14 @@ class MapCanvas(ctk.CTkFrame):
         self.overlays = list(tiles.DEFAULT_OVERLAYS)
 
         self.zoom = 16
-        self.centre: tuple[float, float] | None = None
+        self.center: tuple[float, float] | None = None
         self.follow = True
         self.show_tiles = True
-        self.colour_by_depth = False
-        #: Colour the ROV track by what each position rested on. On by
-        #: default: a single-coloured track implies one level of confidence
+        self.color_by_depth = False
+        #: Color the ROV track by what each position rested on. On by
+        #: default: a single-colored track implies one level of confidence
         #: across a dive that did not have one.
-        self.colour_by_trust = True
+        self.color_by_trust = True
 
         #: What is drawn. Set by the page from the collector's state.
         self.rov_track: list = []
@@ -160,10 +160,10 @@ class MapCanvas(ctk.CTkFrame):
         #: under everything live, so a plan can never be mistaken for
         #: a measurement.
         self.planned: list = []
-        #: (lat, lon, seabed_depth_m) accumulated for the depth colouring.
+        #: (lat, lon, seabed_depth_m) accumulated for the depth coloring.
         self.depth_points: list[tuple[float, float, float]] = []
         #: When there is no geographic reference, positions are (north, east)
-        #: metres from the start and the map says so.
+        #: meters from the start and the map says so.
         self.local_only = False
         self.local_track: list[tuple[float, float]] = []
         self.status_note = ""
@@ -182,7 +182,7 @@ class MapCanvas(ctk.CTkFrame):
         #: never a vessel.
         self.site = None
         self._drag_from: tuple[int, int] | None = None
-        self._drag_centre: tuple[float, float] | None = None
+        self._drag_center: tuple[float, float] | None = None
         self._pixel_bounds: tuple[float, float] | None = None
         #: Set for the length of one draw; see `_origin_px`.
         self._origin_cache: tuple[float, float, int, int] | None = None
@@ -226,21 +226,21 @@ class MapCanvas(ctk.CTkFrame):
             return
         lats = [p[0] for p in pts]
         lons = [p[1] for p in pts]
-        self.centre = ((min(lats) + max(lats)) / 2, (min(lons) + max(lons)) / 2)
+        self.center = ((min(lats) + max(lats)) / 2, (min(lons) + max(lons)) / 2)
         self.follow = False
         w = max(200, self.canvas.winfo_width())
         h = max(200, self.canvas.winfo_height())
         span_m = max(
-            geo.distance_m(min(lats), self.centre[1], max(lats), self.centre[1]),
-            geo.distance_m(self.centre[0], min(lons), self.centre[0], max(lons)),
+            geo.distance_m(min(lats), self.center[1], max(lats), self.center[1]),
+            geo.distance_m(self.center[0], min(lons), self.center[0], max(lons)),
             30.0) * 1.25
         self.zoom = max(MIN_ZOOM, min(
-            MAX_ZOOM, geo.zoom_for_span(self.centre[0], span_m, min(w, h))))
+            MAX_ZOOM, geo.zoom_for_span(self.center[0], span_m, min(w, h))))
         self.draw()
 
-    def centre_on_vehicle(self) -> None:
+    def center_on_vehicle(self) -> None:
         if self.rov_fix is not None:
-            self.centre = (self.rov_fix.lat, self.rov_fix.lon)
+            self.center = (self.rov_fix.lat, self.rov_fix.lon)
         self.follow = True
         self.draw()
 
@@ -251,7 +251,7 @@ class MapCanvas(ctk.CTkFrame):
             self._drag_from = None
             return
         self._drag_from = (e.x, e.y)
-        self._drag_centre = self.centre
+        self._drag_center = self.center
 
     def _hover(self, e) -> None:
         """Pointer moved with no button down: live dimensions while drawing."""
@@ -264,18 +264,18 @@ class MapCanvas(ctk.CTkFrame):
                                         or self.editor.drawing):
             self.editor.motion(e)
             return
-        if self._drag_from is None or self._drag_centre is None:
+        if self._drag_from is None or self._drag_center is None:
             return
         # Panning is an explicit instruction to look somewhere: following is
         # released so the map does not snap back on the next fix.
         self.follow = False
         dx, dy = e.x - self._drag_from[0], e.y - self._drag_from[1]
-        cx, cy = geo.latlon_to_tile_xy(*self._drag_centre, self.zoom)
+        cx, cy = geo.latlon_to_tile_xy(*self._drag_center, self.zoom)
         cx -= dx / TILE_PX
         cy -= dy / TILE_PX
         n = 2.0 ** self.zoom
         cy = max(0.0, min(n, cy))
-        self.centre = geo.tile_xy_to_latlon(cx % n, cy, self.zoom)
+        self.center = geo.tile_xy_to_latlon(cx % n, cy, self.zoom)
         self.draw()
 
     def _release(self, e) -> None:
@@ -297,19 +297,19 @@ class MapCanvas(ctk.CTkFrame):
         new = max(MIN_ZOOM, min(MAX_ZOOM, self.zoom + step))
         if new == self.zoom:
             return
-        # Zoom about the pointer, not the centre: the thing under the cursor
+        # Zoom about the pointer, not the center: the thing under the cursor
         # is the thing the operator is looking at.
-        if event is not None and self.centre is not None:
+        if event is not None and self.center is not None:
             try:
                 at = self.latlon_at(event.x, event.y)
             except Exception:
                 at = None
             if at is not None:
-                old = self.centre
+                old = self.center
                 self.zoom = new
                 after = self.latlon_at(event.x, event.y)
                 if after is not None:
-                    self.centre = (old[0] + (at[0] - after[0]),
+                    self.center = (old[0] + (at[0] - after[0]),
                                    old[1] + (at[1] - after[1]))
                 self.draw()
                 return
@@ -339,9 +339,9 @@ class MapCanvas(ctk.CTkFrame):
             w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
         except tkinter.TclError:
             return None
-        if w < 10 or h < 10 or self.centre is None:
+        if w < 10 or h < 10 or self.center is None:
             return None
-        cx, cy = geo.latlon_to_tile_xy(*self.centre, self.zoom)
+        cx, cy = geo.latlon_to_tile_xy(*self.center, self.zoom)
         return cx * TILE_PX - w / 2, cy * TILE_PX - h / 2, w, h
 
     def xy(self, lat: float, lon: float) -> tuple[float, float] | None:
@@ -389,9 +389,9 @@ class MapCanvas(ctk.CTkFrame):
         c.configure(bg=_hex(T.FIELD_BG))
 
         if self.follow and self.rov_fix is not None:
-            self.centre = (self.rov_fix.lat, self.rov_fix.lon)
+            self.center = (self.rov_fix.lat, self.rov_fix.lon)
 
-        if self.local_only or self.centre is None:
+        if self.local_only or self.center is None:
             self._draw_local(w, h)
             return
 
@@ -404,8 +404,8 @@ class MapCanvas(ctk.CTkFrame):
             self._draw_track(self.vessel_track, _hex(T.WARN), width=2,
                              dash=(4, 3))
             self._draw_track(self.rov_track, _hex(T.ACCENT), width=3,
-                             depth_coloured=self.colour_by_depth,
-                             by_trust=self.colour_by_trust)
+                             depth_colored=self.color_by_depth,
+                             by_trust=self.color_by_trust)
             self._draw_markers()
             self._draw_site()
             if self.editor is not None:
@@ -477,13 +477,13 @@ class MapCanvas(ctk.CTkFrame):
                 del self._photos[ident]
 
     def _draw_grid(self, w: int, h: int, *, faint: bool) -> None:
-        """A metre grid with a round spacing, over or instead of the tiles."""
-        if self.centre is None:
+        """A meter grid with a round spacing, over or instead of the tiles."""
+        if self.center is None:
             return
-        colour = _hex(T.BORDER) if faint else _hex(T.TEXT_MUTED)
-        m_lat, m_lon = geo.metres_per_degree(self.centre[0])
-        # Metres per pixel at this latitude and zoom.
-        mpp = (156543.03392 * math.cos(math.radians(self.centre[0]))
+        color = _hex(T.BORDER) if faint else _hex(T.TEXT_MUTED)
+        m_lat, m_lon = geo.meters_per_degree(self.center[0])
+        # Meters per pixel at this latitude and zoom.
+        mpp = (156543.03392 * math.cos(math.radians(self.center[0]))
                / (2 ** self.zoom))
         if mpp <= 0:
             return
@@ -497,25 +497,25 @@ class MapCanvas(ctk.CTkFrame):
         if o is None:
             return
         ox, oy, _w, _h = o
-        # Anchor the grid to the centre so it does not crawl while panning.
+        # Anchor the grid to the center so it does not crawl while panning.
         cx, cy = w / 2, h / 2
         k = int(cx / px) + 2
         for i in range(-k, k + 1):
             x = cx + i * px
             if 0 <= x <= w:
-                self.canvas.create_line(x, 0, x, h, fill=colour,
+                self.canvas.create_line(x, 0, x, h, fill=color,
                                         dash=(1, 6) if faint else (2, 4))
         k = int(cy / px) + 2
         for i in range(-k, k + 1):
             y = cy + i * px
             if 0 <= y <= h:
-                self.canvas.create_line(0, y, w, y, fill=colour,
+                self.canvas.create_line(0, y, w, y, fill=color,
                                         dash=(1, 6) if faint else (2, 4))
         self.canvas.create_text(6, 14, text=f"grid {step} m", anchor="w",
                                 fill=_hex(T.TEXT_MUTED), font=T.FONT_SMALL)
 
-    def _draw_track(self, points, colour: str, *, width: int = 2,
-                    dash=None, depth_coloured: bool = False,
+    def _draw_track(self, points, color: str, *, width: int = 2,
+                    dash=None, depth_colored: bool = False,
                     by_trust: bool = False) -> None:
         """One track, per segment, decimated to the pixel.
 
@@ -524,7 +524,7 @@ class MapCanvas(ctk.CTkFrame):
         costs the same as a minute of a moving one.
 
         With `by_trust`, a segment is further split into runs of points that
-        rested on the same thing, and each run takes its own colour. The runs
+        rested on the same thing, and each run takes its own color. The runs
         share their boundary point so the line stays continuous: a gap would
         read as a break in the track, which means something else entirely.
         """
@@ -558,7 +558,7 @@ class MapCanvas(ctk.CTkFrame):
                 kw["dash"] = dash
             if not by_trust:
                 flat = [v for at in drawn for v in at]
-                self.canvas.create_line(*flat, fill=colour, **kw)
+                self.canvas.create_line(*flat, fill=color, **kw)
                 continue
 
             start = 0
@@ -574,14 +574,14 @@ class MapCanvas(ctk.CTkFrame):
                     if pattern:
                         run_kw["dash"] = pattern
                     self.canvas.create_line(
-                        *flat, fill=trust_colour(states[start]), **run_kw)
+                        *flat, fill=trust_color(states[start]), **run_kw)
                 start = i
 
-        if depth_coloured and self.depth_points:
+        if depth_colored and self.depth_points:
             self._draw_depth_dots()
 
     def trust_legend(self) -> list[tuple[str, str]]:
-        """(state, colour) for each state actually present in the track.
+        """(state, color) for each state actually present in the track.
 
         Only what is on screen: a legend listing states that did not happen
         invites an operator to look for them.
@@ -593,15 +593,15 @@ class MapCanvas(ctk.CTkFrame):
                 seen.append(st)
         order = {s: i for i, s in enumerate(TR.STATES)}
         seen.sort(key=lambda s: order.get(s, 99))
-        return [(s, trust_colour(s)) for s in seen]
+        return [(s, trust_color(s)) for s in seen]
 
     def trust_styles(self) -> list[tuple[str, str, str, tuple | None]]:
-        """(state, words, colour, dash) for each state present in the track."""
+        """(state, words, color, dash) for each state present in the track."""
         return [(s, TRUST_WORDS.get(s, s), c, trust_dash(s))
                 for s, c in self.trust_legend()]
 
     def _draw_depth_dots(self) -> None:
-        """The seabed depth the vehicle measured, as coloured dots.
+        """The seabed depth the vehicle measured, as colored dots.
 
         Depth below the surface minus altitude above the bottom is the seabed
         depth under the vehicle. Nothing public resolves Elliott Bay at this
@@ -619,9 +619,9 @@ class MapCanvas(ctk.CTkFrame):
             if at is None:
                 continue
             i = int((d - lo) / span * (len(DEPTH_RAMP) - 1))
-            colour = DEPTH_RAMP[max(0, min(len(DEPTH_RAMP) - 1, i))]
+            color = DEPTH_RAMP[max(0, min(len(DEPTH_RAMP) - 1, i))]
             self.canvas.create_oval(at[0] - 3, at[1] - 3, at[0] + 3, at[1] + 3,
-                                    fill=colour, outline="")
+                                    fill=color, outline="")
         self.canvas.create_text(
             6, 30, anchor="w", font=T.FONT_SMALL, fill=_hex(T.TEXT_MUTED),
             text=f"seabed {lo:.1f}–{hi:.1f} m (measured: depth − altitude)")
@@ -712,7 +712,7 @@ class MapCanvas(ctk.CTkFrame):
             return
         x, y = at
         stale = f.quality is not Quality.OK
-        colour = _hex(T.TEXT_MUTED) if stale else _hex(T.WARN)
+        color = _hex(T.TEXT_MUTED) if stale else _hex(T.WARN)
         # The bow points along HDT true heading. Not course over ground, not
         # the ROV's yaw, not the direction of travel -- and when HDT is stale
         # the hull is drawn without a bow at all rather than pointing a way
@@ -720,26 +720,26 @@ class MapCanvas(ctk.CTkFrame):
         hdg = self.vessel_heading
         if hdg is None:
             self.canvas.create_oval(x - 7, y - 7, x + 7, y + 7,
-                                    outline=colour, width=2)
+                                    outline=color, width=2)
             self.canvas.create_text(x + 10, y - 10, text="vessel · no HDT",
                                     anchor="w", fill=_hex(T.WARN),
                                     font=T.FONT_SMALL)
         else:
-            self._hull(x, y, hdg, colour, filled=not stale)
+            self._hull(x, y, hdg, color, filled=not stale)
             self.canvas.create_text(x + 12, y - 12,
                                     text=f"vessel {hdg:.0f}°T"
                                          + (" · stale" if stale else ""),
-                                    anchor="w", fill=colour, font=T.FONT_SMALL)
+                                    anchor="w", fill=color, font=T.FONT_SMALL)
 
-    def _hull(self, x, y, heading_deg, colour, *, filled=True) -> None:
+    def _hull(self, x, y, heading_deg, color, *, filled=True) -> None:
         a = math.radians(heading_deg)
         pts = []
         for lx, ly in ((0, -11), (6, 4), (0, 1), (-6, 4)):
             rx = lx * math.cos(a) - ly * math.sin(a)
             ry = lx * math.sin(a) + ly * math.cos(a)
             pts += [x + rx, y + ry]
-        self.canvas.create_polygon(*pts, fill=colour if filled else "",
-                                   outline=colour, width=2)
+        self.canvas.create_polygon(*pts, fill=color if filled else "",
+                                   outline=color, width=2)
 
     def _draw_rov(self) -> None:
         f = self.rov_fix
@@ -750,7 +750,7 @@ class MapCanvas(ctk.CTkFrame):
             return
         x, y = at
         stale = f.quality is not Quality.OK
-        colour = _hex(T.TEXT_MUTED) if stale else _hex(T.ACCENT)
+        color = _hex(T.TEXT_MUTED) if stale else _hex(T.ACCENT)
         hdg = self.rov_heading
         if hdg is not None:
             a = math.radians(hdg)
@@ -759,12 +759,12 @@ class MapCanvas(ctk.CTkFrame):
                 rx = lx * math.cos(a) - ly * math.sin(a)
                 ry = lx * math.sin(a) + ly * math.cos(a)
                 pts += [x + rx, y + ry]
-            self.canvas.create_polygon(*pts, fill="" if stale else colour,
-                                       outline=colour, width=2)
+            self.canvas.create_polygon(*pts, fill="" if stale else color,
+                                       outline=color, width=2)
         else:
             self.canvas.create_oval(x - 8, y - 8, x + 8, y + 8,
-                                    fill="" if stale else colour,
-                                    outline=colour, width=2)
+                                    fill="" if stale else color,
+                                    outline=color, width=2)
         if stale:
             age = f.age()
             self.canvas.create_text(
@@ -777,16 +777,16 @@ class MapCanvas(ctk.CTkFrame):
                                     font=T.FONT_SMALL, text="dead-reckoned")
 
     def _draw_scale(self, w: int, h: int) -> None:
-        if self.centre is None:
+        if self.center is None:
             return
-        mpp = (156543.03392 * math.cos(math.radians(self.centre[0]))
+        mpp = (156543.03392 * math.cos(math.radians(self.center[0]))
                / (2 ** self.zoom))
-        for metres in (5, 10, 20, 50, 100, 200, 500, 1000, 2000):
-            px = metres / mpp
+        for meters in (5, 10, 20, 50, 100, 200, 500, 1000, 2000):
+            px = meters / mpp
             if px >= 70:
                 break
         else:
-            metres, px = 5000, 5000 / mpp
+            meters, px = 5000, 5000 / mpp
         x0, y0 = 12, h - 16
         ink = _hex(T.TEXT)
         self.canvas.create_line(x0, y0, x0 + px, y0, fill=ink, width=3)
@@ -794,8 +794,8 @@ class MapCanvas(ctk.CTkFrame):
         self.canvas.create_line(x0 + px, y0 - 4, x0 + px, y0 + 4, fill=ink,
                                 width=2)
         self.canvas.create_text(x0 + px / 2, y0 - 9,
-                                text=f"{metres:,} m" if metres < 1000
-                                else f"{metres / 1000:g} km",
+                                text=f"{meters:,} m" if meters < 1000
+                                else f"{meters / 1000:g} km",
                                 fill=ink, font=T.FONT_SMALL)
         # North arrow. The map is never rotated, so north is always up -- and
         # saying so beats leaving an operator to assume it.
@@ -820,7 +820,7 @@ class MapCanvas(ctk.CTkFrame):
     # -- the no-geography case ---------------------------------------------
 
     def _draw_local(self, w: int, h: int) -> None:
-        """Metres from the start, with no claim to a geographic position.
+        """Meters from the start, with no claim to a geographic position.
 
         This is what a DVL-only dive looks like before the EKF origin is set,
         which on this fleet is the normal state of affairs until somebody
@@ -884,7 +884,7 @@ class MapCanvas(ctk.CTkFrame):
 
         c.create_text(
             w / 2, 18, anchor="c", fill=_hex(T.WARN), font=T.FONT_H2,
-            text="LOCAL VIEW — metres from the start, not a geographic position")
+            text="LOCAL VIEW — meters from the start, not a geographic position")
         c.create_text(
             w / 2, 36, anchor="c", fill=_hex(T.TEXT_MUTED), font=T.FONT_SMALL,
             text=self.status_note
@@ -918,8 +918,8 @@ def format_position(fix: Fix | None, *, now: float | None = None) -> str:
     return "  ·  ".join(bits)
 
 
-def _hex(colour) -> str:
-    if isinstance(colour, (tuple, list)):
+def _hex(color) -> str:
+    if isinstance(color, (tuple, list)):
         mode = ctk.get_appearance_mode()
-        return colour[1] if str(mode).lower() == "dark" else colour[0]
-    return colour
+        return color[1] if str(mode).lower() == "dark" else color[0]
+    return color

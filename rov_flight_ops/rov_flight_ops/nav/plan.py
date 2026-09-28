@@ -7,23 +7,23 @@ What an operator is doing at the dock is laying out where the ROV will fly:
 can be tested against an independent calculation rather than against a
 screenshot.
 
-**Metres are computed in a local frame, never from pixels.** Every feature
-carries an anchor, and all of its geometry is held as east/north metres from
+**Meters are computed in a local frame, never from pixels.** Every feature
+carries an anchor, and all of its geometry is held as east/north meters from
 that anchor. Converting to and from latitude and longitude happens at the
-edges, through the geodesic helpers. Over the few hundred metres a survey
-covers, a local tangent plane is accurate to well under a centimetre, and it
+edges, through the geodesic helpers. Over the few hundred meters a survey
+covers, a local tangent plane is accurate to well under a centimeter, and it
 makes rotation, rectangles and lane clipping ordinary Cartesian arithmetic
 instead of spherical trigonometry. Doing it the other way -- measuring on
 screen -- would make a plan's dimensions depend on the zoom it was drawn at,
 which is the one thing they must never do.
 
-**A rectangle stays a rectangle.** It is stored as a centre, a length, a
+**A rectangle stays a rectangle.** It is stored as a center, a length, a
 width and a rotation, not as four corner points that a drag can shear. The
 corners are derived. The same applies to a grid: it keeps the rectangle and
 the lane settings, so an operator can change the spacing afterwards and get
 new lanes rather than a frozen set of lines.
 
-**Lanes are not coverage.** Flying the centre line of a lane does not survey
+**Lanes are not coverage.** Flying the center line of a lane does not survey
 the strip either side of it unless something says how wide the camera sees,
 and nothing here knows that. `coverage()` returns "not established" until an
 effective swath width is supplied, and says so.
@@ -65,7 +65,7 @@ MAX_SPACING_M = 500.0
 
 @dataclass(frozen=True)
 class Anchor:
-    """The point a feature's local metres are measured from.
+    """The point a feature's local meters are measured from.
 
     Every feature has one, and it is stored with the feature rather than with
     the plan, so moving one feature cannot silently reinterpret another.
@@ -75,8 +75,8 @@ class Anchor:
     lon: float
 
     def to_local(self, lat: float, lon: float) -> tuple[float, float]:
-        """(east, north) metres from the anchor."""
-        m_lat, m_lon = geo.metres_per_degree(self.lat)
+        """(east, north) meters from the anchor."""
+        m_lat, m_lon = geo.meters_per_degree(self.lat)
         return (geo.wrap180(lon - self.lon) * m_lon, (lat - self.lat) * m_lat)
 
     def to_geo(self, east: float, north: float) -> tuple[float, float]:
@@ -107,7 +107,7 @@ def _bearing_of(de: float, dn: float) -> float:
 
 
 def polygon_area(points) -> float:
-    """Area in square metres of a closed local-frame polygon.
+    """Area in square meters of a closed local-frame polygon.
 
     The shoelace formula, absolute value so winding order does not matter.
     In a local tangent frame this is the true ground area to within the
@@ -206,7 +206,7 @@ class Line(Feature):
     """
 
     kind: str = "line"
-    #: [(east, north), ...] metres from the anchor.
+    #: [(east, north), ...] meters from the anchor.
     points: list = field(default_factory=list)
 
     def local_points(self) -> list:
@@ -319,7 +319,7 @@ class Line(Feature):
 class Rect(Feature):
     """A rotated rectangle, stored so it cannot stop being one.
 
-    Centre, length, width and rotation -- not four corners. A handle drag
+    Center, length, width and rotation -- not four corners. A handle drag
     recomputes those four numbers, so no sequence of edits can shear it into a
     parallelogram, which is exactly what storing corners allows.
 
@@ -327,7 +327,7 @@ class Rect(Feature):
     """
 
     kind: str = "rect"
-    centre: tuple = (0.0, 0.0)          # local (east, north)
+    center: tuple = (0.0, 0.0)          # local (east, north)
     length_m: float = 0.0               # along the rotation axis
     width_m: float = 0.0                # across it
     rotation_deg: float = 0.0
@@ -335,10 +335,10 @@ class Rect(Feature):
     @classmethod
     def from_corners(cls, anchor: Anchor, a: tuple, b: tuple,
                      rotation_deg: float = 0.0, **kw) -> Rect:
-        """An axis-aligned drag from `a` to `b`, then rotated about its centre."""
+        """An axis-aligned drag from `a` to `b`, then rotated about its center."""
         ce = (a[0] + b[0]) / 2.0
         cn = (a[1] + b[1]) / 2.0
-        return cls(anchor=anchor, centre=(ce, cn),
+        return cls(anchor=anchor, center=(ce, cn),
                    width_m=abs(b[0] - a[0]), length_m=abs(b[1] - a[1]),
                    rotation_deg=rotation_deg, **kw)
 
@@ -349,7 +349,7 @@ class Rect(Feature):
         out = []
         for e, n in base:
             re, rn = _rotate(e, n, self.rotation_deg)
-            out.append((self.centre[0] + re, self.centre[1] + rn))
+            out.append((self.center[0] + re, self.center[1] + rn))
         return out
 
     def local_points(self) -> list:
@@ -369,7 +369,7 @@ class Rect(Feature):
         """Retype the dimensions exactly.
 
         `anchor_corner` is an index into `corners()` that stays put; None
-        keeps the centre still. Pinning a corner is what an operator wants
+        keeps the center still. Pinning a corner is what an operator wants
         when the box is registered to a pier edge.
         """
         if length_m < MIN_RECT_M or width_m < MIN_RECT_M:
@@ -382,13 +382,13 @@ class Rect(Feature):
         keep = self.corners()[anchor_corner % 4]
         self.length_m, self.width_m = length_m, width_m
         moved = self.corners()[anchor_corner % 4]
-        self.centre = (self.centre[0] + keep[0] - moved[0],
-                       self.centre[1] + keep[1] - moved[1])
+        self.center = (self.center[0] + keep[0] - moved[0],
+                       self.center[1] + keep[1] - moved[1])
         self.touch()
 
     def to_json(self) -> dict:
         return {**super().to_json(),
-                "centre": [round(self.centre[0], 4), round(self.centre[1], 4)],
+                "center": [round(self.center[0], 4), round(self.center[1], 4)],
                 "length_m": round(self.length_m, 4),
                 "width_m": round(self.width_m, 4),
                 "rotation_deg": round(self.rotation_deg, 4)}
@@ -397,12 +397,12 @@ class Rect(Feature):
 @dataclass
 class Circle(Feature):
     kind: str = "circle"
-    centre: tuple = (0.0, 0.0)
+    center: tuple = (0.0, 0.0)
     radius_m: float = 0.0
 
     def local_points(self, steps: int = 72) -> list:
-        return [(self.centre[0] + self.radius_m * math.sin(2 * math.pi * i / steps),
-                 self.centre[1] + self.radius_m * math.cos(2 * math.pi * i / steps))
+        return [(self.center[0] + self.radius_m * math.sin(2 * math.pi * i / steps),
+                 self.center[1] + self.radius_m * math.cos(2 * math.pi * i / steps))
                 for i in range(steps)]
 
     def measurements(self) -> dict:
@@ -412,7 +412,7 @@ class Circle(Feature):
 
     def to_json(self) -> dict:
         return {**super().to_json(),
-                "centre": [round(self.centre[0], 4), round(self.centre[1], 4)],
+                "center": [round(self.center[0], 4), round(self.center[1], 4)],
                 "radius_m": round(self.radius_m, 4)}
 
 
@@ -481,11 +481,11 @@ class Grid(Feature):
     That means a width not divisible by the spacing gets slightly tighter
     lanes rather than a bare strip along one edge, and `effective_spacing_m`
     reports what was actually used. Asking for 2 m in a 5 m width gives three
-    lanes at 1.5 m, not two at 2 m with a metre unswept.
+    lanes at 1.5 m, not two at 2 m with a meter unswept.
     """
 
     kind: str = "grid"
-    centre: tuple = (0.0, 0.0)
+    center: tuple = (0.0, 0.0)
     length_m: float = 0.0
     width_m: float = 0.0
     rotation_deg: float = 0.0
@@ -505,7 +505,7 @@ class Grid(Feature):
     # -- the rectangle -----------------------------------------------------
 
     def as_rect(self) -> Rect:
-        return Rect(anchor=self.anchor, centre=self.centre,
+        return Rect(anchor=self.anchor, center=self.center,
                     length_m=self.length_m, width_m=self.width_m,
                     rotation_deg=self.rotation_deg)
 
@@ -524,7 +524,7 @@ class Grid(Feature):
     def lane_count(self) -> int:
         """How many lanes, chosen so the spacing is never *exceeded*.
 
-        With a half-spacing inset at each edge, the centres span
+        With a half-spacing inset at each edge, the centers span
         ``across - S`` and the gap between adjacent lanes is
         ``(across - S) / (n - 1)``. Requiring that to be at most the requested
         ``S`` gives ``n >= across / S``, so the count is the **ceiling**.
@@ -590,7 +590,7 @@ class Grid(Feature):
             pts = []
             for al in (a_along, b_along):
                 e, nn = _rotate(off, al, rot)
-                pts.append((self.centre[0] + e, self.centre[1] + nn))
+                pts.append((self.center[0] + e, self.center[1] + nn))
             out.append(Lane(index=i + 1, start=pts[0], end=pts[1],
                             state=self.lane_state.get(str(i + 1), "")))
         return out
@@ -622,7 +622,7 @@ class Grid(Feature):
 
         A back-and-forth turn runs exactly *along* the end edge, so its
         midpoint sits on the boundary. Tested against the rectangle grown by
-        a millimetre, so those count as inside -- a point-on-edge test that
+        a millimeter, so those count as inside -- a point-on-edge test that
         called every ordinary turn an excursion would make the number
         meaningless.
         """
@@ -665,15 +665,15 @@ class Grid(Feature):
         """What fraction of the box the lanes actually see.
 
         **Returns "not established" without a swath width**, because flying
-        the centre line of a lane surveys nothing either side of it unless
+        the center line of a lane surveys nothing either side of it unless
         something says how wide the camera sees, and this module does not
         know. Supplying a swath is an explicit claim by the operator or by a
-        camera-footprint model, and it is labelled as one.
+        camera-footprint model, and it is labeled as one.
         """
         if swath_m is None or swath_m <= 0:
             return {"established": False,
                     "note": "coverage not established — no effective swath "
-                            "width has been given, and flying a lane's centre "
+                            "width has been given, and flying a lane's center "
                             "line does not survey the strip either side of it"}
         eff = self.effective_spacing_m()
         if eff is None:
@@ -706,7 +706,7 @@ class Grid(Feature):
 
     def to_json(self) -> dict:
         return {**super().to_json(),
-                "centre": [round(self.centre[0], 4), round(self.centre[1], 4)],
+                "center": [round(self.center[0], 4), round(self.center[1], 4)],
                 "length_m": round(self.length_m, 4),
                 "width_m": round(self.width_m, 4),
                 "rotation_deg": round(self.rotation_deg, 4),
@@ -845,7 +845,7 @@ class Plan:
         """Standards-compliant GeoJSON, with the plan's own semantics kept
         in `properties` so a round trip does not flatten a grid into lines.
 
-        Refuses a local-only plan: a set of metres from an unreferenced
+        Refuses a local-only plan: a set of meters from an unreferenced
         vehicle frame is not geography, and writing it out as latitude and
         longitude would invent a position it never had.
         """
@@ -912,15 +912,15 @@ def _feature_from_json(row: dict) -> Feature | None:
         return Polygon(**common,
                        points=[tuple(p) for p in row.get("points", [])])
     if cls is Circle:
-        return Circle(**common, centre=tuple(row.get("centre", (0, 0))),
+        return Circle(**common, center=tuple(row.get("center", (0, 0))),
                       radius_m=float(row.get("radius_m", 0)))
     if cls is Rect:
-        return Rect(**common, centre=tuple(row.get("centre", (0, 0))),
+        return Rect(**common, center=tuple(row.get("center", (0, 0))),
                     length_m=float(row.get("length_m", 0)),
                     width_m=float(row.get("width_m", 0)),
                     rotation_deg=float(row.get("rotation_deg", 0)))
     if cls is Grid:
-        return Grid(**common, centre=tuple(row.get("centre", (0, 0))),
+        return Grid(**common, center=tuple(row.get("center", (0, 0))),
                     length_m=float(row.get("length_m", 0)),
                     width_m=float(row.get("width_m", 0)),
                     rotation_deg=float(row.get("rotation_deg", 0)),

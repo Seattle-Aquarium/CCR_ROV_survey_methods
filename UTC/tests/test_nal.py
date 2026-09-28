@@ -2,7 +2,7 @@
 
 This code walks every byte of the ROV bitstream -- around 2 GB per dive -- so it
 is written with ``bytes.find`` rather than a Python index loop. That rewrite was
-worth ~26x on extraction, and these tests pin the behaviour so a later
+worth ~26x on extraction, and these tests pin the behavior so a later
 "simplification" cannot quietly undo it.
 
 A fuzz comparison against an index-stepping reference also caught a real

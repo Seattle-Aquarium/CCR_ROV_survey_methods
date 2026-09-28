@@ -38,12 +38,12 @@ APP_NAME = "Underwater Telemetry Compositing"
 APP_ABBREV = "UTC"
 
 #: What the banner says. Deliberately separate from APP_NAME, which still names
-#: the window, the dialogs and the files this writes -- renaming the programme
+#: the window, the dialogs and the files this writes -- renaming the program
 #: is a decision for later, and nothing on disk should move in the meantime.
 DISPLAY_TITLE = "Program Title"
 
 #: One line per chapter, in the rail's order, and numbered to match it. Drawn
-#: with a coloured badge carrying the number -- the same colour that chapter's
+#: with a colored badge carrying the number -- the same color that chapter's
 #: button wears -- so the banner reads as the roadmap for the rail rather than
 #: as a sentence that happens to list four things.
 CHAPTER_BLURBS = (
@@ -207,15 +207,15 @@ class App(ctk.CTk):
                     ground: str, ink: str, font: tuple, s: float) -> int:
         """Draw one chapter number and return the width it used.
 
-        Six treatments, all of which keep the chapter's colour somewhere. The
-        colour is never the type itself: on a light ground Algae and Seafoam
+        Six treatments, all of which keep the chapter's color somewhere. The
+        color is never the type itself: on a light ground Algae and Seafoam
         measure 2.2:1 and 1.9:1, so where the number has to be read it is set
-        in body ink and the colour goes into a fill, a ring, a disc or a rule.
+        in body ink and the color goes into a fill, a ring, a disc or a rule.
         """
         from PIL import ImageTk
 
         style = T.BADGE_STYLE
-        colour = T.CHAPTER_COLOURS[index % len(T.CHAPTER_COLOURS)]
+        color = T.CHAPTER_COLORS[index % len(T.CHAPTER_COLORS)]
         num = str(index + 1)
 
         if style == "plain":
@@ -226,19 +226,19 @@ class App(ctk.CTk):
         if style == "bar":
             bw = max(2, int(4 * s))
             c.create_rectangle(x, cy - badge / 2, x + bw, cy + badge / 2,
-                               fill=colour, outline="")
+                               fill=color, outline="")
             return self._badge_width(badge, s)
 
         if style == "dot":
             d = badge // 2
-            c.create_oval(x, cy - d / 2, x + d, cy + d / 2, fill=colour,
+            c.create_oval(x, cy - d / 2, x + d, cy + d / 2, fill=color,
                           outline="")
             c.create_text(x + d + int(7 * s), cy, anchor="w", text=num,
                           font=font, fill=ink)
             return self._badge_width(badge, s)
 
         if style == "outline":
-            img = G.chip((badge, badge), fill=ground, border=colour,
+            img = G.chip((badge, badge), fill=ground, border=color,
                          border_w=max(1, int(1.5 * s)), radius=badge // 4,
                          ground=ground)
             photo = ImageTk.PhotoImage(img)
@@ -249,17 +249,17 @@ class App(ctk.CTk):
             return badge
 
         # "solid" and "soft" -- filled, the number chosen against the fill.
-        img = G.chip((badge, badge), fill=colour, radius=badge // 4,
+        img = G.chip((badge, badge), fill=color, radius=badge // 4,
                      ground=ground)
         photo = ImageTk.PhotoImage(img)
         self._badge_photos.append(photo)
         c.create_image(x, cy - badge / 2, image=photo, anchor="nw")
         c.create_text(x + badge / 2, cy, anchor="center", text=num,
-                      font=font, fill=T.ink_for(colour))
+                      font=font, fill=T.ink_for(color))
         return badge
 
     def _draw_title(self, c, x: int, y: int, s: float, heading: str) -> None:
-        """The programme name, in whichever style the theme asks for."""
+        """The program name, in whichever style the theme asks for."""
         style = T.TITLE_STYLE
         font = T.scale_font(T.title_font(style), s)
         if style == "caps":
@@ -971,8 +971,8 @@ class App(ctk.CTk):
             self.progress.set(1.0 if res.ok else self.progress.get())
             for line in res.summary().splitlines():
                 self._log(line)
-            if res.cancelled:
-                self.status.configure(text="Cancelled.")
+            if res.canceled:
+                self.status.configure(text="Canceled.")
             elif res.errors:
                 self.status.configure(text="Finished with errors — see the log.")
             else:

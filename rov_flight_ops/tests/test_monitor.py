@@ -4,7 +4,7 @@ and the files a flight leaves behind.
 Hermetic. No vehicle, no display, and no assumption that the machine running
 them has any particular sensor -- the point of the sampler is that a laptop
 which cannot answer a question leaves a blank rather than failing, so the
-tests assert the *shape* of a row and the behaviour of the state machine, not
+tests assert the *shape* of a row and the behavior of the state machine, not
 the values a particular Dell happens to report.
 
 The state machine is exercised against a stub vehicle rather than a real one,
@@ -176,7 +176,7 @@ def test_arm_bit_is_read_from_base_mode(monkeypatch):
 
 
 def test_unreachable_vehicle_is_unknown_not_disarmed(monkeypatch):
-    """The single most important behaviour in the whole recorder.
+    """The single most important behavior in the whole recorder.
 
     The tether drops packets -- measured doing so on 2026-09-11 -- and a
     recorder that read one lost GET as a disarm would stop recording in the
@@ -333,7 +333,7 @@ def test_a_dropped_request_does_not_end_a_flight(tmp_path, monkeypatch):
 
 
 def test_no_flight_folder_refuses_loudly(monkeypatch):
-    """Chosen behaviour: never guess a folder, but never do it quietly."""
+    """Chosen behavior: never guess a folder, but never do it quietly."""
     v = FakeVehicle()
     v.install(monkeypatch)
     rec = flightlog.FlightRecorder(host="test", flight_dir=None)

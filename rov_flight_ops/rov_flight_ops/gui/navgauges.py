@@ -12,10 +12,10 @@ actually read at arm's length on a Rugged laptop in daylight:
 * the **number is the instrument** and the graphic is the context. The number
   is large, high-contrast and always carries its unit;
 * nothing is ever drawn at a healthy-looking zero. An invalid or stale reading
-  greys the icon, marks the number and says why;
-* colour never carries meaning alone -- every state that uses colour also
-  changes a glyph or a label, because a daylight-washed screen and colour
-  vision deficiency both eat the colour first.
+  grays the icon, marks the number and says why;
+* color never carries meaning alone -- every state that uses color also
+  changes a glyph or a label, because a daylight-washed screen and color
+  vision deficiency both eat the color first.
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ def survey_fraction(h: float) -> float:
 
     A linear 0–1.5 m axis has its midpoint at 0.75 m, and the altitude these
     surveys are flown at is 0.8. Rather than mislabel the axis or move the
-    reference off centre, the scale is split at 0.8 and each half gets half
+    reference off center, the scale is split at 0.8 and each half gets half
     the height:
 
         u = 0.5 * h / 0.8                 for 0 <= h <= 0.8
@@ -72,7 +72,7 @@ def survey_fraction(h: float) -> float:
     Equal screen distances therefore do **not** represent equal altitude
     increments across the midpoint -- 1 mm below the middle is a smaller
     change than 1 mm above it. That is a real cost, and it is paid knowingly:
-    the ticks are labelled with their true values, the two intervals are named
+    the ticks are labeled with their true values, the two intervals are named
     in the tooltip, and the numeric readout is exact. What is bought is that
     the one altitude that matters sits exactly halfway up, where the eye finds
     it without reading anything.
@@ -101,12 +101,12 @@ class AltitudeGauge(ctk.CTkFrame):
     Two modes, chosen by the reading itself and held across the boundary by
     hysteresis so a vehicle hovering at 1.5 m does not make the axis flicker:
 
-    **Approach** for anything above the threshold. A labelled linear scale
-    with sensible stops and headroom, so ten metres reads near the top and
+    **Approach** for anything above the threshold. A labeled linear scale
+    with sensible stops and headroom, so ten meters reads near the top and
     zero is on screen.
 
     **Survey** at or below 1.5 m. The ticks stop moving entirely -- a fixed
-    0–1.5 m axis with 0.8 m at the exact vertical centre -- and only the
+    0–1.5 m axis with 0.8 m at the exact vertical center -- and only the
     vehicle moves. That is the mode the whole dive is flown in, and an axis
     that rescales underneath a pilot holding 0.8 m is worse than useless.
     """
@@ -205,9 +205,9 @@ class AltitudeGauge(ctk.CTkFrame):
 
         # The gauge column is narrow -- a HUD is a quarter of the page and
         # the gauge is a third of that, so about 180 px at 1920. The axis
-        # therefore sits well left of centre, tick values go on its left and
+        # therefore sits well left of center, tick values go on its left and
         # markers on its right, and nothing is written twice. An earlier
-        # version put "0.8 survey" beside a tick already labelled 0.8 and the
+        # version put "0.8 survey" beside a tick already labeled 0.8 and the
         # two collided with the Surftrak target at survey altitude, which is
         # exactly when the gauge has to be readable.
         pad_top, pad_bot = 20, 40
@@ -282,20 +282,20 @@ class AltitudeGauge(ctk.CTkFrame):
             above = shown > (SURVEY_TOP_M if self._mode == "survey" else self._top)
             frac = self.fraction(shown)
             y = y_of(frac)
-            colour = (_hex(T.ACCENT) if usable else _hex(T.TEXT_MUTED))
+            color = (_hex(T.ACCENT) if usable else _hex(T.TEXT_MUTED))
             if above:
                 # Never plot a false in-range position: an arrow at the top
                 # and the true number beside it.
                 c.create_polygon(axis_x, top_y - 6, axis_x - 8, top_y + 6,
-                                 axis_x + 8, top_y + 6, fill=colour,
+                                 axis_x + 8, top_y + 6, fill=color,
                                  outline="")
                 c.create_text(axis_x + 14, top_y + 4,
                               text=f"▲ {shown:.2f} m above scale", anchor="w",
-                              fill=colour, font=T.FONT_SMALL)
+                              fill=color, font=T.FONT_SMALL)
             else:
                 c.create_oval(axis_x - 13, y - 7, axis_x + 13, y + 7,
-                              fill=colour, outline="")
-                c.create_line(axis_x - 13, y, axis_x - 26, y, fill=colour,
+                              fill=color, outline="")
+                c.create_line(axis_x - 13, y, axis_x - 26, y, fill=color,
                               width=2)
                 if not usable:
                     c.create_text(axis_x + 30, y, text="✕", anchor="w",
@@ -306,14 +306,14 @@ class AltitudeGauge(ctk.CTkFrame):
         if usable:
             text = f"{v:.2f}"
             sub = "m above bottom"
-            colour = ink
+            color = ink
         elif r is not None and r.quality is Quality.STALE and shown is not None:
-            text, sub, colour = f"{shown:.2f}", "STALE · " + (r.note or ""), _hex(T.WARN)
+            text, sub, color = f"{shown:.2f}", "STALE · " + (r.note or ""), _hex(T.WARN)
         else:
             text = NO_VALUE
             sub = (r.note if r is not None and r.note else "no bottom range")
-            colour = _hex(T.WARN)
-        c.create_text(4, h - 34, text=text, anchor="w", fill=colour, font=big)
+            color = _hex(T.WARN)
+        c.create_text(4, h - 34, text=text, anchor="w", fill=color, font=big)
         c.create_text(4, h - 11, text=sub[:40], anchor="w", fill=muted,
                       font=T.FONT_SMALL)
 
@@ -334,8 +334,8 @@ class PowerGauge(ctk.CTkFrame):
     matters. Over-range keeps the true number and adds a mark; it does not
     move the axis.
 
-    The 900 W band is red *and* hatched *and* labelled, because on a sunlit
-    screen the colour is the first thing to go.
+    The 900 W band is red *and* hatched *and* labeled, because on a sunlit
+    screen the color is the first thing to go.
     """
 
     def __init__(self, master, **kw):
@@ -377,7 +377,7 @@ class PowerGauge(ctk.CTkFrame):
         c.create_rectangle(axis_x - 9, top_y, axis_x + 9, bot_y,
                            fill=_hex(T.FIELD_BG), outline=_hex(T.BORDER))
 
-        # The high-load band: filled, hatched and labelled.
+        # The high-load band: filled, hatched and labeled.
         band_y = y_of(P.HIGH_LOAD_W / P.GAUGE_MAX_W)
         c.create_rectangle(axis_x - 9, top_y, axis_x + 9, band_y,
                            fill=_hex(T.ERROR), outline="", stipple="gray50")
@@ -413,9 +413,9 @@ class PowerGauge(ctk.CTkFrame):
             frac = P.gauge_fraction(shown)
             y = y_of(frac)
             hot = P.high_load(shown)
-            colour = (_hex(T.ERROR) if hot else
+            color = (_hex(T.ERROR) if hot else
                       _hex(T.ACCENT) if usable else _hex(T.TEXT_MUTED))
-            c.create_oval(axis_x - 13, y - 7, axis_x + 13, y + 7, fill=colour,
+            c.create_oval(axis_x - 13, y - 7, axis_x + 13, y + 7, fill=color,
                           outline="")
             if over:
                 c.create_text(axis_x, top_y - 12, text="▲ OVER", anchor="c",
@@ -426,15 +426,15 @@ class PowerGauge(ctk.CTkFrame):
             hot = P.high_load(v)
             text = f"{v:,.0f}"
             sub = "HIGH LOAD — OTPS 1,000 W" if hot else "W  busbar"
-            colour = _hex(T.ERROR) if hot else _hex(T.TEXT)
+            color = _hex(T.ERROR) if hot else _hex(T.TEXT)
         elif r is not None and r.quality is Quality.STALE and shown is not None:
             text, sub = f"{shown:,.0f}", "STALE · " + (r.note or "")
-            colour = _hex(T.WARN)
+            color = _hex(T.WARN)
         else:
             text = NO_VALUE
             sub = (r.note if r is not None and r.note else "no power reading")
-            colour = _hex(T.WARN)
-        c.create_text(4, h - 34, text=text, anchor="w", fill=colour, font=big)
+            color = _hex(T.WARN)
+        c.create_text(4, h - 34, text=text, anchor="w", fill=color, font=big)
         c.create_text(4, h - 11, text=sub[:40], anchor="w", fill=muted,
                       font=T.FONT_SMALL)
 
@@ -442,14 +442,14 @@ class PowerGauge(ctk.CTkFrame):
         self.draw()
 
 
-def _hex(colour) -> str:
-    """A theme colour as a plain string a Tk canvas will take.
+def _hex(color) -> str:
+    """A theme color as a plain string a Tk canvas will take.
 
-    `theme` stores every colour as a (light, dark) pair for CustomTkinter,
+    `theme` stores every color as a (light, dark) pair for CustomTkinter,
     which resolves them itself. A raw Tk canvas does not, so the current mode's
     half has to be picked here.
     """
-    if isinstance(colour, (tuple, list)):
+    if isinstance(color, (tuple, list)):
         mode = ctk.get_appearance_mode()
-        return colour[1] if str(mode).lower() == "dark" else colour[0]
-    return colour
+        return color[1] if str(mode).lower() == "dark" else color[0]
+    return color

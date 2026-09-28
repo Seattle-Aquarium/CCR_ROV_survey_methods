@@ -121,7 +121,7 @@ def around(events: list[dict], at_mono: float, *, before: float = BEFORE_S,
     """Everything recorded between `at_mono - before` and `at_mono + after`.
 
     Monotonic, not wall clock: the wall clock on a laptop that has just
-    synchronised can move backwards by seconds, and an alignment built on it
+    synchronized can move backwards by seconds, and an alignment built on it
     would silently reorder the very events being examined.
     """
     win = Window(at_mono=at_mono)

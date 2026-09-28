@@ -7,7 +7,7 @@ platform allows and skipped where it does not, because a test that needs a
 bridged laptop with a vehicle on the end of it is not a test anybody runs.
 
 What is worth asserting is the reasoning, not the syscall: that a subnet match
-finds the right adapter, that a bridge is recognised and its members are kept,
+finds the right adapter, that a bridge is recognized and its members are kept,
 that a counter column cannot silently land in another adapter's column, and
 that the vehicle's own counters survive BlueOS renaming them.
 """
@@ -91,7 +91,7 @@ def test_no_adapter_on_the_vehicles_subnet_is_none_not_a_guess():
     assert netdiag.routing_interface("192.168.2.2", ifaces) is None
 
 
-def test_a_bridge_is_recognised_by_what_it_calls_itself():
+def test_a_bridge_is_recognized_by_what_it_calls_itself():
     assert _iface(3, "Network Bridge", description="MAC Bridge Miniport").is_bridge
     assert _iface(3, "Ethernet 2", description="Realtek PCIe GbE").is_bridge is False
 

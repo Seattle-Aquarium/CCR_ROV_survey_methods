@@ -36,7 +36,7 @@ panel = render_panel(vals, cfg, m)
 g = gauges.render_gauges(vals, cfg)
 print(f"panel png: {panel.size}   gauge png: {g.size}  (inset h = {cfg.inset_height()})")
 
-# lay them out as they will appear, over a mid-grey stand-in for video
+# lay them out as they will appear, over a mid-gray stand-in for video
 strip = Image.new("RGBA", (g.width + panel.width + 60, max(g.height, panel.height) + 40),
                   (70, 78, 70, 255))
 strip.alpha_composite(g, (20, 20))

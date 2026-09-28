@@ -11,7 +11,7 @@ Two things here are not obvious and were both bugs in v1:
   matrix. Relying on ffmpeg's autorotate is a trap: it rotates the frames fed to
   the filter graph *and* copies the matrix onto the output, so a player rotates
   the finished composite a second time and the whole picture -- overlays
-  included -- comes out upside down. We neutralise the input matrix with
+  included -- comes out upside down. We neutralize the input matrix with
   ``-display_rotation 0`` and apply the rotation ourselves.
 
 * **setpts.** Seeking leaves each input with its own small timestamp offset, and

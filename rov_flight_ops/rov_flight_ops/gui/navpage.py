@@ -123,7 +123,7 @@ class NavigationPage(ctk.CTkFrame):
         self.prepare = offline.OfflinePrepare(self.tile_cache)
 
         #: The site the map opens on and recenters to. Pier 59 until something
-        #: else is chosen, because that is where this programme dives and
+        #: else is chosen, because that is where this program dives and
         #: because it is the one place a basemap ships for.
         self.site = dict(bundled.PIER59)
 
@@ -145,7 +145,7 @@ class NavigationPage(ctk.CTkFrame):
         self.progress = GD.Progress()
 
         self._narrow = False
-        self._centred_once = False
+        self._centered_once = False
 
         self.grid_columnconfigure(0, weight=MAP_WEIGHT, uniform="nav")
         self.grid_columnconfigure(1, weight=SIDE_WEIGHT, uniform="nav")
@@ -165,7 +165,7 @@ class NavigationPage(ctk.CTkFrame):
         top.bind("<Escape>", self._escape, add="+")
         top.bind("<Return>", self._enter, add="+")
         self.after(REFRESH_MS, self._tick)
-        self.after(600, self._centre_on_site_once)
+        self.after(600, self._center_on_site_once)
 
     # ------------------------------------------------------------------
     #  layout
@@ -186,7 +186,7 @@ class NavigationPage(ctk.CTkFrame):
             command=self._pick_base)
         self.base_menu.set(tiles.SOURCES[tiles.DEFAULT_BASE].label)
         self.base_menu.grid(row=0, column=0, padx=(0, 6))
-        button(bar, f"◎ {self.site['short']}", self.centre_on_site, "ghost",
+        button(bar, f"◎ {self.site['short']}", self.center_on_site, "ghost",
                width=130).grid(row=0, column=1, padx=(0, 6))
         self.follow_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(bar, text="Follow ROV", variable=self.follow_var,
@@ -212,12 +212,12 @@ class NavigationPage(ctk.CTkFrame):
         self.position_label.configure(font=T.FONT_MONO, anchor="w")
         self.position_label.grid(row=0, column=0, sticky="ew")
 
-        #: What the track's colours mean, built from the track itself so it
+        #: What the track's colors mean, built from the track itself so it
         #: never lists a state the dive did not reach.
         #:
         #: `height=0` matters: an empty CTkFrame asks for its default 200
         #: logical pixels, and before the first fix this one has no chips in
-        #: it at all -- which left a third of a metre of blank screen under
+        #: it at all -- which left a third of a meter of blank screen under
         #: the map on a tall window. It grows with its chips.
         self.trust_legend = ctk.CTkFrame(readout, fg_color="transparent",
                                          width=0, height=0)
@@ -311,7 +311,7 @@ class NavigationPage(ctk.CTkFrame):
 
         plan_card = Card(col, "Survey plan",
                          "Measured lines, rotated boxes and the lanes that "
-                         "fill them. Metres, never pixels.")
+                         "fill them. Meters, never pixels.")
         plan_card.grid(row=1, column=0, sticky="nsew")
         plan_card.body.grid_rowconfigure(0, weight=1)
         plan_card.body.grid_columnconfigure(0, weight=1)
@@ -351,7 +351,7 @@ class NavigationPage(ctk.CTkFrame):
     #  the site
     # ------------------------------------------------------------------
 
-    def _centre_on_site_once(self) -> None:
+    def _center_on_site_once(self) -> None:
         """Open on the site, once, and then leave the view alone.
 
         A first launch with nothing connected must still show somewhere real.
@@ -359,14 +359,14 @@ class NavigationPage(ctk.CTkFrame):
         on, decide what is on screen -- the map must not keep dragging itself
         back to Pier 59 while somebody is working at another pier.
         """
-        if self._centred_once:
+        if self._centered_once:
             return
-        self._centred_once = True
-        if self.map.centre is None:
-            self.centre_on_site()
+        self._centered_once = True
+        if self.map.center is None:
+            self.center_on_site()
 
-    def centre_on_site(self) -> None:
-        self.map.centre = (self.site["lat"], self.site["lon"])
+    def center_on_site(self) -> None:
+        self.map.center = (self.site["lat"], self.site["lon"])
         self.map.zoom = self.site.get("zoom", 18)
         self.map.follow = False
         self.follow_var.set(False)
@@ -565,8 +565,8 @@ class NavigationPage(ctk.CTkFrame):
                                      float(v["bearing_deg"]),
                                      fix=v.get("fix", "start"))
             if isinstance(f, (P.Rect, P.Grid)):
-                corner = v.get("anchor_corner", "centre")
-                idx = None if corner == "centre" else int(corner) - 1
+                corner = v.get("anchor_corner", "center")
+                idx = None if corner == "center" else int(corner) - 1
                 f.rotation_deg = float(v.get("rotation_deg", f.rotation_deg))
                 f.set_size(float(v["length_m"]), float(v["width_m"]),
                            anchor_corner=idx)
@@ -835,10 +835,10 @@ class NavigationPage(ctk.CTkFrame):
         self._legend_shown = [x[0] for x in styles]
         for kid in self.trust_legend.winfo_children():
             kid.destroy()
-        for i, (_state, text, colour, dash) in enumerate(styles):
+        for i, (_state, text, color, dash) in enumerate(styles):
             chip = ctk.CTkLabel(self.trust_legend,
                                 text=("- - " if dash else "— ") + text,
-                                font=T.FONT_SMALL, text_color=colour)
+                                font=T.FONT_SMALL, text_color=color)
             chip.grid(row=0, column=i, padx=(8, 0))
 
     def _render_guidance(self, s, now: float) -> None:
@@ -933,10 +933,10 @@ class NavigationPage(ctk.CTkFrame):
             bits.append(f"map: {self.tile_cache.last_error}")
         if s.link.mode == "replay":
             bits.insert(0, "REPLAY — not a live vehicle")
-        colour = (T.WARN if (s.link.problem or not s.link.connected
+        color = (T.WARN if (s.link.problem or not s.link.connected
                              or s.link.mode == "replay") else T.TEXT_MUTED)
         _set_label(self.foot_label, text="  ·  ".join(bits)[:150],
-                   text_color=colour)
+                   text_color=color)
         can = self._can_write()
         self.apply_button.configure(
             state="normal" if can else "disabled",
@@ -955,7 +955,7 @@ class NavigationPage(ctk.CTkFrame):
     def _toggle_follow(self) -> None:
         self.map.follow = self.follow_var.get()
         if self.map.follow and self.map.rov_fix is not None:
-            self.map.centre_on_vehicle()
+            self.map.center_on_vehicle()
 
     def _fit(self) -> None:
         pts = [(f.anchor.to_geo(*p)) for f in self.plan.features
@@ -963,16 +963,16 @@ class NavigationPage(ctk.CTkFrame):
         if pts:
             lats = [p[0] for p in pts]
             lons = [p[1] for p in pts]
-            self.map.centre = ((min(lats) + max(lats)) / 2,
+            self.map.center = ((min(lats) + max(lats)) / 2,
                                (min(lons) + max(lons)) / 2)
-            span = max(geo.distance_m(min(lats), self.map.centre[1],
-                                      max(lats), self.map.centre[1]),
-                       geo.distance_m(self.map.centre[0], min(lons),
-                                      self.map.centre[0], max(lons)), 30.0)
+            span = max(geo.distance_m(min(lats), self.map.center[1],
+                                      max(lats), self.map.center[1]),
+                       geo.distance_m(self.map.center[0], min(lons),
+                                      self.map.center[0], max(lons)), 30.0)
             w = max(200, self.map.canvas.winfo_width())
             h = max(200, self.map.canvas.winfo_height())
             self.map.zoom = max(3, min(19, geo.zoom_for_span(
-                self.map.centre[0], span * 1.4, min(w, h))))
+                self.map.center[0], span * 1.4, min(w, h))))
             self.map.follow = False
             self.follow_var.set(False)
             self.map.draw()

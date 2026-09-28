@@ -2,7 +2,7 @@
 The dive profile, drawn for the transect sanity check.
 
 Depth against time for the whole flight, with the transect windows shaded and
-labelled. It exists for one purpose: before imagery is pulled off a card --
+labeled. It exists for one purpose: before imagery is pulled off a card --
 and the card is wiped -- the user needs to see that the times they typed land
 on the part of the dive they think they do.
 
@@ -30,7 +30,7 @@ DEPTH_FIELD = "GLOBAL_POSITION_INT.relative_alt"
 
 @dataclass
 class PlotStyle:
-    """Colours and geometry. Defaults match the dark GUI; `light()` flips it."""
+    """Colors and geometry. Defaults match the dark GUI; `light()` flips it."""
 
     bg: str = brand.FATHOM
     panel: str = "#132C4C"
@@ -70,7 +70,7 @@ def _font(size: int, weight: str = "medium") -> ImageFont.FreeTypeFont:
 
 
 def depth_series(store: TelemetryStore) -> tuple[np.ndarray, np.ndarray] | None:
-    """(epoch, metres below surface). None when the field is absent."""
+    """(epoch, meters below surface). None when the field is absent."""
     s = store.series.get(DEPTH_FIELD)
     if s is None or len(s.t) == 0:
         return None

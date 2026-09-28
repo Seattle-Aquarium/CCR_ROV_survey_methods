@@ -214,26 +214,26 @@ class App(Shell):
             rec = self.recorder
             st = rec.status if rec is not None else None
             if rec is None:
-                text, colour = "Not watching for the ROV", T.TEXT_MUTED
+                text, color = "Not watching for the ROV", T.TEXT_MUTED
             elif st.problem:
                 short = st.problem if len(st.problem) < 90 else st.problem[:87] + "…"
-                text, colour = f"⚠  {short}", T.WARN
+                text, color = f"⚠  {short}", T.WARN
             elif st.state == "recording":
-                text, colour = (f"●  Recording {st.flight_id}  ·  {st.rows:,} rows  ·  "
+                text, color = (f"●  Recording {st.flight_id}  ·  {st.rows:,} rows  ·  "
                                 f"{rec.host}"), T.OK
             elif st.state == "starting":
-                text, colour = f"Starting {st.flight_id}…", T.TEXT
+                text, color = f"Starting {st.flight_id}…", T.TEXT
             elif st.state == "closing":
-                text, colour = f"Closing {st.flight_id}…", T.TEXT
+                text, color = f"Closing {st.flight_id}…", T.TEXT
             elif st.transition:
-                text, colour = f"{st.transition}…", T.TEXT
+                text, color = f"{st.transition}…", T.TEXT
             elif not rec.watching:
-                text, colour = "Not watching for the ROV", T.TEXT_MUTED
+                text, color = "Not watching for the ROV", T.TEXT_MUTED
             else:
-                text, colour = f"Watching {rec.host} for arming", T.TEXT_MUTED
+                text, color = f"Watching {rec.host} for arming", T.TEXT_MUTED
             if st is not None and st.degraded and not st.problem:
-                text, colour = f"{text}  ·  ⚠ a recorder worker is stuck", T.WARN
-            self.recorder_badge.configure(text=text, text_color=colour)
+                text, color = f"{text}  ·  ⚠ a recorder worker is stuck", T.WARN
+            self.recorder_badge.configure(text=text, text_color=color)
         except Exception:
             diagnostics.log_exception("recorder badge", *sys.exc_info(),
                                       level=logging.WARNING)
@@ -308,7 +308,7 @@ class App(Shell):
     def _discover(self) -> None:
         """Walk the flight folder off the window's thread.
 
-        A flight folder on a synchronised or external drive can take seconds
+        A flight folder on a synchronized or external drive can take seconds
         to walk, and used to hold the window for all of them. The result is
         shown only if the folder is still the one chosen: switching flights
         while a walk is under way drops the old walk's result.

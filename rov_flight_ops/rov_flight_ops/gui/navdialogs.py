@@ -755,10 +755,10 @@ class ApplyDialog(_Drawer):
 
     def _set_state(self, state: str, text: str) -> None:
         self.state = state
-        colour = {"succeeded": T.OK, "failed": T.ERROR,
+        color = {"succeeded": T.OK, "failed": T.ERROR,
                   "partially applied": T.WARN}.get(state, T.TEXT_MUTED)
         self.state_label.configure(text=f"{state.upper()} — {text}",
-                                   text_color=colour)
+                                   text_color=color)
 
 
 # --------------------------------------------------------------------------
@@ -876,7 +876,7 @@ class OfflineDialog(_Drawer):
         try:
             radius = float(self.radius.get())
         except ValueError:
-            messagebox.showwarning("Offline maps", "The radius must be metres.")
+            messagebox.showwarning("Offline maps", "The radius must be meters.")
             return
         count = offline.count_tiles(p.site["lat"], p.site["lon"], radius,
                                     offline.SURVEY_ZOOMS)
@@ -927,7 +927,7 @@ class StartDialog(_Drawer):
 
     The distinction this dialog exists to make: **choosing a site is a local
     action and writes nothing to the vehicle.** Selecting OTS recentres the
-    map and stages the coordinates; initialising the vehicle is a separate,
+    map and stages the coordinates; initializing the vehicle is a separate,
     reviewed step behind the write interlock. An operator should be able to
     set a dive up on the train.
     """
@@ -971,7 +971,7 @@ class StartDialog(_Drawer):
         self.mode_note.configure(anchor="w", justify="left")
         self.mode_note.grid(row=99, column=0, sticky="ew", pady=(8, 0))
 
-        init = Card(body, "3.  Initialise the vehicle",
+        init = Card(body, "3.  Initialize the vehicle",
                     "The only step here that touches the ROV. Reviewed, read "
                     "back, and refused while armed.")
         init.grid(row=2, column=0, sticky="ew", pady=(0, 10))
@@ -1015,7 +1015,7 @@ class StartDialog(_Drawer):
         page.site = site
         page.map.site = site
         if announce:
-            page.centre_on_site()
+            page.center_on_site()
             if page.session is not None:
                 page.session.event("site_selected", {
                     "site": site["key"], "lat": site["lat"],
@@ -1058,7 +1058,7 @@ class StartDialog(_Drawer):
             f"{site['lon']:.7f} (WGS-84, from the operator).",
             "",
             "Altitude: the supplied coordinates carry none. The origin's "
-            "altitude is metres above the ellipsoid and is NOT the dive "
+            "altitude is meters above the ellipsoid and is NOT the dive "
             "depth. Zero is used unless a site datum is entered, and which "
             "was used is recorded either way.",
             "",
@@ -1074,9 +1074,9 @@ class StartDialog(_Drawer):
                 "An origin that is already set cannot be moved by sending "
                 "another: EKF3 refuses it. Nothing here will overwrite it, "
                 "reset the vision position or reboot the vehicle. If it is "
-                "wrong, reboot deliberately and initialise again.")
+                "wrong, reboot deliberately and initialize again.")
         elif st.active is False:
-            lines.append("This vehicle has NO origin. Initialising will set "
+            lines.append("This vehicle has NO origin. Initializing will set "
                          "one and read it back to confirm.")
         else:
             lines.append("Whether this vehicle has an origin has not been "

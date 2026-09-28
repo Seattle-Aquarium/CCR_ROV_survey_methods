@@ -112,9 +112,9 @@ def test_beyond_the_pack_the_view_really_is_enlarged(cache):
         assert im.size == (TL.TILE_PX, TL.TILE_PX)
 
 
-def test_enlargement_stops_before_it_becomes_a_colour_wash(cache):
+def test_enlargement_stops_before_it_becomes_a_color_wash(cache):
     """Eight-fold is still recognisably the same shoreline. Past that a tile
-    is a handful of coloured squares, and an honest blank grid beats a
+    is a handful of colored squares, and an honest blank grid beats a
     confident-looking smear."""
     src = TL.SOURCES["pier59_imagery"]
     too_far = src.max_zoom + TL.MAX_OVERZOOM + 1
@@ -125,7 +125,7 @@ def test_the_children_of_a_tile_reassemble_into_their_parent(cache):
     """The part that a size check cannot catch: that each enlarged tile is
     the *right* quarter of its ancestor. Four children put back together,
     each shrunk by half, must reproduce the parent exactly -- nearest
-    neighbour up and back down is lossless."""
+    neighbor up and back down is lossless."""
     from PIL import Image
 
     src = TL.SOURCES["pier59_imagery"]
@@ -208,7 +208,7 @@ def test_the_tile_estimate_rises_with_zoom_and_with_radius(cache):
 
 
 def test_the_manifest_records_where_every_pixel_came_from():
-    """A redistributable pack has to be able to say what it is: a licence
+    """A redistributable pack has to be able to say what it is: a license
     that permits the redistribution, and a checksum that proves the file in
     Git is the file that was built."""
     import hashlib
@@ -217,12 +217,12 @@ def test_the_manifest_records_where_every_pixel_came_from():
     path = B.PACK_DIR / "manifest.json"
     assert path.is_file(), "the pack has no manifest"
     man = json.loads(path.read_text(encoding="utf-8"))
-    for field in ("site", "centre", "radius_m", "bounds", "built", "built_by"):
+    for field in ("site", "center", "radius_m", "bounds", "built", "built_by"):
         assert man.get(field), f"the manifest has no {field}"
 
     assert set(man["layers"]) == {"pier59_chart", "pier59_imagery"}
     for key, layer in man["layers"].items():
-        for field in ("source", "url", "licence", "attribution", "zooms",
+        for field in ("source", "url", "license", "attribution", "zooms",
                       "tiles", "bytes", "sha256"):
             assert layer.get(field), f"{key} has no {field}"
         f = B.PACK_DIR / f"{key}.mbtiles"
@@ -238,7 +238,7 @@ def test_the_manifest_records_where_every_pixel_came_from():
 
 def test_the_packs_are_mbtiles_and_open_read_only():
     """Opened with `immutable=1`, so a pack on a read-only checkout or a
-    synchronised drive cannot be journalled into a modified state."""
+    synchronized drive cannot be journalled into a modified state."""
     for key in ("pier59_chart", "pier59_imagery"):
         layer = B.BundledMaps().layers[key]
         if not layer.available:

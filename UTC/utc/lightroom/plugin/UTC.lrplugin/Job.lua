@@ -35,7 +35,7 @@ local Util = require 'Util'
 local M = {}
 
 --- Photos per write transaction and per export batch. Small enough that a
--- Stop is honoured promptly, large enough that the per-transaction overhead
+-- Stop is honored promptly, large enough that the per-transaction overhead
 -- stays in the noise.
 local CHUNK = 10
 
@@ -113,7 +113,7 @@ local function croppedOf(photo)
     return nil
 end
 
-local function centred(frameW, frameH, wantW, wantH)
+local function centered(frameW, frameH, wantW, wantH)
     local l = (1.0 - wantW / frameW) / 2.0
     local t = (1.0 - wantH / frameH) / 2.0
     return { left = l, top = t, right = 1.0 - l, bottom = 1.0 - t }
@@ -218,7 +218,7 @@ local function cropAll(catalog, photos, groups, wantW, wantH, removeCA)
     for _, key in ipairs(order) do
         local bucket = byKey[key]
         local rect = groups[key]
-                     or centred(bucket.frame.width, bucket.frame.height,
+                     or centered(bucket.frame.width, bucket.frame.height,
                                 wantW, wantH)
         Util.status{ phase = 'cropping', done = cropped, total = #photos,
                      message = 'crop ' .. key }

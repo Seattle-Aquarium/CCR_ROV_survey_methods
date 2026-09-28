@@ -32,7 +32,7 @@ def test_a_line_is_the_length_and_bearing_it_was_given():
     assert ln.bearing_deg == pytest.approx(125.0, abs=1e-6)
 
 
-def test_a_lines_metres_survive_the_trip_to_real_coordinates():
+def test_a_lines_meters_survive_the_trip_to_real_coordinates():
     """The independent check: measure the exported coordinates geodesically."""
     for bearing in (0.0, 45.0, 125.0, 270.0, 359.0):
         ln = P.Line.from_bearing(LAT, LON, bearing, 30.0)
@@ -97,9 +97,9 @@ def test_a_line_with_no_direction_has_no_parallels():
 
 
 @pytest.mark.parametrize("rot", [0.0, 37.0, 90.0, 125.0, 300.0, 359.5])
-def test_a_30_by_20_rectangle_is_600_square_metres_at_any_rotation(rot):
+def test_a_30_by_20_rectangle_is_600_square_meters_at_any_rotation(rot):
     """The acceptance case, three independent ways."""
-    r = P.Rect(anchor=ANCHOR, centre=(0, 0), length_m=30.0, width_m=20.0,
+    r = P.Rect(anchor=ANCHOR, center=(0, 0), length_m=30.0, width_m=20.0,
                rotation_deg=rot)
     assert r.measurements()["area_m2"] == pytest.approx(600.0)
     # Shoelace over the derived corners.
@@ -112,8 +112,8 @@ def test_a_30_by_20_rectangle_is_600_square_metres_at_any_rotation(rot):
 
 
 def test_a_rectangle_stays_a_rectangle_through_edits():
-    """Stored as centre/length/width/rotation, so no drag can shear it."""
-    r = P.Rect(anchor=ANCHOR, centre=(0, 0), length_m=30.0, width_m=20.0,
+    """Stored as center/length/width/rotation, so no drag can shear it."""
+    r = P.Rect(anchor=ANCHOR, center=(0, 0), length_m=30.0, width_m=20.0,
                rotation_deg=37.0)
     for length, width in ((40.0, 15.0), (5.0, 5.0), (12.5, 31.25)):
         r.set_size(length, width)
@@ -128,7 +128,7 @@ def test_a_rectangle_stays_a_rectangle_through_edits():
 
 def test_resizing_can_pin_a_chosen_corner():
     for corner in range(4):
-        r2 = P.Rect(anchor=ANCHOR, centre=(0, 0), length_m=30.0, width_m=20.0,
+        r2 = P.Rect(anchor=ANCHOR, center=(0, 0), length_m=30.0, width_m=20.0,
                     rotation_deg=37.0)
         keep = r2.corners()[corner]
         r2.set_size(40.0, 15.0, anchor_corner=corner)
@@ -136,7 +136,7 @@ def test_resizing_can_pin_a_chosen_corner():
 
 
 def test_a_rectangle_refuses_to_be_smaller_than_a_mis_drag():
-    r = P.Rect(anchor=ANCHOR, centre=(0, 0), length_m=30.0, width_m=20.0)
+    r = P.Rect(anchor=ANCHOR, center=(0, 0), length_m=30.0, width_m=20.0)
     with pytest.raises(ValueError):
         r.set_size(0.1, 20.0)
 
@@ -147,7 +147,7 @@ def test_a_rectangle_refuses_to_be_smaller_than_a_mis_drag():
 
 
 def _grid(**kw):
-    base = dict(anchor=ANCHOR, centre=(0, 0), length_m=30.0, width_m=20.0,
+    base = dict(anchor=ANCHOR, center=(0, 0), length_m=30.0, width_m=20.0,
                 rotation_deg=0.0, spacing_m=3.0)
     base.update(kw)
     return P.Grid(**base)
@@ -177,7 +177,7 @@ def test_the_effective_spacing_is_never_wider_than_requested():
             assert eff <= want + 1e-9, (across, want, g.lane_count(), eff)
 
 
-def test_the_five_metre_case_gives_three_lanes_at_one_and_a_half():
+def test_the_five_meter_case_gives_three_lanes_at_one_and_a_half():
     g = _grid(length_m=10.0, width_m=5.0, spacing_m=2.0)
     assert g.lane_count() == 3
     assert g.effective_spacing_m() == pytest.approx(1.5)
@@ -194,7 +194,7 @@ def test_no_edge_strip_is_left_beyond_half_the_requested_spacing():
         assert margin == pytest.approx(min(want / 2.0, across / 2.0), abs=1e-6)
 
 
-def test_a_width_narrower_than_the_spacing_gets_one_centred_lane():
+def test_a_width_narrower_than_the_spacing_gets_one_centered_lane():
     g = _grid(length_m=2.0, width_m=1.0, spacing_m=3.0)
     assert g.lane_count() == 1
     assert g.effective_spacing_m() is None
@@ -277,14 +277,14 @@ def test_rotating_the_grid_rotates_every_lane_by_the_same_amount():
 
 
 def test_coverage_is_not_established_without_a_swath_width():
-    """Flying a lane's centre line does not survey the strip either side."""
+    """Flying a lane's center line does not survey the strip either side."""
     cov = _grid().coverage()
     assert cov["established"] is False
     assert "not established" in cov["note"]
     assert "swath" in cov["note"]
 
 
-def test_a_stated_swath_gives_overlap_and_is_labelled_as_planned():
+def test_a_stated_swath_gives_overlap_and_is_labeled_as_planned():
     g = _grid(width_m=20.0, spacing_m=3.0)
     cov = g.coverage(swath_m=3.5)
     assert cov["established"]
@@ -342,7 +342,7 @@ def test_geojson_export_is_lon_lat_and_keeps_the_plan_block():
 
 
 def test_a_session_local_plan_refuses_to_be_exported_as_geography():
-    """Metres from an unreferenced vehicle frame are not latitude and
+    """Meters from an unreferenced vehicle frame are not latitude and
     longitude, and writing them out as such invents a position."""
     pl = P.Plan(name="local", crs="local")
     pl.add(P.Line(anchor=P.Anchor(0, 0), points=[(0, 0), (10, 0)]))

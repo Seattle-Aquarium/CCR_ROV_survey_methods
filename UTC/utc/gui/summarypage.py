@@ -123,7 +123,7 @@ class SummaryPage(ctk.CTkFrame):
         def work(progress, cancel):
             day = flightscan.scan(folder, progress=progress)
             progress(0.97, "Working out what it means")
-            report = flightreport.analyse(day)
+            report = flightreport.analyze(day)
             progress(0.99, "Drawing the sheet")
             return report, tearsheet.build(report)
 

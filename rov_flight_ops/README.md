@@ -84,7 +84,7 @@ day. Startup never upgrades anything. If an environment is ever broken, run
 
 The desktop icon is drawn by **`assets/make_rov_icon.py`** and lives in
 `assets/rov_flight_ops.ico`. It is an original drawing of *our* vehicle seen
-head on — the red enclosures either side of the centre tube, the red tape
+head on — the red enclosures either side of the center tube, the red tape
 across the float blocks, the camera dome, and the two lights pointing down and
 lit. It carries eight sizes from 16 to 256 pixels, and **each size is drawn
 rather than scaled down from one bitmap**: at 16 px the icon is about ten
@@ -144,7 +144,7 @@ From a terminal: `python -m rov_flight_ops` (in the environment above).
 * **Two lamps**, *Vehicle connected* and *Logging*. Open, they sit under
   Diagnostics and the appearance switch; folded, they are in the same row. Each
   has three states rather than two, because there genuinely are three:
-  **grey ○** nothing, **green ○** on and waiting, **green ●** happening now.
+  **gray ○** nothing, **green ○** on and waiting, **green ●** happening now.
   *Logging* is a ring while the recorder is watching for the ROV to arm and a
   filled dot once it is writing rows — which is the difference between two
   transects and a recorder that has stopped. *Vehicle connected* goes out when
@@ -212,7 +212,7 @@ actually achieved**. Specifically:
   folder and only the next one goes to the new folder.
 * **The buttons do not wait on the recorder.** *Start monitoring*, *Record now* and
   *Stop* hand the work to the recorder's own thread and return at once; the
-  button reads *Starting monitoring…* or *Closing…* and is greyed out until it
+  button reads *Starting monitoring…* or *Closing…* and is grayed out until it
   is done, so a second press cannot queue the opposite. Closing a flight reads
   every parameter off the vehicle; against a vehicle that is not answering that
   read is given **90 seconds** and then abandoned, and the flight record says
@@ -278,12 +278,12 @@ source, the compatibility matrix and a bench checklist. In outline:
   layers, about 600 KiB, covering 200 m around the site, so a laptop that has
   only ever pulled from Git has a chart of the pier with no network at all.
   Past a layer's top zoom the view is enlarged rather than blanked, and says
-  so; with no tiles at all it falls back to a metre grid rather than to
+  so; with no tiles at all it falls back to a meter grid rather than to
   nothing;
 * an **interactive survey plan**: measured lines and polylines ("30.0 m at
   125°T", either endpoint held), rectangles at any rotation with live L × W and
   area, survey grids whose lanes are clipped to the box with a documented
-  edge-offset rule, circles and polygons — all in metres taken from the
+  edge-offset rule, circles and polygons — all in meters taken from the
   geometry, never from pixels, with undo, snapping and GeoJSON export;
 * **live guidance** along a selected line or lane: cross-track relative to the
   line's own direction of travel rather than the bow, along-track progress as a
@@ -292,7 +292,7 @@ source, the compatibility matrix and a bench checklist. In outline:
 * a **navigation readiness** panel whose sensor matrix answers four separate
   questions per source — *configured*, *receiving*, *valid* and **fused** —
   because a source can be the first three and not the fourth, which is exactly
-  the state that cost this programme a day of coordinates on 18 September 2026.
+  the state that cost this program a day of coordinates on 18 September 2026.
   The fourth column shows `?` rather than guessing, since ArduPilot publishes
   aiding mode rather than per-instance fusion;
 * **navigation profiles** (DVL dead reckoning, acoustic + DVL) with parameter
@@ -620,7 +620,7 @@ Older flights with recordings loose in `logs/` are read exactly as before.
 * `%LOCALAPPDATA%\utc_cache\` — extracted telemetry, per flight. This location
   is shared with UTC and ROV Imagery Processing **on purpose**: it is data, not
   code, and sharing it means a `.BIN` telemetry override chosen on Flight summary
-  is honoured when imagery is bannered, and gigabytes are not extracted twice.
+  is honored when imagery is bannered, and gigabytes are not extracted twice.
   So that sharing is safe:
   * a cached extraction is used only when its marker records the **same source
     files — path, size and modification time — and the current cache schema**,
@@ -687,7 +687,7 @@ watchdog, and appears only as a gap in `app.log`.
 
 ## To confirm on Nereo (first on-site test)
 
-These are written against BlueOS's documented behaviour and a fake vehicle in
+These are written against BlueOS's documented behavior and a fake vehicle in
 the tests; each wants one look at the real thing:
 
 - [ ] **C3 folder** — does the search find Madrona's folder? If not, type it in
@@ -714,7 +714,7 @@ the tests; each wants one look at the real thing:
 - [ ] **Rates** — arm, confirm charts fill and the Hz labels read sensibly.
 - [ ] **Responsiveness** (from the 14 September review), with Cockpit and the
       cameras running: Start/Stop monitoring and Record now/Stop several times
-      each — the window keeps redrawing and the buttons grey out while each
+      each — the window keeps redrawing and the buttons gray out while each
       runs; a brief disarm and re-arm (one flight); a long disarm (closes on
       its own); pull the tether mid-recording and press Stop (closes within
       about two minutes, record notes the abandoned snapshot); close the window
@@ -782,7 +782,7 @@ python -m pytest --runlive  # also the scripts that need real data or a display
 ```
 
 `tests/test_review_fixes.py` reproduces each failure case from the 13 September
-2026 independent evaluation and holds the repaired behaviour;
+2026 independent evaluation and holds the repaired behavior;
 `tests/test_resilience.py` does the same for the 14 September responsiveness
 review, with event barriers rather than sleeps, and real subprocesses for the
 cache lock and the crash log. The GUI tests use
@@ -834,7 +834,7 @@ next incident leaves evidence.
 
 | | finding | what changed |
 |---|---|---|
-| R1 | Start/Stop monitoring, Record now/Stop and closing the window did hardware setup, thread joins and the closing vehicle snapshot inside the button callback, freezing the window — unbounded against a vehicle that was not answering | a recorder lifecycle thread carries out queued requests in order; buttons grey out while one runs; the closing snapshot has a 90 s budget; closing the window keeps it responsive and says truthfully if the recorder did not finish |
+| R1 | Start/Stop monitoring, Record now/Stop and closing the window did hardware setup, thread joins and the closing vehicle snapshot inside the button callback, freezing the window — unbounded against a vehicle that was not answering | a recorder lifecycle thread carries out queued requests in order; buttons gray out while one runs; the closing snapshot has a 90 s budget; closing the window keeps it responsive and says truthfully if the recorder did not finish |
 | R2 | a timed join was treated as a stopped thread: a restart cleared a still-running worker's stop signal, a late opening snapshot could land in the next flight, and the counters, ICMP handle and trace files could be closed beneath a worker still using them | every watch and every flight has its own stop signal, workers and files; one path closes a flight; resources are closed by the thread that uses them; a stuck worker is reported as *degraded* |
 | R3 | one exception in a result handler stopped the job queue for good, and a finished job's queued result could be handed to the next job's callback | per-job ids and callbacks; a job is running until its result is delivered; the queue is serviced in a protected, time-bounded pass with progress coalesced; a Stop is reported as a stop, not an error |
 | R4 | no record of callback errors, thread deaths or stalls under `pythonw` | `diagnostics.py`: rotating `app.log`, `faults.log`, a stall watchdog, credential scrubbing, and the Diagnostics button — see [Diagnostics](#diagnostics-and-reporting-a-problem) |

@@ -157,7 +157,7 @@ def _flight_report(flight: Path) -> int:
     if not (day.recordings or day.monitors):
         print(f"Nothing to read in {day.folder}", file=_sys.stderr)
         return 2
-    report = flightreport.analyse(day)
+    report = flightreport.analyze(day)
     print(report.headline)
     print()
     marks = {flightreport.CRITICAL: "!!", flightreport.WARNING: " !",

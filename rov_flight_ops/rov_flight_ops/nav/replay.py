@@ -9,7 +9,7 @@ Three sources, in order of how real they are:
                already on disk from every survey this year, with position,
                depth, altitude, power and mode -- enough to drive the whole
                page from a flight that actually happened.
-``synthetic``  generated. **Labelled synthetic everywhere it appears**, with
+``synthetic``  generated. **Labeled synthetic everywhere it appears**, with
                deliberate faults: DVL lock loss, a stale vessel, a power
                excursion past 900 W, an estimator reset. For tests, and for
                showing somebody the page without a boat.

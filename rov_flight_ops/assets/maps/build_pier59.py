@@ -19,7 +19,7 @@ that records the answer.
 
 ``pier59_chart``    Rendered here from OpenStreetMap data fetched through
                     Overpass. OSM data is ODbL 1.0; a rendering of it is a
-                    "Produced Work" under that licence and may be distributed
+                    "Produced Work" under that license and may be distributed
                     provided the data is attributed, which the manifest and
                     the map's own attribution line both do. This gives
                     coastline, the piers themselves, the seawall, buildings
@@ -81,7 +81,7 @@ ATTRIBUTION = {
     "pier59_imagery": "USGS The National Map — public domain",
     "pier59_chart": "© OpenStreetMap contributors (ODbL), rendered locally",
 }
-LICENCE = {
+LICENSE = {
     "pier59_imagery": (
         "Public domain. A work of the U.S. Government under 17 U.S.C. 105; "
         "USGS National Map products carry no copyright restriction."),
@@ -166,7 +166,7 @@ def open_mbtiles(path: Path, name: str, fmt: str, zooms) -> sqlite3.Connection:
                  ("bounds", f"{w:.7f},{s:.7f},{e:.7f},{n:.7f}"),
                  ("center", f"{LON:.7f},{LAT:.7f},{max(zooms)}"),
                  ("attribution", ATTRIBUTION[name]),
-                 ("description", f"{SITE} starter map. {LICENCE[name]}")):
+                 ("description", f"{SITE} starter map. {LICENSE[name]}")):
         db.execute("INSERT INTO metadata VALUES (?,?)", (k, v))
     return db
 
@@ -260,7 +260,7 @@ def render_chart_tile(data: dict, z: int, x: int, y: int):
 
     # Land. OSM coastline ways have the sea on their left, so a filled
     # polygon of the way plus the tile corners is not reliable in general --
-    # but over one small harbour tile, filling the landward side of each
+    # but over one small harbor tile, filling the landward side of each
     # coastline way against the tile edge is good enough to show where the
     # water stops, which is the only thing this layer has to get right.
     for tags, pts in _ways(data):
@@ -327,7 +327,7 @@ def main() -> int:
     w, s, e, n = bounds()
     manifest = {
         "site": SITE,
-        "centre": {"lat": LAT, "lon": LON},
+        "center": {"lat": LAT, "lon": LON},
         "radius_m": RADIUS_M,
         "bounds": {"west": round(w, 7), "south": round(s, 7),
                    "east": round(e, 7), "north": round(n, 7)},
@@ -340,14 +340,14 @@ def main() -> int:
         print("USGS National Map imagery…")
         info = build_imagery(out)
         info.update(source="USGS The National Map (USGSImageryOnly)",
-                    url=USGS, licence=LICENCE["pier59_imagery"],
+                    url=USGS, license=LICENSE["pier59_imagery"],
                     attribution=ATTRIBUTION["pier59_imagery"], format="jpg")
         manifest["layers"]["pier59_imagery"] = info
 
     print("OpenStreetMap-derived chart…")
     info = build_chart(out, work)
     info.update(source="OpenStreetMap via Overpass API, rendered locally",
-                url=OVERPASS, licence=LICENCE["pier59_chart"],
+                url=OVERPASS, license=LICENSE["pier59_chart"],
                 attribution=ATTRIBUTION["pier59_chart"], format="png")
     manifest["layers"]["pier59_chart"] = info
 
