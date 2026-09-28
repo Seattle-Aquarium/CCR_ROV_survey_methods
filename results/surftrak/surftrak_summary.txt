@@ -1,0 +1,45 @@
+surftrak performance, HSIL, Port_of_Seattle, 2024 onward
+generated 2026-09-28 16:27 by code/surftrak_performance.py
+
+transects scored (any telemetry):          138
+transects with any SURFTRAK time:           124
+transects flown in SURFTRAK (>= 50% of time): 118
+survey days (flight folders) represented:   31
+  by program: HSIL 10, Port_of_Seattle 21
+median share of transect time in SURFTRAK:  100.0%
+SURFTRAK seconds with altitude (pooled):    74957 (1249.3 min)
+SURFTRAK seconds without altitude (dropout): 15
+target: logged RFTarget for 100.0% of seconds, nominal 0.8 m otherwise
+
+altitude, median (IQR):   0.75 m (0.70-0.80)
+error vs target, median:  -0.003 m
+mean absolute error:      0.057 m
+within +/-0.10 m:         84.7% of seconds
+within +/-0.20 m:         96.2% of seconds
+
+per-transect share within +/-0.20 m: median 99.1%, range 9.9-100.0%
+
+all SURFTRAK time in the logs, on or off transect (sanity check):
+  114720 s (31.9 h) across 38 flight folders; within +/-0.10 m 81.9%, within +/-0.20 m 94.8%, MAE 0.068 m
+
+flight folders not scored:
+  HSIL/2024_03_21_Centennial_Park (no transect CSVs)
+  HSIL/2024_03_21_Jefferson_Head (no transect CSVs)
+  HSIL/2024_05_20_Jefferson_Head (no transect CSVs)
+  HSIL/2024_07_11_Jefferson_Head (no tlog telemetry)
+  HSIL/2024_09_09_Burrows (no tlog telemetry)
+  HSIL/2024_09_13_Deadman's_Bay (no tlog telemetry)
+  HSIL/2024_09_24_EBM (no transect CSVs)
+  HSIL/2024_12_04_TurnRock (no tlog telemetry)
+  HSIL/2025_09_27_Shaw_Island (no transect CSVs)
+  Port_of_Seattle/2024_02_02_S6 (no transect CSVs)
+  Port_of_Seattle/2024_02_02_S7 (no transect CSVs)
+  Port_of_Seattle/2026_08_31_Magnolia (no tlog telemetry)
+  Port_of_Seattle/2026_09_01_Coast_Guard_Station (no tlog telemetry)
+  Port_of_Seattle/2026_09_02_Jack_Block_Park (no tlog telemetry)
+  Port_of_Seattle/2026_09_15_GrainElevator (no tlog telemetry)
+  Port_of_Seattle/2026_09_15_PocketBeach (no tlog telemetry)
+  Port_of_Seattle/2026_09_17_EBM_W (no tlog telemetry)
+  Port_of_Seattle/2026_09_17_Sirens_of_Spring (no tlog telemetry)
+  Port_of_Seattle/2026_09_18_EBM_C (no tlog telemetry)
+  Port_of_Seattle/2026_09_18_EBM_E (no tlog telemetry)
