@@ -320,18 +320,91 @@ def test_empty_window_reports_rather_than_raises():
 # --------------------------------------------------------------------------
 
 
-def test_csv_has_the_documented_columns_and_one_row_per_mark():
+def _survey_frames(seconds: float, cadence: float = 3.0):
+    """Capture times like a real transect: one frame every few seconds."""
+    from datetime import datetime
+    from datetime import timezone as _tz
+
+    return [(T0 + o,
+             datetime.fromtimestamp(T0 + o, _tz.utc).strftime("%Y_%m_%d_%H-%M-%S"))
+            for o in range(0, int(seconds), int(cadence))]
+
+
+def _written(rec):
     import csv as _csv
 
-    store = straight_store(seconds=60.0, speed=0.5)
-    rec = mm.reconstruct(store, "T1", whole(60.0), interval=1.0)
     with tempfile.TemporaryDirectory() as tmp:
         out = mm.write_marks_csv(rec, Path(tmp) / "T1_meter_marks.csv")
-        rows = list(_csv.reader(out.read_text().splitlines()))
-    assert tuple(rows[0]) == mm.CSV_COLUMNS
+        return list(_csv.reader(out.read_text().splitlines()))
+
+
+def test_csv_has_the_documented_columns_and_one_row_per_mark():
+    store = straight_store(seconds=60.0, speed=0.5)
+    rec = mm.reconstruct(store, "T1", whole(60.0), interval=1.0)
+    rows = _written(rec)
+    header = rows[0]
+    assert tuple(header) == mm.CSV_COLUMNS
     assert len(rows) - 1 == len(rec.marks)
-    assert rows[1][0] == "T1"
-    assert rows[1][10] == "ekf_velocity"
+    assert rows[1][header.index("Distance_source")] == "ekf_velocity"
+
+
+def test_the_transect_and_the_ordinal_are_not_repeated_in_every_row():
+    """The filename says which transect; the row number says which mark."""
+    assert "Transect_ID" not in mm.CSV_COLUMNS
+    assert "Mark_number" not in mm.CSV_COLUMNS
+    assert "Distance_m" in mm.CSV_COLUMNS, (
+        "the ordinal is the droppable one -- Distance_m stays right when the "
+        "interval is not 1 m")
+
+
+def test_distance_m_still_reads_correctly_at_other_intervals():
+    """Why the ordinal was the column to drop."""
+    store = straight_store(seconds=100.0, speed=0.5)
+    for interval in (0.5, 2.0):
+        rec = mm.reconstruct(store, "T1", whole(100.0), interval=interval)
+        rows = _written(rec)
+        first = float(rows[1][rows[0].index("Distance_m")])
+        assert abs(first - interval) < 1e-9, (interval, first)
+
+
+def test_the_per_frame_distances_track_the_interval():
+    """Between the *frames*, not the marks: the marks are exactly an interval
+    apart by construction, so that would read 1.000 every time and say
+    nothing. Between the chosen frames it is the interval plus whatever the
+    nearest-frame match cost."""
+    secs, interval = 700.0, 1.0
+    store = straight_store(seconds=secs, speed=0.10)     # a real survey speed
+    rec = mm.reconstruct(store, "T1", whole(secs), interval=interval,
+                         frames=_survey_frames(secs))
+    rows = _written(rec)
+    h = rows[0]
+    step_i, cum_i = h.index("Image_step_m"), h.index("Image_cumulative_m")
+
+    assert rows[1][step_i] == "0.000", "the first frame has nothing before it"
+    assert rows[1][cum_i] == "0.000"
+
+    steps = [float(r[step_i]) for r in rows[2:] if r[step_i]]
+    assert steps, "no steps were written"
+    assert abs(sum(steps) / len(steps) - interval) < 0.05, "should average ~1 m"
+    assert all(0.5 < v < 1.6 for v in steps), (min(steps), max(steps))
+
+    # cumulative is the running sum of the steps, to rounding
+    cum = [float(r[cum_i]) for r in rows[1:] if r[cum_i]]
+    assert abs(cum[-1] - sum(steps)) < 0.01
+    assert all(b >= a - 1e-9 for a, b in itertools.pairwise(cum)), "never falls"
+
+
+def test_a_mark_with_no_frame_leaves_the_distance_columns_blank():
+    """There is nothing to measure between when a mark got no frame."""
+    secs = 60.0
+    store = straight_store(seconds=secs, speed=0.5)
+    rec = mm.reconstruct(store, "T1", whole(secs), interval=1.0, frames=[])
+    rows = _written(rec)
+    h = rows[0]
+    for r in rows[1:]:
+        assert r[h.index("Image")] == ""
+        assert r[h.index("Image_step_m")] == ""
+        assert r[h.index("Image_cumulative_m")] == ""
 
 
 def test_png_is_written_and_is_a_png():
@@ -550,6 +623,123 @@ def test_a_transect_never_imported_is_skipped():
         names = [r.name for r in rep.reconstructions]
         assert names == ["T1"], names
         assert not (layout.transect_dir(flight, "T7")).exists()
+
+
+# --------------------------------------------------------------------------
+#  Threading the timezone, and writing into Dropbox
+# --------------------------------------------------------------------------
+
+
+def test_frames_are_invisible_without_a_timezone():
+    """Why the import must pass one.
+
+    Sorted names carry a local clock time and nothing else, so
+    `time_from_name` returns None without a zone to read them in. The import
+    used to call the mark pass with no timezone, and every mark came back with
+    no image while the same flight matched perfectly from the button.
+    """
+    from datetime import datetime
+    from datetime import timezone as _tz
+
+    with tempfile.TemporaryDirectory() as tmp:
+        flight = Path(tmp)
+        tdir = layout.ensure_transect(flight, "T1")
+        for offset in (10.0, 20.0):
+            when = datetime.fromtimestamp(T0 + offset, _tz.utc)
+            (tdir / layout.JPG_PREVIEW /
+             f"{when.strftime('%Y_%m_%d_%H-%M-%S')}.JPG").write_bytes(b"x")
+
+        assert mm.frames_in_transect(flight, "T1", None) == []
+        assert len(mm.frames_in_transect(flight, "T1", "UTC")) == 2
+
+
+def test_the_sort_hands_the_timezone_to_the_mark_pass():
+    """The regression, exercised through the seam where it broke.
+
+    Without the zone every mark comes back with no image, which is exactly
+    what a real import produced: 257 marks, 0 matched.
+    """
+    from rov_imagery_processing import sorting
+
+    def run(tz_name):
+        store = straight_store(seconds=60.0, speed=0.5)
+        with tempfile.TemporaryDirectory() as tmp:
+            flight, _tdir, _ = _flight_with_frames(tmp)
+            rep = sorting.sort_flight(
+                flight, [("T1", *whole(60.0)[0])], store=store,
+                tz_name=tz_name,
+                options=sorting.SortOptions(banner_previews=False,
+                                            meter_marks=True))
+            return rep.marks
+
+    with_zone = run("UTC")
+    assert with_zone.marks > 0
+    assert with_zone.matched > 0, "the zone was not threaded through"
+
+    without = run(None)
+    assert without.marks > 0, "marks are still computed"
+    assert without.matched == 0, "and this is the failure it used to hide"
+
+
+def test_outputs_survive_a_locked_destination():
+    """Dropbox holds the old file and denies the rename; publish() waits."""
+    store = straight_store(seconds=60.0, speed=0.5)
+    rec = mm.reconstruct(store, "T1", whole(60.0), interval=1.0)
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "T1_meter_marks.csv"
+        out.write_text("previous run", encoding="utf-8")   # already there
+        landed = mm.write_marks_csv(rec, out)
+        assert landed.is_file()
+        assert "Distance_m" in landed.read_text(encoding="utf-8")
+        assert not out.with_name(out.name + ".part").exists(), "no .part left"
+
+
+# --------------------------------------------------------------------------
+#  Filing both JPG folders
+# --------------------------------------------------------------------------
+
+
+def _flight_with_both_jpgs(tmp: Path):
+    from datetime import datetime
+    from datetime import timezone as _tz
+
+    flight = Path(tmp)
+    tdir = layout.ensure_transect(flight, "T1")
+    for offset in range(0, 60, 3):
+        when = datetime.fromtimestamp(T0 + offset, _tz.utc)
+        stem = when.strftime("%Y_%m_%d_%H-%M-%S")
+        (tdir / layout.GPR / f"{stem}.GPR").write_bytes(b"raw")
+        (tdir / layout.JPG_PREVIEW / f"{stem}.JPG").write_bytes(b"preview")
+        (tdir / layout.JPG_EDITED / f"{stem}.JPG").write_bytes(b"edited")
+    return flight, tdir
+
+
+def test_filing_jpgs_covers_previews_and_edited_alike():
+    """A mark is the same mark in either folder."""
+    store = straight_store(seconds=60.0, speed=0.5)
+    with tempfile.TemporaryDirectory() as tmp:
+        flight, tdir = _flight_with_both_jpgs(tmp)
+        rep = mm.run_for_flight(
+            flight, [("T1", *whole(60.0)[0])], store,
+            mm.MarkOptions(enabled=True, move_jpg=True), tz_name="UTC")
+        matched = {m.stem for m in rep.reconstructions[0].matches if m.matched}
+        for sub in (layout.JPG_PREVIEW, layout.JPG_EDITED):
+            filed = {p.stem for p in (tdir / sub / layout.METERS).glob("*.JPG")}
+            assert filed == matched, sub
+        # and the raws, which are on by default
+        assert {p.stem for p in
+                (tdir / layout.GPR / layout.METERS).glob("*.GPR")} == matched
+
+
+def test_previews_are_left_alone_when_jpg_filing_is_off():
+    store = straight_store(seconds=60.0, speed=0.5)
+    with tempfile.TemporaryDirectory() as tmp:
+        flight, tdir = _flight_with_both_jpgs(tmp)
+        mm.run_for_flight(flight, [("T1", *whole(60.0)[0])], store,
+                          mm.MarkOptions(enabled=True), tz_name="UTC")
+        for sub in (layout.JPG_PREVIEW, layout.JPG_EDITED):
+            assert not (tdir / sub / layout.METERS).exists(), sub
+        assert (tdir / layout.GPR / layout.METERS).is_dir()
 
 
 if __name__ == "__main__":
