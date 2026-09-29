@@ -8,6 +8,10 @@ Our methods are designed for subtidal monitoring of nearshore habitats in the te
 
 Our goal is to create an **open-source reference** that allows other research groups to understand, replicate, and adapt our methods for their own underwater survey applications.  
 
+<p align="center">
+  <img src="images/rov_on_transect.jpg" width="80%" alt="The ROV flying a survey over a rocky reef in Puget Sound, its lights on, with transect tapes laid across the seabed and anemones in the foreground" />
+</p>
+
 ### 📂 Repository contents
 
 | Folder | What it holds | Manuscript items |
@@ -33,9 +37,6 @@ Our goal is to create an **open-source reference** that allows other research gr
 - [**BlueROV2**](https://bluerobotics.com/store/rov/bluerov2/) (Blue Robotics) — Heavy Configuration with 150 m tether  
 - **Navigator Flight Controller** (with Raspberry Pi 4, 8 GB Model B)  
 - **Modifications:** Custom “kelp guards” fabricated from HDPE plastic to minimize entanglement with kelp stipes during surveys
-<p align="center">
-  <img src="images/ROV_GIF_1.gif" width="600", height="500" /> 
-</p>
 
 ### ⚡ Power and Tether Management  
 - [**Outland Technology Power Supply (OTPS-1kW)**](https://bluerobotics.com/store/comm-control-power/powersupplies-batteries/otps1kw/)  
