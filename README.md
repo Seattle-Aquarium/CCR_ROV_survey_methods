@@ -103,7 +103,7 @@ Two open-source Windows desktop applications carry a survey day from pre-dive ch
 Runs on the topside laptop for the whole survey day, with tabs in the order the day uses them: automatic recording of laptop and tether health whenever the ROV is armed; a live navigation map with survey plans, line-following guidance and a navigation-sensor readiness check; transect times (and pauses) checked against the dive profile; verified download of BlueOS logs and imagery from the vehicle; an automated flight report that diagnoses disarms, tether dropouts and sensor faults; and per-transect telemetry CSVs and maps from the bundled transect extractor ([`mcap_to_csv/`](mcap_to_csv/)). See [`rov_flight_ops/README.md`](rov_flight_ops/README.md).
 
 <p align="center">
-  <img src="images/rov_flight_ops.png" width="800" alt="ROV Flight Operations, Navigation tab" />
+  <img src="images/rov_flight_ops.png" width="600" alt="ROV Flight Operations, Navigation tab" />
 </p>
 
 ### [ROV Imagery Processing](rov_imagery_processing/) (`rov_imagery_processing/`)
@@ -111,40 +111,90 @@ Runs on the topside laptop for the whole survey day, with tabs in the order the 
 Turns a day's raw imagery into sorted, developed and telemetry-annotated products using the same transect times: imports GoPro photos straight from the SD card into per-transect folders (optionally one photo per meter traveled); batch-develops GoPro RAW (`.GPR`) photos in Adobe Lightroom Classic (crop, chromatic-aberration removal, AI Denoise); and trims each transect's video and composites it with the ROV's telemetry and forward camera. See [`rov_imagery_processing/README.md`](rov_imagery_processing/README.md).
 
 <p align="center">
-  <img src="images/rov_imagery_processing.png" width="800" alt="ROV Imagery Processing, Video tab" />
+  <img src="images/rov_imagery_processing.png" width="600" alt="ROV Imagery Processing, Video tab" />
 </p>
 
 ---
-## General information; workflows ready to implement
-The following repos contain general information about our work, and specialized repos for ROV telemetry analyses, processing and analyses of ROV-derived benthic abundance and distribution data.
+<!-- CCR-REPO-MAP:START -->
+## 🗺️ CCR repositories
 
-```mermaid
-graph TD
+The [Seattle Aquarium](https://www.seattleaquarium.org)'s Coastal Climate Resilience (CCR) work spans the repos below. 🔶 = help wanted · 📍 = you are here.
 
-A["<a href='https://github.com/Seattle-Aquarium/Coastal_Climate_Resilience' target='_blank' style='font-size: 16px; font-weight: bold;'>Coastal_Climate_Resilience</a><br><font color='darkgray'>the main landing pad for the CCR research program</font>"]
+<table>
+  <tbody>
+  <tr>
+    <td colspan="2" align="center">
+      <a href="https://github.com/Seattle-Aquarium/Coastal_Climate_Resilience"><img src="https://raw.githubusercontent.com/Seattle-Aquarium/Coastal_Climate_Resilience/main/photos/repo_map/hub_Coastal_Climate_Resilience.jpg" width="780" alt="Bull kelp stipes and bulbs floating at the surface"></a><br>
+      🌊 <a href="https://github.com/Seattle-Aquarium/Coastal_Climate_Resilience"><b>Coastal_Climate_Resilience</b></a> · start here<br>
+      Program overview, objectives, talks, media coverage, and year-end reports.
+    </td>
+  </tr>
+  <tr><th colspan="2">📚 Core field methods and data analysis</th></tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="https://github.com/Seattle-Aquarium/CCR_ROV_survey_methods"><img src="https://raw.githubusercontent.com/Seattle-Aquarium/Coastal_Climate_Resilience/main/photos/repo_map/CCR_ROV_survey_methods.jpg" width="380" alt="ROV command console set up on the survey vessel"></a><br>
+      🤖 <a href="https://github.com/Seattle-Aquarium/CCR_ROV_survey_methods"><b>CCR_ROV_survey_methods</b></a><br>
+      ROV hardware, field workflow, and telemetry processing, including custom desktop apps.<br>
+      📍 <b>You are here</b>
+    </td>
+    <td width="50%" valign="top">
+      <a href="https://github.com/Seattle-Aquarium/CCR_benthic_analyses"><img src="https://raw.githubusercontent.com/Seattle-Aquarium/Coastal_Climate_Resilience/main/photos/repo_map/CCR_benthic_analyses.jpg" width="380" alt="Grid of kelp holdfast image patches used to train the percent-cover classifier"></a><br>
+      📊 <a href="https://github.com/Seattle-Aquarium/CCR_benthic_analyses"><b>CCR_benthic_analyses</b></a><br>
+      ML percent-cover classification and object detection, plus community analyses of the resulting data.
+    </td>
+  </tr>
+  <tr><th colspan="2">🖼️ Image processing</th></tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="https://github.com/Seattle-Aquarium/CCR_image_processing"><img src="https://raw.githubusercontent.com/Seattle-Aquarium/Coastal_Climate_Resilience/main/photos/repo_map/CCR_image_processing.jpg" width="380" alt="Unedited GoPro survey photo"></a><br>
+      <i>Unedited frame</i><br>
+      📷 <a href="https://github.com/Seattle-Aquarium/CCR_image_processing"><b>CCR_image_processing</b></a><br>
+      The photo-editing bottleneck, with unedited and hand-edited image sets for training and testing.
+    </td>
+    <td width="50%" valign="top">
+      <a href="https://github.com/Seattle-Aquarium/underwater-auto-image-encoder"><img src="https://raw.githubusercontent.com/Seattle-Aquarium/Coastal_Climate_Resilience/main/photos/repo_map/underwater-auto-image-encoder.jpg" width="380" alt="The same survey photo after ML enhancement"></a><br>
+      <i>Same frame, ML-enhanced</i><br>
+      ✨ <a href="https://github.com/Seattle-Aquarium/underwater-auto-image-encoder"><b>underwater-auto-image-encoder</b></a><br>
+      ML pipeline and desktop app that turns raw GoPro photos into survey-ready images.
+    </td>
+  </tr>
+  <tr><th colspan="2">🙋 Get involved</th></tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="https://github.com/Seattle-Aquarium/CCR_development"><img src="https://raw.githubusercontent.com/Seattle-Aquarium/Coastal_Climate_Resilience/main/photos/repo_map/CCR_development.jpg" width="380" alt="Front view of a red-housed BlueROV2 with its lights on"></a>
+    </td>
+    <td width="50%" valign="top">
+      <a href="https://github.com/Seattle-Aquarium/CCR_development"><img src="https://raw.githubusercontent.com/Seattle-Aquarium/Coastal_Climate_Resilience/main/photos/repo_map/CCR_development_telemetry.jpg" width="380" alt="Maps comparing ROV survey tracks from underwater GPS, DVL, and EKF navigation"></a>
+    </td>
+  </tr>
+  </tbody>
+  <!-- A second tbody restarts GitHub's row shading, so this text row stays white like the other cards. -->
+  <tbody>
+  <tr>
+    <td colspan="2">
+      🛠️ <a href="https://github.com/Seattle-Aquarium/CCR_development"><b>CCR_development</b></a><br>
+      Open Issues and 1-page project descriptions for robotics, telemetry, software, AI/ML, and computer vision work. All research and development is open and is tracked via Git Issues.<br>
+      🔶 <b>Help wanted:</b> pick up an <a href="https://github.com/Seattle-Aquarium/CCR_development/issues">open Issue</a>.
+    </td>
+  </tr>
+  <tr><th colspan="2">🧪 Standalone projects</th></tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="https://github.com/Seattle-Aquarium/ROV_underwater_wireless_charging"><img src="https://raw.githubusercontent.com/Seattle-Aquarium/Coastal_Climate_Resilience/main/photos/repo_map/ROV_underwater_wireless_charging.jpg" width="380" alt="BlueROV2 docked at the underwater wireless charging station on a Pier 59 piling"></a><br>
+      ⚡ <a href="https://github.com/Seattle-Aquarium/ROV_underwater_wireless_charging"><b>ROV_underwater_wireless_charging</b></a><br>
+      Prototype underwater wireless charging dock for a BlueROV2 at Pier 59, with the UW Applied Physics Lab, Blue Robotics, and WiBotic.
+    </td>
+    <td width="50%" valign="top">
+      <a href="https://github.com/Seattle-Aquarium/understory_kelp_indicator"><img src="https://raw.githubusercontent.com/Seattle-Aquarium/Coastal_Climate_Resilience/main/photos/repo_map/understory_kelp_indicator.jpg" width="380" alt="Understory kelp and a sea star on a Puget Sound reef"></a><br>
+      🌿 <a href="https://github.com/Seattle-Aquarium/understory_kelp_indicator"><b>understory_kelp_indicator</b></a><br>
+      Puget Sound Understory Kelp Vital Sign indicator, co-developed with Reef Check from diver and ROV surveys.
+    </td>
+  </tr>
+  </tbody>
+</table>
 
-A --> E["<a href='https://github.com/Seattle-Aquarium/CCR_ROV_survey_methods' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_ROV_survey_methods</a><br><font color='darkgray'>this repository: survey methods, field operations and imagery software</font>"]
-
-A --> F["<a href='https://github.com/Seattle-Aquarium/CCR_benthic_analyses' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_benthic_analyses</a><br><font color='darkgray'>code to work with ROV-derived benthic community data</font>"]
-
-
-```
-
-
-
-## Help wanted! 
-The following repos involve active areas of open-source software development, AI/ML implementation, and computer vision challenges; areas where we could use assistance are 🔶 highlighted in orange 🔶
-
-```mermaid
-graph TD
-
-B["<a href='https://github.com/Seattle-Aquarium/CCR_development' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_development</a><br><font color='darkgray'>main hub for organizing active Issues under development </font>"]
-
-B --> C["<a href='https://github.com/Seattle-Aquarium/CCR_image_processing' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_image_processing</a><br><font color='darkgray'>help wanted to implement AI/ML solution to expendite image processing</font>"]
-
-B --> D["<a href='https://github.com/Seattle-Aquarium/CCR_kelp_feature_detection' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_kelp_feature_detection</a><br><font color='darkgray'>active research re: photogrammetry in kelp forests</font>"]
-
-style B stroke:#FF8600,stroke-width:4px
-style C stroke:#FF8600,stroke-width:4px
-```
-
+<details>
+<summary>📦 Archived projects</summary>
+<br>
+<a href="https://github.com/Seattle-Aquarium/CCR_kelp_feature_detection"><b>CCR_kelp_feature_detection</b></a>: tested photogrammetry feature detectors on kelp forest imagery. No longer under active development; its 25-image test set and reviewed percent-cover annotations remain available.
+</details>
