@@ -33,8 +33,10 @@ tracking.
 
 Usage
 -----
-    python surftrak_performance.py
+    python surftrak_performance.py --root "D:/flights"
     python surftrak_performance.py --root "D:/flights" --programs HSIL Port_of_Seattle --since 2024
+
+(or set the CCR_FLIGHTS_ROOT environment variable instead of passing --root)
 
 Outputs (default ``surftrak_analysis/`` in this repository)::
 
@@ -66,7 +68,9 @@ LOCAL_TZ = ZoneInfo("America/Los_Angeles")   # transect CSV times are local
 SURFTRAK = 21                                # ArduSub custom_mode for SURFTRAK
 MAV_TYPE_SUBMARINE = 12
 
-DEFAULT_ROOT = Path(r"C:\Users\randellz\Seattle Aquarium Dropbox\Coastal_Climate_Resilience\flights")
+#: The flights folder (one subfolder per program, then per year): --root, or
+#: the CCR_FLIGHTS_ROOT environment variable.
+DEFAULT_ROOT = Path(os.environ["CCR_FLIGHTS_ROOT"]) if os.environ.get("CCR_FLIGHTS_ROOT") else None
 DEFAULT_PROGRAMS = ["HSIL", "Port_of_Seattle"]
 REPO = Path(__file__).resolve().parents[1]
 
@@ -352,6 +356,8 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=Path, default=REPO / "surftrak_analysis")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) // 2))
     args = ap.parse_args(argv)
+    if args.root is None:
+        ap.error("give the flights folder with --root, or set CCR_FLIGHTS_ROOT")
 
     flights = find_flights(args.root, args.programs, args.since)
     print(f"{len(flights)} flight folders under {args.root}")

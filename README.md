@@ -2,7 +2,7 @@
 
 ## 🌊 Overview  
 
-This repository provides an overview of the Seattle Aquarium’s Coastal Climate Resilience (CCR) team’s remotely operated vehicle (ROV) survey workflow — spanning hardware configuration, field operations, telemetry data extraction, and visualization. It especially focuses on code and documentation for processing and organizing ROV telemetry data collected during benthic habitat surveys.
+This repository provides an overview of the Seattle Aquarium’s Coastal Climate Resilience (CCR) team’s remotely operated vehicle (ROV) survey workflow — spanning hardware configuration, field operations, telemetry data extraction, and visualization. It includes two open-source desktop applications that streamline field operations and imagery processing, along with the code and data behind our survey-methods manuscript.
 
 Our methods are designed for subtidal monitoring of nearshore habitats in the temperate waters of Puget Sound, where visibility and environmental conditions can be highly variable. Surveys are optimized to collect high-resolution, georeferenced imagery to support analyses of seafloor composition, kelp and algal cover, and associated benthic communities.
 
@@ -94,50 +94,25 @@ Our goal is to create an **open-source reference** that allows other research gr
 
 ---
 
-## 🧮 Telemetry Processing  
+## 🧰 Field and Imagery Software
 
-### Underwater Telemetry Compositing (UTC)
+Two open-source Windows desktop applications carry a survey day from pre-dive checks to analysis-ready imagery. Each installs from a double-click launcher into its own Python environment, and the two share only the day's flight folder, where the transect times written by one drive the other.
 
-A Windows desktop application that manages a survey flight end to end: it builds
-the flight's folder structure, imports stills off the camera card into transect
-folders, stamps MAVLink telemetry onto the imagery, trims and composites the
-video, and exports a 1 Hz telemetry CSV.
+### [ROV Flight Operations](rov_flight_ops/) (`rov_flight_ops/`)
 
-**Collaborators need nothing installed.** It ships as a single ~96 MB
-executable carrying its own Python runtime, ffmpeg, fonts and timezone
-database — download, double-click, run. Windows 10/11, 64-bit.
+Runs on the topside laptop for the whole survey day, with tabs in the order the day uses them: automatic recording of laptop and tether health whenever the ROV is armed; a live navigation map with survey plans, line-following guidance and a navigation-sensor readiness check; transect times (and pauses) checked against the dive profile; verified download of BlueOS logs and imagery from the vehicle; an automated flight report that diagnoses disarms, tether dropouts and sensor faults; and per-transect telemetry CSVs and maps from the bundled transect extractor ([`mcap_to_csv/`](mcap_to_csv/)). See [`rov_flight_ops/README.md`](rov_flight_ops/README.md).
 
-It also reads recordings that failed in the field: an `.mcap` the vehicle never
-closed (power lost mid-dive) is repaired on the fly without modifying the file,
-and when the MAVLink router dies mid-flight the telemetry is recovered from the
-autopilot's own `.BIN` dataflash log instead.
-
-📁 [**`UTC/`**](UTC/) — see [`UTC/README.md`](UTC/README.md) for the workflow,
-how the clocks are tied together, what every telemetry column means and where
-it came from, and what to do when a recording fails.
-
-### Code 
-
-* `mcap_to_csv/`: **The current tool.** BlueOS 1.5 records telemetry as `.mcap` rather than writing `.tlog` files, so this replaces `tlog_to_csv.py` for new dives. Same transect windows, same per-second averaging, same output columns — the CSVs drop straight into the existing VIAME and percent-cover joins — plus a Leaflet map of every transect at the site. Run `run_MCAP_to_CSV.bat`, or build `MCAP-to-CSV.exe` from the included PyInstaller spec. See [mcap_to_csv/README.md](mcap_to_csv/README.md), which also documents what had to change: `LOCAL_POSITION_NED` is not in these recordings, so the DVL track is rebuilt from `VISION_POSITION_DELTA`.
-
-* **Knowing what the numbers are worth.** Both the standalone tool and UTC's
-  Transects step can report where each column's values actually came from and
-  whether the instruments behind them behaved — which aiding sources the EKF
-  had, its innovation variances, the compass, and the dropouts that leave holes
-  in a transect. Run `python -m ccr_m2c --health logs/*.mcap --plan surveys.json`,
-  or use step 5 on the Transects page. Column-by-column provenance is in
-  [mcap_to_csv/COLUMNS.md](mcap_to_csv/COLUMNS.md).
-
-* `tlog_to_csv.py`: This script processes `.tlog` files when GPS and DVL data are fused via an Extended Kalman Filter (EKF), producing more accurate tracks than using GPS or DVL alone. Instead of calculating `DVLlat`/`DVLlon`, this script incorporates the fused position data (`GLOBAL_POSITION_INT`) for improved accuracy. Kept for reprocessing dives recorded before the switch to `.mcap`.
 <p align="center">
-  <img src="images/survey_params.png" width="600", height="200" /> 
+  <img src="images/rov_flight_ops.png" width="800" alt="ROV Flight Operations, Navigation tab" />
 </p>
 
-* `transect_map.py`: This script generates a Leaflet map displaying the ROV tracks as measured by different navigation sources: GPS (black), DVL (blue), and EKF (red). `mcap_to_csv` builds its own map automatically; this one still serves CSVs produced by `tlog_to_csv.py`.
-<p align="center">
-  <img src="images/ROV_tracks.png" width="300", height="300" /> 
-</p>
+### [ROV Imagery Processing](rov_imagery_processing/) (`rov_imagery_processing/`)
 
+Turns a day's raw imagery into sorted, developed and telemetry-annotated products using the same transect times: imports GoPro photos straight from the SD card into per-transect folders (optionally one photo per meter traveled); batch-develops GoPro RAW (`.GPR`) photos in Adobe Lightroom Classic (crop, chromatic-aberration removal, AI Denoise); and trims each transect's video and composites it with the ROV's telemetry and forward camera. See [`rov_imagery_processing/README.md`](rov_imagery_processing/README.md).
+
+<p align="center">
+  <img src="images/rov_imagery_processing.png" width="800" alt="ROV Imagery Processing, Video tab" />
+</p>
 
 ---
 ## General information; workflows ready to implement
@@ -148,7 +123,7 @@ graph TD
 
 A["<a href='https://github.com/Seattle-Aquarium/Coastal_Climate_Resilience' target='_blank' style='font-size: 16px; font-weight: bold;'>Coastal_Climate_Resilience</a><br><font color='darkgray'>the main landing pad for the CCR research program</font>"]
 
-A --> E["<a href='https://github.com/Seattle-Aquarium/CCR_ROV_survey_methods' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_ROV_survey_methods</a><br><font color='darkgray'>this repository: survey methods, UTC, and the transect extractor</font>"]
+A --> E["<a href='https://github.com/Seattle-Aquarium/CCR_ROV_survey_methods' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_ROV_survey_methods</a><br><font color='darkgray'>this repository: survey methods, field operations and imagery software</font>"]
 
 A --> F["<a href='https://github.com/Seattle-Aquarium/CCR_benthic_analyses' target='_blank' style='font-size: 16px; font-weight: bold;'>CCR_benthic_analyses</a><br><font color='darkgray'>code to work with ROV-derived benthic community data</font>"]
 
