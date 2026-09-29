@@ -9,7 +9,7 @@ Our methods are designed for subtidal monitoring of nearshore habitats in the te
 Our goal is to create an **open-source reference** that allows other research groups to understand, replicate, and adapt our methods for their own underwater survey applications.  
 
 <p align="center">
-  <img src="images/rov_on_transect.jpg" width="80%" alt="The ROV flying a survey over a rocky reef in Puget Sound, its lights on, with transect tapes laid across the seabed and anemones in the foreground" />
+  <img src="images/rov_on_transect.jpg" width="65%" alt="The ROV flying a survey over a rocky reef in Puget Sound, its lights on, with transect tapes laid across the seabed and anemones in the foreground" />
 </p>
 
 ### 📂 Repository contents
