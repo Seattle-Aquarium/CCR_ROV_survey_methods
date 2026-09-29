@@ -18,10 +18,11 @@ Python 3.10 or newer: on its first run the launcher builds a private
 environment in `%LOCALAPPDATA%\CCR_ROV\venv`, installs this tool into it, and
 opens the window. That takes a couple of minutes once.
 
-It is also a step inside UTC — the **Transects** page — which is the better
-route when a flight folder and survey plan already exist, because it reads the
-transect windows from the plan instead of asking for them again. This launcher
-is for extracting CSVs on their own.
+It is also a step inside ROV Flight Operations — the **Analyze transects** tab
+(`../rov_flight_ops/`) — which is the better route when a flight folder and
+survey plan already exist, because it reads the transect windows from the plan
+instead of asking for them again. This launcher is for extracting CSVs on their
+own.
 
 1. **Add File(s)** or **Add Folder** — pick the `.mcap` files for the dive. Each
    is listed with the local clock time it covers, and a combined span underneath.
@@ -48,8 +49,8 @@ is for extracting CSVs on their own.
 ### Loading a survey plan
 
 Rather than retyping the windows, **Load plan (.json)...** reads the same survey
-plan the UTC compositing tool uses, so one file drives both and the two cannot
-drift apart:
+plan (`surveys.json`) that ROV Flight Operations writes and ROV Imagery
+Processing reads, so one file drives all three and they cannot drift apart:
 
 ```json
 {
@@ -159,7 +160,7 @@ sits at a constant **−0.61 m for the whole dive**: low enough to pass the old
 `Depth` column that was flat wrong and looked entirely plausible.
 
 `GLOBAL_POSITION_INT.relative_alt` — the autopilot's own baro depth, and the
-same number UTC's overlays use — now leads, and any candidate has to *vary*
+same number ROV Imagery Processing's overlays use — now leads, and any candidate has to *vary*
 across the recording before it is believed. A depth that never moves is a fixed
 offset, not a measurement.
 
@@ -370,7 +371,7 @@ coordinates at all. Give it the vessel's position afterwards:
 python -m ccr_m2c logs/*.mcap --plan utc_plan.json --origin 47.6176,-122.3610
 ```
 
-or the **Origin** fields on UTC's Transects page. A typed origin beats a static
+or the origin ROV Flight Operations' Analyze transects tab passes in. A typed origin beats a static
 fix — the only reason to type one is that the recording's own is missing or
 wrong — and is ignored, with a note, when the fix was tracking, since a USBL
 knows where the vehicle was and a typed origin does not.
@@ -539,14 +540,11 @@ If the app reports missing packages, it prints the exact interpreter and the
 `pip install -r requirements.txt` line to run. If it reports no usable Python,
 install one from python.org with the "tcl/tk and IDLE" option ticked.
 
-> The same partial install will be picked by `UTC/run_UTC.bat`, which lists
-> `Python313` first and does not verify it.
-
 ### Building a standalone .exe (optional)
 
 The batch file is the intended way to run this. `ccr_m2c.spec` is included for the
-day someone wants a copy that runs without Python at all — it mirrors UTC's
-spec, but **it has not been built or tested here**, so treat the first build as
+day someone wants a copy that runs without Python at all, but **it has not been
+built or tested here**, so treat the first build as
 something to verify rather than to hand straight to a teammate:
 
 ```bash

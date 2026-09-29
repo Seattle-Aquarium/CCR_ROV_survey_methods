@@ -12,8 +12,8 @@ __pycache__
 # manuscript files until submitted to journal
 manuscript/
 
-# avoid pushing numerous survey images
-data/Satellite
+# local Claude Code settings (per user, not project source)
+.claude/
 
 # per-user GUI state, not source (personal paths, last site used)
 code/.tlog_to_csv_config.json

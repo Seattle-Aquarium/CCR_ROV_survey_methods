@@ -8,16 +8,16 @@ vehicle, watching the laptop and the tether while it flies, recording each
 flight, typing and checking the transect times, and pulling logs off the Pi —
 or clearing them off it.
 
-It is one of two programs split out of UTC (Underwater Telemetry Compositing):
+It is one of two programs that replaced UTC (Underwater Telemetry Compositing),
+the earlier all-in-one program, which has been retired from this repository:
 
 | program | folder | what it does |
 |---|---|---|
 | **ROV Flight Operations** *(working title)* | `rov_flight_ops/` | the vehicle, monitoring, logs, flight reports |
 | **ROV Imagery Processing** *(working title)* | `rov_imagery_processing/` | photos and video |
-| UTC | `UTC/` | the original all-in-one program, kept working unchanged as a fallback |
 
-The two new programs are **self-contained in their code**. Neither imports
-anything from the other or from `UTC/`: where both need the same file (the
+The two programs are **self-contained in their code**. Neither imports
+anything from the other: where both need the same file (the
 theme, the survey plan, the telemetry reader…) each folder has its own copy.
 Each has its own launcher and its own Python environment, so updating one can
 never break another. Two things are deliberately *not* separate:
@@ -620,7 +620,7 @@ Older flights with recordings loose in `logs/` are read exactly as before.
 * `%LOCALAPPDATA%\CCR_ROV\rov_flight_ops\settings.json` — the vehicle address
   and the C3 folder, remembered between runs.
 * `%LOCALAPPDATA%\utc_cache\` — extracted telemetry, per flight. This location
-  is shared with UTC and ROV Imagery Processing **on purpose**: it is data, not
+  is shared with ROV Imagery Processing **on purpose**: it is data, not
   code, and sharing it means a `.BIN` telemetry override chosen on Flight summary
   is honored when imagery is bannered, and gigabytes are not extracted twice.
   So that sharing is safe:
@@ -636,9 +636,9 @@ Older flights with recordings loose in `logs/` are read exactly as before.
     long ago progress was reported, and the lock file is never deleted.
   * *Stop* during an extraction takes effect within a few thousand messages;
     the half-built cache is left without its marker, so it is never used.
-  * **UTC's extractor takes no lock and does not check fingerprints.** A cache
-    it writes is rebuilt once by these programs, and it can read theirs — but
-    do not extract the same flight in UTC while this program or ROV Imagery
+  * **An older UTC install on the same laptop takes no lock and does not check
+    fingerprints.** A cache it wrote is rebuilt once by these programs — but do
+    not extract the same flight in UTC while this program or ROV Imagery
     Processing is extracting it.
 
 ## Diagnostics and reporting a problem

@@ -25,7 +25,7 @@ library(RColorBrewer)
 # By default this assumes your R working directory is already set to the
 # folder with the CSVs (e.g. in RStudio: Session > Set Working Directory >
 # To Source File Location). Otherwise, replace "." with a full path, e.g.
-# "C:/Users/randellz/OneDrive - Seattle Aquarium/Desktop/transect_tracks"
+# "path/to/CCR_ROV_survey_methods/code/transect_tracks"
 folder_path <- "."
 
 file_pattern <- "\\.csv$"

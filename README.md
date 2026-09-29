@@ -8,6 +8,23 @@ Our methods are designed for subtidal monitoring of nearshore habitats in the te
 
 Our goal is to create an **open-source reference** that allows other research groups to understand, replicate, and adapt our methods for their own underwater survey applications.  
 
+### 📂 Repository contents
+
+| Folder | What it holds | Manuscript items |
+|---|---|---|
+| [`rov_flight_ops/`](rov_flight_ops/) | ROV Flight Operations desktop app for the survey day (see [below](#-field-and-imagery-software)) | Supp. Section S4, Fig. S6 |
+| [`rov_imagery_processing/`](rov_imagery_processing/) | ROV Imagery Processing desktop app for photos and video (see [below](#-field-and-imagery-software)) | Supp. Section S4 |
+| [`mcap_to_csv/`](mcap_to_csv/) | Transect extractor: BlueOS `.mcap` recordings to per-transect 1 Hz CSVs and maps; runs on its own or inside ROV Flight Operations | Table S3 |
+| [`code/`](code/) | Stand-alone Python scripts that preceded the two apps (`tlog_to_csv.py`, `transect_map.py`, `meter_mark.py`, `rename_jpg_gpr_EXIF.py`, `MAVLink_listen.py`, `optimize_path.py`) and `surftrak_performance.py` | Table S3 |
+| [`code/transect_tracks/`](code/transect_tracks/) | R code and transect CSVs for the ROV positioning-track figure | Fig. 2 |
+| [`surftrak_analysis/`](surftrak_analysis/) | Output of `code/surftrak_performance.py`: surftrak altitude error per transect, survey day and year, and its histogram | Table S1, Fig. S2 |
+| [`tlog_visualization/`](tlog_visualization/) | R code, data and figures for surftrak altitude holding and ROV power use | Figs. 3–4, S11, S13 |
+| [`lighting/`](lighting/) | Lighting-control subsystem for the V4 lights: Raspberry Pi Pico code, wiring, parts list and a lighting simulation | Fig. S8, Table S4 |
+| [`lua_scripts/`](lua_scripts/) | ArduSub Lua scripts: `surftrak2.lua`, `transect3.lua`, `message_interval.lua`, `ahrs-set-origin.lua` | Table S2 |
+| [`field_checklist/`](field_checklist/) | One-page printable field log (LaTeX source and PDF) | Fig. S1 |
+| [`sort_by_meter_mark/`](sort_by_meter_mark/) | Example output of `optimize_path.py` and meter-mark photo sorting for three transects | — |
+| [`images/`](images/) | Images used in this README | — |
+
 ---
 
 ## ⚙️ Hardware  
@@ -88,7 +105,7 @@ Our goal is to create an **open-source reference** that allows other research gr
 - [**DVL Extension**](https://github.com/bluerobotics/BlueOS-Water-Linked-DVL): v1.0.8  
 - [**UGPS Extension**](https://github.com/waterlinked/blueos-ugps-extension): v1.0.7  
   - Modified configuration with `EXTRA_ARGS=--ignore_gps` for improved sensor fusion  
-- [**Surftrack Fixit**](https://github.com/clydemcqueen/surftrak_fixit): v1.0.0-beta.2  
+- [**Surftrak Fixit**](https://github.com/clydemcqueen/surftrak_fixit): v1.0.0-beta.2  
 - [**Water Linked External UGPS Extension**](https://github.com/clydemcqueen/wl_ugps_external_extension)  
   - Provides external (vessel) position and heading data to the Water Linked UGPS system  
 
@@ -113,6 +130,14 @@ Turns a day's raw imagery into sorted, developed and telemetry-annotated product
 <p align="center">
   <img src="images/rov_imagery_processing.png" width="600" alt="ROV Imagery Processing, Video tab" />
 </p>
+
+---
+
+## 📄 License and citation
+
+Code in this repository is released under the [MIT License](LICENSE). A few bundled files written by others (two Lua scripts, a modified ArduPilot applet, a University of Washington driver library, MicroPython firmware and the Montserrat fonts) keep their own licenses, listed at the end of [`LICENSE`](LICENSE). The Seattle Aquarium name and logos are not covered by the MIT License.
+
+To cite this repository, use the **Cite this repository** button on GitHub, which reads [`CITATION.cff`](CITATION.cff).
 
 ---
 <!-- CCR-REPO-MAP:START -->

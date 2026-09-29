@@ -30,10 +30,8 @@ from pathlib import Path
 
 import numpy as np
 
-DEFAULT_PDF = Path(
-    r"C:\Users\randellz\Seattle Aquarium Dropbox\Coastal_Climate_Resilience"
-    r"\documents\ROV_documents\lights\LEDSeaLite_Manual.pdf"
-)
+#: Without an argument, the manual is looked for next to this script.
+DEFAULT_PDF = Path(__file__).parent / "LEDSeaLite_Manual.pdf"
 OUT_DIR = Path(__file__).parent
 
 # --- Chart calibration ------------------------------------------------------

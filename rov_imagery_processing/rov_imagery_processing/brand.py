@@ -319,11 +319,9 @@ def font_family(weight: str = "regular", fallback: str = "Segoe UI") -> str:
 #  Logo assets
 # --------------------------------------------------------------------------
 
-_LOGO_SOURCE = (
-    Path(r"C:\Users\randellz\Seattle Aquarium Dropbox\Coastal_Climate_Resilience")
-    / "visual_media" / "communications" / "presentation_graphics" / "logos"
-    / "Seattle_Aquarium_logos"
-)
+#: Where the original logo files live, for variants not vendored into
+#: ``assets/``. Optional: set CCR_LOGO_SOURCE to the folder holding them.
+_LOGO_SOURCE = Path(os.environ["CCR_LOGO_SOURCE"]) if os.environ.get("CCR_LOGO_SOURCE") else None
 
 _LOGO_FILES = {
     "white": ["Seattle Aquarium Logo-White-LG.png", "SEAQ_white_logo.PNG"],
@@ -339,11 +337,13 @@ def logo_path(variant: str = "white") -> str | None:
     """Locate a logo bitmap.
 
     Prefers a copy vendored into ``assets/`` (so a packaged .exe is
-    self-contained), and falls back to the shared Dropbox originals.
+    self-contained), and falls back to the originals in CCR_LOGO_SOURCE.
     """
     local = Path(__file__).resolve().parent.parent / "assets" / f"logo_{variant}.png"
     if local.is_file():
         return str(local)
+    if _LOGO_SOURCE is None:
+        return None
     for rel in _LOGO_FILES.get(variant, []):
         p = _LOGO_SOURCE / rel
         if p.is_file():

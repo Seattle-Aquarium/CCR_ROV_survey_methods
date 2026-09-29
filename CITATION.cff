@@ -1,0 +1,51 @@
+# Read by GitHub ("Cite this repository") and by Zenodo when a release is
+# archived. Before the release: add each author's ORCID as
+#   orcid: "https://orcid.org/0000-0000-0000-0000"
+# (Zenodo rejects the file if an ORCID is malformed, so leave the line out
+# rather than use a placeholder), and set version and date-released to match
+# the release tag. After the DOI is minted, add it as `doi:`.
+cff-version: 1.2.0
+message: "If you use this software or these methods, please cite them as below."
+type: software
+title: "CCR_ROV_survey_methods: ROV survey methods, field operations and imagery software"
+abstract: >-
+  Hardware configuration, field workflow and open-source software used by the
+  Seattle Aquarium's Coastal Climate Resilience (CCR) team for standardized
+  benthic imaging surveys with a small, modular remotely operated vehicle
+  (BlueROV2) in temperate kelp forests. Includes two Windows desktop
+  applications, ROV Flight Operations (field operations, navigation,
+  telemetry health and transect extraction) and ROV Imagery Processing
+  (photo import, RAW development and telemetry-annotated video), the
+  mcap_to_csv transect extractor, ArduSub Lua scripts, a lighting-control
+  subsystem, a printable field log, and the code and data behind the
+  associated survey-methods manuscript.
+authors:
+  - given-names: Zachary
+    family-names: Randell
+    email: z.randell@seattleaquarium.org
+    affiliation: Seattle Aquarium
+  - given-names: Megan
+    family-names: Williams
+    affiliation: Seattle Aquarium
+  - given-names: Reid
+    family-names: Thomson
+    affiliation: Seattle Aquarium
+  - given-names: Keenan
+    family-names: Johnson
+    affiliation: Seattle Aquarium
+  - given-names: Clyde
+    family-names: McQueen
+    affiliation: Seattle Aquarium
+repository-code: "https://github.com/Seattle-Aquarium/CCR_ROV_survey_methods"
+license: MIT
+version: 1.0.0
+keywords:
+  - remotely operated vehicle
+  - ROV
+  - BlueROV2
+  - ArduSub
+  - benthic imaging
+  - kelp forest
+  - subtidal monitoring
+  - underwater survey
+  - telemetry

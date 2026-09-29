@@ -1,9 +1,8 @@
 name: ROV programs
 
-# ROV Flight Operations and ROV Imagery Processing, the two programs split out
-# of UTC. Each is self-contained, so each is installed, linted and tested on
-# its own -- a change to one must not be able to pass by leaning on the other.
-# The UTC workflow does not cover them: its path filters are UTC's.
+# ROV Flight Operations and ROV Imagery Processing. Each is self-contained, so
+# each is installed, linted and tested on its own -- a change to one must not
+# be able to pass by leaning on the other.
 on:
   push:
     branches: [main]

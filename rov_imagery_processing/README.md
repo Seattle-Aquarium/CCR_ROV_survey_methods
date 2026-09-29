@@ -7,16 +7,16 @@ Everything to do with the imagery that comes back from an ROV survey flight:
 bringing photos into per-transect folders, developing GoPro raws, stamping the
 telemetry banner on stills, and trimming and compositing video.
 
-It is one of two programs split out of UTC (Underwater Telemetry Compositing):
+It is one of two programs that replaced UTC (Underwater Telemetry Compositing),
+the earlier all-in-one program, which has been retired from this repository:
 
 | program | folder | what it does |
 |---|---|---|
 | **ROV Flight Operations** *(working title)* | `rov_flight_ops/` | the vehicle, monitoring, logs, flight reports |
 | **ROV Imagery Processing** *(working title)* | `rov_imagery_processing/` | photos and video |
-| UTC | `UTC/` | the original all-in-one program, kept working unchanged as a fallback |
 
-The two new programs are **self-contained in their code**. Neither imports
-anything from the other or from `UTC/`: where both need the same file (the
+The two programs are **self-contained in their code**. Neither imports
+anything from the other: where both need the same file (the
 theme, the survey plan, the telemetry reader…) each folder has its own copy.
 Each has its own launcher and its own Python environment. The one thing they
 deliberately share is the telemetry cache (see [Cache](#cache)). Because the
@@ -278,7 +278,7 @@ view used to have both spliced into one stream.
 ## Cache
 
 `%LOCALAPPDATA%\utc_cache\` holds extracted telemetry and ROV-video proxies,
-per flight (gigabytes). The location is shared with UTC and ROV Flight
+per flight (gigabytes). The location is shared with ROV Flight
 Operations **on purpose**: it is data, not code, and sharing it means a flight
 whose telemetry was switched to the autopilot's `.BIN` log in ROV Flight
 Operations is bannered and composited from that log here, and nothing is
@@ -296,8 +296,8 @@ when the program ends, however it ends (since the 14 September 2026 review;
 before, a lock file was declared stale after two minutes without progress, and
 a paused extraction could lose it). *Stop* during an extraction takes effect
 within a few thousand messages, and a half-built cache is never marked valid.
-**UTC's extractor takes no lock**: do not extract the same flight in UTC while
-this program or ROV Flight Operations is extracting it.
+**An older UTC install on the same laptop takes no lock**: do not extract the
+same flight in UTC while this program or ROV Flight Operations is extracting it.
 
 ## Diagnostics and reporting a problem
 
