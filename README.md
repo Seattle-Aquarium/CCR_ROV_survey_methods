@@ -17,7 +17,7 @@ Our goal is to create an **open-source reference** that allows other research gr
 - **Navigator Flight Controller** (with Raspberry Pi 4, 8 GB Model B)  
 - **Modifications:** Custom “kelp guards” fabricated from HDPE plastic to minimize entanglement with kelp stipes during surveys
 <p align="center">
-  <img src="figures/ROV_GIF_1.gif" width="600", height="500" /> 
+  <img src="images/ROV_GIF_1.gif" width="600", height="500" /> 
 </p>
 
 ### ⚡ Power and Tether Management  
@@ -76,7 +76,7 @@ Our goal is to create an **open-source reference** that allows other research gr
 - **19-inch sunlight-readable monitor** ([MS190W1610NT](https://www.lcdpart.com/products/ms190w1610nt-19-inch-sunlight-readable-open-frame-monitor-1200-nits))  
 - **Ethernet switch** for network connectivity between ROV, GPS, DVL, and camera control systems  
 <p align="center">
-  <img src="figures/command_console2.jpg" width="500", height="400" /> 
+  <img src="images/command_console2.jpg" width="500", height="400" /> 
 </p>
 
 ---
@@ -130,12 +130,12 @@ it came from, and what to do when a recording fails.
 
 * `tlog_to_csv.py`: This script processes `.tlog` files when GPS and DVL data are fused via an Extended Kalman Filter (EKF), producing more accurate tracks than using GPS or DVL alone. Instead of calculating `DVLlat`/`DVLlon`, this script incorporates the fused position data (`GLOBAL_POSITION_INT`) for improved accuracy. Kept for reprocessing dives recorded before the switch to `.mcap`.
 <p align="center">
-  <img src="figures/survey_params.png" width="600", height="200" /> 
+  <img src="images/survey_params.png" width="600", height="200" /> 
 </p>
 
 * `transect_map.py`: This script generates a Leaflet map displaying the ROV tracks as measured by different navigation sources: GPS (black), DVL (blue), and EKF (red). `mcap_to_csv` builds its own map automatically; this one still serves CSVs produced by `tlog_to_csv.py`.
 <p align="center">
-  <img src="figures/ROV_tracks.png" width="300", height="300" /> 
+  <img src="images/ROV_tracks.png" width="300", height="300" /> 
 </p>
 
 
