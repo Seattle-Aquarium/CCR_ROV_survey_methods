@@ -14,12 +14,12 @@ Our goal is to create an **open-source reference** that allows other research gr
 |---|---|---|
 | [`rov_flight_ops/`](rov_flight_ops/) | ROV Flight Operations desktop app for the survey day (see [below](#-field-and-imagery-software)) | Supp. Section S4, Fig. S6 |
 | [`rov_imagery_processing/`](rov_imagery_processing/) | ROV Imagery Processing desktop app for photos and video (see [below](#-field-and-imagery-software)) | Supp. Section S4 |
-| [`mcap_to_csv/`](mcap_to_csv/) | Transect extractor: BlueOS `.mcap` recordings to per-transect 1 Hz CSVs and maps; runs on its own or inside ROV Flight Operations | Table S3 |
-| [`code/`](code/) | Stand-alone Python scripts that preceded the two apps (`tlog_to_csv.py`, `transect_map.py`, `meter_mark.py`, `rename_jpg_gpr_EXIF.py`, `MAVLink_listen.py`, `optimize_path.py`) and `surftrak_performance.py` | Table S3 |
+| [`mcap_to_csv/`](mcap_to_csv/) | Transect extractor: BlueOS `.mcap` recordings to per-transect 1 Hz CSVs and maps; runs on its own or inside ROV Flight Operations | Supp. Section S4 |
+| [`code/`](code/) | Stand-alone Python scripts that preceded the two apps (`tlog_to_csv.py`, `transect_map.py`, `meter_mark.py`, `rename_jpg_gpr_EXIF.py`, `MAVLink_listen.py`, `optimize_path.py`) and `surftrak_performance.py` | Supp. Sections S3–S4 |
 | [`code/transect_tracks/`](code/transect_tracks/) | R code and transect CSVs for the ROV positioning-track figure | Fig. 2 |
 | [`surftrak_analysis/`](surftrak_analysis/) | Output of `code/surftrak_performance.py`: surftrak altitude error per transect, survey day and year, and its histogram | Table S1, Fig. S2 |
 | [`tlog_visualization/`](tlog_visualization/) | R code, data and figures for surftrak altitude holding and ROV power use | Figs. 3–4, S11, S13 |
-| [`lighting/`](lighting/) | Lighting-control subsystem for the V4 lights: Raspberry Pi Pico code, wiring, parts list and a lighting simulation | Fig. S8, Table S4 |
+| [`lighting/`](lighting/) | Lighting-control subsystem for the V4 lights: Raspberry Pi Pico code, wiring, parts list and a lighting simulation | Fig. S8, Table S3 |
 | [`lua_scripts/`](lua_scripts/) | ArduSub Lua scripts: `surftrak2.lua`, `transect3.lua`, `message_interval.lua`, `ahrs-set-origin.lua` | Table S2 |
 | [`field_checklist/`](field_checklist/) | One-page printable field log (LaTeX source and PDF) | Fig. S1 |
 | [`sort_by_meter_mark/`](sort_by_meter_mark/) | Example output of `optimize_path.py` and meter-mark photo sorting for three transects | — |
