@@ -386,21 +386,39 @@ def main(argv=None) -> int:
           .round(3).reset_index())
     fl.to_csv(args.out / "surftrak_flights.csv", index=False)
 
-    # Pool the per-second errors of the transects that count as flown in surftrak.
-    keep = {(r, t) for r, t in zip(flown["flight"], flown["transect"])}
-    errs, alts = [], []
+    # Pool the per-second errors of the transects that count as flown in
+    # surftrak. A transect is identified by its flight and start second: two
+    # vehicles can fly a "T1" on the same day.
+    keep = {(f, int(s0)) for f, s0 in zip(flown["flight"], flown["start"])}
+    errs, alts, years = [], [], []
     for r in results:
-        # Rebuild per-transect errors in order; score_flight appends them in
-        # transect order, so walk the same order here.
+        # score_flight appends each transect's errors in transect order, so
+        # walk the same order here.
         i = 0
         for t in r.transects:
             n = t["scored_s"]
-            if (r.flight, t["transect"]) in keep:
+            if (r.flight, int(t["start"])) in keep:
                 errs += r.errors[i:i + n]
                 alts += r.altitudes[i:i + n]
+                years += [t["date"][:4]] * n
             i += n
-    errs, alts = np.array(errs), np.array(alts)
+    errs, alts, years = np.array(errs), np.array(alts), np.array(years)
     s = pooled(errs, alts)
+
+    # The same statistics by year, for the supplementary table.
+    by_year = []
+    flown_year = flown.assign(year=flown["date"].str[:4])
+    for label, mask, sub in (
+            [(y, years == y, flown_year[flown_year["year"] == y]) for y in sorted(set(years))]
+            + [("All", np.ones(len(years), bool), flown_year)]):
+        p = pooled(errs[mask], alts[mask])
+        by_year.append(dict(
+            period=label, survey_days=sub["flight"].nunique(), transects=len(sub),
+            hours=round(p["seconds"] / 3600, 1), median_alt=round(p["median_alt"], 2),
+            q1_alt=round(p["q1_alt"], 2), q3_alt=round(p["q3_alt"], 2),
+            median_err=round(p["median_err"], 3), mae=round(p["mae"], 3),
+            within_010=round(p["within_010"], 1), within_020=round(p["within_020"], 1)))
+    pd.DataFrame(by_year).to_csv(args.out / "surftrak_by_year.csv", index=False)
     logged = flown["target_logged_pct"].fillna(0)
     lines = [
         f"surftrak performance, {', '.join(args.programs)}, {args.since} onward",
@@ -446,21 +464,55 @@ def main(argv=None) -> int:
     print("\n" + text)
 
     try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        fig, ax = plt.subplots(figsize=(5, 3.2), dpi=200)
-        ax.hist(np.clip(errs, -0.6, 0.6), bins=np.arange(-0.6, 0.62, 0.02), color="#1f6f8b")
-        for x in (-0.2, -0.1, 0.1, 0.2):
-            ax.axvline(x, color="0.4", lw=0.8, ls=":" if abs(x) > 0.15 else "--")
-        ax.set_xlabel("altitude minus surftrak target (m)")
-        ax.set_ylabel("seconds")
-        ax.set_title(f"{len(flown)} transects, {s['minutes']:.0f} min", fontsize=9)
-        fig.tight_layout()
-        fig.savefig(args.out / "surftrak_error_hist.png")
+        plot_histogram(errs, s, len(flown), flown["flight"].nunique(), args.out)
     except ImportError:
         pass
     return 0
+
+
+def plot_histogram(errs: np.ndarray, s: dict, n_transects: int, n_days: int, out: Path) -> None:
+    """Distribution of altitude error, as a vector PDF (for the manuscript) and a PNG."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    lim, width = 0.5, 0.02
+    edges = np.arange(-lim, lim + width / 2, width)
+    # Errors beyond the axis are gathered into the end bins, not dropped.
+    clipped = np.clip(errs, -lim + width / 2, lim - width / 2)
+    counts, _ = np.histogram(clipped, bins=edges)
+    minutes = counts / 60
+    centers = (edges[:-1] + edges[1:]) / 2
+    inside = np.abs(centers) <= 0.10
+    band = (np.abs(centers) > 0.10) & (np.abs(centers) <= 0.20)
+
+    plt.rcParams.update({"font.size": 9, "font.family": "DejaVu Sans"})
+    fig, ax = plt.subplots(figsize=(5.2, 3.2))
+    ax.bar(centers[~(inside | band)], minutes[~(inside | band)], width=width,
+           color="#b9c4cb", edgecolor="white", linewidth=0.3)
+    ax.bar(centers[band], minutes[band], width=width, color="#7fa7ba",
+           edgecolor="white", linewidth=0.3)
+    ax.bar(centers[inside], minutes[inside], width=width, color="#1f5f7a",
+           edgecolor="white", linewidth=0.3)
+    for x in (-0.2, -0.1, 0.1, 0.2):
+        ax.axvline(x, color="0.35", lw=0.7, ls="--" if abs(x) < 0.15 else ":")
+    ax.text(0.98, 0.95,
+            f"within $\\pm$0.10 m: {s['within_010']:.1f}%\n"
+            f"within $\\pm$0.20 m: {s['within_020']:.1f}%\n"
+            f"mean |error|: {s['mae']:.3f} m",
+            transform=ax.transAxes, ha="right", va="top", fontsize=8,
+            bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="0.8", lw=0.6))
+    ax.set_xlim(-lim, lim)
+    ax.set_xlabel("ROV altitude minus surftrak target altitude (m)")
+    ax.set_ylabel("Time (min)")
+    ax.set_title(f"{n_transects} transects, {n_days} survey days, {s['minutes'] / 60:.1f} h",
+                 fontsize=9)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(out / "surftrak_error_hist.pdf")
+    fig.savefig(out / "surftrak_error_hist.png", dpi=220)
+    plt.close(fig)
 
 
 if __name__ == "__main__":

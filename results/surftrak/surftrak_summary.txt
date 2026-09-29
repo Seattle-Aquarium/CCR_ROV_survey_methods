@@ -1,5 +1,5 @@
 surftrak performance, HSIL, Port_of_Seattle, 2024 onward
-generated 2026-09-28 16:27 by code/surftrak_performance.py
+generated 2026-09-28 18:40 by code/surftrak_performance.py
 
 transects scored (any telemetry):          138
 transects with any SURFTRAK time:           124
