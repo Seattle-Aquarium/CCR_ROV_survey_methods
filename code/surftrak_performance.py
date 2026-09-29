@@ -36,7 +36,7 @@ Usage
     python surftrak_performance.py
     python surftrak_performance.py --root "D:/flights" --programs HSIL Port_of_Seattle --since 2024
 
-Outputs (default ``results/surftrak/`` in this repository)::
+Outputs (default ``surftrak_analysis/`` in this repository)::
 
     surftrak_transects.csv   one row per transect
     surftrak_flights.csv     one row per flight folder (survey day and site)
@@ -349,7 +349,7 @@ def main(argv=None) -> int:
                     help="target altitude (m) when no RFTarget was logged")
     ap.add_argument("--min-surftrak-pct", type=float, default=50.0,
                     help="a transect counts as 'flown in surftrak' above this share")
-    ap.add_argument("--out", type=Path, default=REPO / "results" / "surftrak")
+    ap.add_argument("--out", type=Path, default=REPO / "surftrak_analysis")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) // 2))
     args = ap.parse_args(argv)
 
