@@ -81,12 +81,13 @@ class LightingController:
     Light brightness is controlled by a PWM input from the BlueROV.
     """
 
-    # Hardware UART pin assignments
-    UART_TX_PIN = 0   # GP0
-    UART_RX_PIN = 1   # GP1
+    # The RX/TX silkscreen on the QtPy corresponds to UART1
+    # Use the default TX and RX pins for the UART
+    RS485_UART = 1
 
-    # PWM input from BlueROV servo output
-    PWM_INPUT_PIN = 16  # GP16
+    # PWM input on the "A0" pin, which is connected to RP2004 pin 38
+    # Also PWM6B
+    PWM_INPUT_PIN = Pin.cpu.GPIO29
 
     # ArduSub servo PWM range (microseconds)
     PWM_MIN_US = 1100
@@ -145,13 +146,13 @@ class LightingController:
     def _init_uart(self):
         """Initialize shared UART0 connection."""
         self._uart = UARTWrapper(
-            uart_id=0,
+            uart_id=self.RS485_UART,
             baudrate=self.BAUDRATE,
-            tx=Pin(self.UART_TX_PIN),
-            rx=Pin(self.UART_RX_PIN),
             timeout=2000
         )
-        print(f"UART0 initialized: TX=GP{self.UART_TX_PIN}, RX=GP{self.UART_RX_PIN}")
+
+        print(f"UART{self.RS485_UART} initialized on default pins")
+
 
     def _init_lights(self):
         """Initialize SeaLite objects for each light."""
@@ -231,6 +232,12 @@ class LightingController:
         for i in range(len(self._lights)):
             if self.set_light_level(i, level):
                 success += 1
+
+            # Arbitrary pause to let each light respond
+            # This could either be tuned to better match the
+            # actual time to respond, or the code to catch
+            # replies from the lights could be made more robust.
+            time.sleep_us(50000)
         return success
 
     def get_light_level(self, light_index):
