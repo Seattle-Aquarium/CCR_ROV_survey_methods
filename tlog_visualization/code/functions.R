@@ -396,14 +396,28 @@ my.theme = theme(panel.grid.major = element_blank(),
                  legend.text=element_text(size=15))
 
 
-## transect colors
+## transect colors: the Okabe-Ito colour-blind-safe palette, keeping the
+## green / blue / red look of the earlier figures. The first three (bluish
+## green, blue, vermillion) stay distinguishable under simulated protanopia,
+## deuteranopia and tritanopia; the previous green and red (#308014, #B22222)
+## were nearly identical under deuteranopia.
 transect_fills <- c(
   "0" = "gray",
-  "1" = "#308014",
-  "2" = "#104E8B",
-  "3" = "#B22222",
-  "4" = "#FF5721",
-  "5" = "#7D26CD"
+  "1" = "#009E73",
+  "2" = "#0072B2",
+  "3" = "#D55E00",
+  "4" = "#E69F00",
+  "5" = "#CC79A7"
+)
+
+## legend labels for survey transects (the V4 lighting-gain runs pass their own)
+transect_labels <- c(
+  "0" = "off transect",
+  "1" = "transect 1",
+  "2" = "transect 2",
+  "3" = "transect 3",
+  "4" = "transect 4",
+  "5" = "transect 5"
 )
 
 
@@ -439,6 +453,7 @@ power_over_time <- function(dat,
                             x_col = "min",
                             transect_col = "transect",
                             fills = transect_fills,
+                            labels = transect_labels,
                             lw_values = transect_lw_2,
                             legend_pos = c(0.15, 0.80),
                             xlab = "ROV flight time",
@@ -468,17 +483,7 @@ power_over_time <- function(dat,
     )
   ) +
     geom_path(alpha = alpha) +
-    scale_color_manual(
-      values = fills,
-      labels = c(
-        "0" = "off transect",
-        "1" = "gain = 20%",
-        "2" = "gain = 30%",
-        "3" = "gain = 30%",
-        "4" = "gain = 40%",
-        "5" = "gain = 50%"
-      )
-    ) +
+    scale_color_manual(values = fills, labels = labels) +
     guides(
       color = guide_legend(
         override.aes = list(linewidth = 1.5)
@@ -557,14 +562,9 @@ density_stack <- function(dat,
       legend.key        = element_rect(fill = NA, colour = NA)
     )
   
-<<<<<<< Updated upstream
   if (back_transform) {
-    
+
     scale_args <- list(
-=======
- if (back_transform) {
-    p <- p + scale_x_continuous(
->>>>>>> Stashed changes
       labels = function(x) round(10^x),
       expand = expansion(mult = expand_mult)
     )
@@ -606,27 +606,31 @@ density_stack <- function(dat,
 
 
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-## quick plot to visualize un-transformed W consumed
-#ggplot(dat, aes(x = W, fill = factor(transect))) +
-#  geom_histogram(position = "stack", bins = 40, color = "black") +
-#  scale_fill_manual(
-#    values = transect_fills,
-#    labels = c(
-#      "0" = "off transect",
-#      "1" = "transect 1",
-#      "2" = "transect 2",
-#      "3" = "transect 3"
-#    )
-#  ) +
-#  xlab("Power consumption (W)") +
-#  ylab("Frequency") +
-#  my.theme +
-#  theme(
-#    legend.position = c(0.85, 0.80),
-#    legend.title = element_blank(),
-#    legend.background = element_rect(fill = "white", colour = "black")
-#  )
-## END quick plot ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+## stacked histogram of un-transformed W consumed (Fig. S12)
+power_histogram <- function(dat,
+                            x_col = "W",
+                            transect_col = "transect",
+                            fills = transect_fills,
+                            labels = transect_labels,
+                            bins = 40,
+                            legend_pos = c(0.85, 0.80),
+                            xlab = "Power consumption (W)",
+                            ylab = "Frequency") {
+  x_col <- rlang::as_name(rlang::ensym(x_col))
+  transect_col <- rlang::as_name(rlang::ensym(transect_col))
+  ggplot(dat, aes(x = .data[[x_col]], fill = factor(.data[[transect_col]]))) +
+    geom_histogram(position = "stack", bins = bins, color = "black") +
+    scale_fill_manual(values = fills, labels = labels) +
+    xlab(xlab) +
+    ylab(ylab) +
+    my.theme +
+    theme(
+      legend.position = legend_pos,
+      legend.title = element_blank(),
+      legend.background = element_rect(fill = "white", colour = "black")
+    )
+}
+## END histogram ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 
