@@ -419,7 +419,7 @@ def main(argv=None) -> int:
             + [("All", np.ones(len(years), bool), flown_year)]):
         p = pooled(errs[mask], alts[mask])
         by_year.append(dict(
-            period=label, survey_days=sub["flight"].nunique(), transects=len(sub),
+            period=label, survey_days=sub["date"].nunique(), transects=len(sub),
             hours=round(p["seconds"] / 3600, 1), median_alt=round(p["median_alt"], 2),
             q1_alt=round(p["q1_alt"], 2), q3_alt=round(p["q3_alt"], 2),
             median_err=round(p["median_err"], 3), mae=round(p["mae"], 3),
@@ -433,8 +433,9 @@ def main(argv=None) -> int:
         f"transects scored (any telemetry):          {len(tr)}",
         f"transects with any SURFTRAK time:           {int((tr['surftrak_s'] > 0).sum())}",
         f"transects flown in SURFTRAK (>= {args.min_surftrak_pct:.0f}% of time): {len(flown)}",
-        f"survey days (flight folders) represented:   {flown['flight'].nunique()}",
-        f"  by program: " + ", ".join(f"{p} {n}" for p, n in flown.groupby('program')['flight'].nunique().items()),
+        f"survey days (calendar dates) represented:   {flown['date'].nunique()}",
+        f"  by program: " + ", ".join(f"{p} {n}" for p, n in flown.groupby('program')['date'].nunique().items()),
+        f"flight folders represented:                 {flown['flight'].nunique()}",
         f"median share of transect time in SURFTRAK:  {flown['surftrak_pct'].median():.1f}%",
         f"SURFTRAK seconds with altitude (pooled):    {s['seconds']} ({s['minutes']:.1f} min)",
         f"SURFTRAK seconds without altitude (dropout): {int(flown['dropout_s'].sum())}",
@@ -470,7 +471,7 @@ def main(argv=None) -> int:
     print("\n" + text)
 
     try:
-        plot_histogram(errs, s, len(flown), flown["flight"].nunique(), args.out)
+        plot_histogram(errs, s, len(flown), flown["date"].nunique(), args.out)
     except ImportError:
         pass
     return 0

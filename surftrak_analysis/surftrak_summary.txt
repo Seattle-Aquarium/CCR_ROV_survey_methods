@@ -1,11 +1,12 @@
 surftrak performance, HSIL, Port_of_Seattle, 2024 onward
-generated 2026-09-28 18:40 by code/surftrak_performance.py
+generated 2026-09-30 07:43 by code/surftrak_performance.py
 
 transects scored (any telemetry):          138
 transects with any SURFTRAK time:           124
 transects flown in SURFTRAK (>= 50% of time): 118
-survey days (flight folders) represented:   31
-  by program: HSIL 10, Port_of_Seattle 21
+survey days (calendar dates) represented:   27
+  by program: HSIL 10, Port_of_Seattle 17
+flight folders represented:                 31
 median share of transect time in SURFTRAK:  100.0%
 SURFTRAK seconds with altitude (pooled):    74957 (1249.3 min)
 SURFTRAK seconds without altitude (dropout): 15
