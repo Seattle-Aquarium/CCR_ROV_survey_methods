@@ -982,7 +982,7 @@ plot_V1 <- function(dat,
   dat[[flight_col]] <- factor(
     dat[[flight_col]],
     levels = c("low", "high"),
-    labels = c("0-1 kt water current", "1-2.5 kt water current")
+    labels = c("0-1 kt water current", "2-3 kt water current")
   )
   
   if (order_by_x && all(c(flight_col, x_col) %in% names(dat))) {
@@ -1081,7 +1081,7 @@ V1_density_stack <- function(dat,
   dat[[flight_col]] <- factor(
     dat[[flight_col]],
     levels = c("low", "high"),
-    labels = c("0-1 kt water current", "1-2.5 kt water current")
+    labels = c("0-1 kt water current", "2-3 kt water current")
   )
   
   dens_args <- list(position = "stack", alpha = alpha, adjust = adjust)
