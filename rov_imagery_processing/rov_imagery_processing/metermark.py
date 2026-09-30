@@ -10,8 +10,8 @@ Everything here works at **sensor rate**, off the full-rate series in
 ``TelemetryStore``. That matters more than it sounds. Measuring distance from
 positions already resampled to one row per second throws away the motion inside
 each second before it is ever counted; measured against the 100 m tape
-transects that moved a third of the marks far enough to select a different
-photograph. Accumulating at sensor rate and only rounding when marks are
+passes that moved 29% of the marks far enough to select a different
+photograph (``distance_calibration/`` at the repository root). Accumulating at sensor rate and only rounding when marks are
 written out puts that figure near zero.
 
 Which channel the distance comes from is not a fixed choice, because the
@@ -77,9 +77,9 @@ class DistanceSource:
     """One way of measuring how far the vehicle traveled.
 
     ``scale`` brings the source onto the same footing as the others. Each was
-    measured against the 19 usable 100 m tape transects in the 2024-26
-    archive; the median ratio of measured to true is inverted to give the
-    factor here.
+    measured against passes flown along 100 m tapes (``distance_calibration/``
+    at the repository root); the median ratio of measured to true is inverted
+    to give the factor here.
     """
 
     key: str

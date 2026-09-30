@@ -1,0 +1,15 @@
+Distance sources against 100 m transect tapes
+generated 2026-09-30 08:24 by distance_calibration/tape_calibration.py
+
+passes logged: 40; used: 35 (excluded in tape_passes.csv: 5; no telemetry: 0)
+days: 10
+
+source          passes  median share of tape (IQR)   implied factor  program factor  calibrated: median, MAE
+ekf_velocity        28    99.3% (97.7-100.9%)          1.007           1.010        100.3%, 4.7%
+dvl                 33    96.3% (94.4-97.8%)          1.038           1.037         99.9%, 4.5%
+gps_velocity        33    92.0% (90.9-93.6%)          1.087           1.058         97.3%, 5.4%
+ekf_position        28   104.5% (100.6-111.9%)          0.957           0.979        102.3%, 14.2%
+
+as the program measures it (first available source, calibrated), 35 passes: median 99.6% of the tape, mean absolute error 4.3%; sources used: {'ekf_velocity': 30, 'dvl': 5}
+
+1 Hz instead of sensor rate (EKF velocity, 30 passes, 2985 one-metre marks, photographs every 3 s): 864 marks (28.9%) land on a different photograph

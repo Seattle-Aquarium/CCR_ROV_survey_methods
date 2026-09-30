@@ -174,13 +174,15 @@ carries a scale factor measured against the 100 m tape transects:
 | `GLOBAL_POSITION_INT` velocity | ×1.058 | fallback; reads ~4.5% under the EKF |
 | `LOCAL_POSITION_NED` position, differenced | ×0.979 | last resort; noise and filter resets inflate it |
 
-Across the 19 tape windows that describe one clean pass this lands at a median
-of **100.0%** of true, mean absolute error 2.4%.
+Checked against 35 passes along 100 m tapes (`distance_calibration/` at the
+repository root), EKF velocity reads a median 99.3% and DVL odometry 96.3% of
+the tape, within 0.3% of the factors above, and the program as run lands at a
+median of **99.6%** of the tape.
 
 Distance is accumulated at **sensor rate**, not from a 1 Hz CSV. Measuring from
 positions already resampled to one row per second discards the motion inside
-each second before it is counted; on the tape transects that moved a third of
-the marks far enough to pick a different photograph.
+each second before it is counted; on the tape passes that moved 29% of the
+marks far enough to pick a different photograph.
 
 **What it tells you when something is wrong.** A timed transect has no tape to
 check against, so the pass reports its own confidence rather than presenting a

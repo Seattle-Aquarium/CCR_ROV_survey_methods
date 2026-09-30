@@ -25,6 +25,7 @@ Our goal is to create an **open-source reference** that allows other research gr
 | [`tlog_visualization/`](tlog_visualization/) | R code, data and figures for surftrak altitude holding and ROV power use | Figs. 3–4, S11, S13 |
 | [`lighting/`](lighting/) | Lighting-control subsystem for the V4 lights: Raspberry Pi Pico code, wiring, parts list and a lighting simulation | Fig. S8, Table S3 |
 | [`lua_scripts/`](lua_scripts/) | ArduSub Lua scripts: `surftrak2.lua`, `transect3.lua`, `message_interval.lua`, `ahrs-set-origin.lua` | Table S2 |
+| [`distance_calibration/`](distance_calibration/) | Distance sources checked against 100 m transect tapes: the passes, the script and per-pass results behind the meter-mark calibration factors | Positioning results; Supp. Section S4 |
 | [`survey_log/`](survey_log/) | Flight log of every ROV survey transect (2022–2026) and a script that reproduces the survey totals | Methods; Supp. Section S1 |
 | [`field_checklist/`](field_checklist/) | One-page printable field log (LaTeX source and PDF) | Fig. S1 |
 | [`sort_by_meter_mark/`](sort_by_meter_mark/) | Example output of `optimize_path.py` and meter-mark photo sorting for three transects | — |

@@ -1,0 +1,41 @@
+flight,date,tape,pass,start,end,pauses,true_m,use,note
+HSIL/2024/2024_10_08_diver-ROV_Centennial_Park,2024-10-08,deep,1,10:07:50,10:39:48,,100,no,out-and-back along both sides of the tape logged as one window; the turn at 100 m was not recorded
+HSIL/2024/2024_10_08_diver-ROV_Centennial_Park,2024-10-08,deep,2,10:48:08,10:51:00,,100,no,3-minute window; not a full pass
+HSIL/2024/2024_10_08_diver-ROV_Centennial_Park,2024-10-08,shallow,3,11:32:00,11:50:14,,100,yes,
+HSIL/2024/2024_10_08_diver-ROV_Centennial_Park,2024-10-08,shallow,4,11:51:00,12:07:30,,100,yes,
+HSIL/2024/2024_10_09_diver-ROV_EBM,2024-10-09,deep,1,10:03:00,10:27:00,,100,yes,start logged to the minute
+HSIL/2024/2024_10_09_diver-ROV_EBM,2024-10-09,deep,2,10:28:05,10:58:00,,100,no,ended at 40 m after an entanglement; logged end time inconsistent
+HSIL/2024/2024_10_09_diver-ROV_EBM,2024-10-09,shallow,3,11:32:56,11:50:57,,100,yes,
+HSIL/2024/2024_10_09_diver-ROV_EBM,2024-10-09,shallow,4,12:06:11,12:24:07,,100,yes,
+HSIL/2024/2024_12_03_Shaw_Island,2024-12-03,deep,deep 1,11:06:37,11:27:50,,100,yes,
+HSIL/2024/2024_12_03_Shaw_Island,2024-12-03,deep,deep 2,11:28:47,11:47:20,,100,yes,
+HSIL/2024/2024_12_03_Shaw_Island,2024-12-03,shallow,shallow 1,12:21:43,12:40:18,,100,yes,
+HSIL/2024/2024_12_03_Shaw_Island,2024-12-03,shallow,shallow 2,12:41:42,13:00:02,,100,yes,
+HSIL/2024/2024_12_05_Satellite_Island,2024-12-05,deep,deep 1,10:23:13,10:46:35,,100,yes,
+HSIL/2024/2024_12_05_Satellite_Island,2024-12-05,deep,deep 2,10:48:18,11:10:10,,100,yes,
+HSIL/2024/2024_12_05_Satellite_Island,2024-12-05,shallow,shallow 1,11:56:10,12:12:08,,100,yes,
+HSIL/2024/2024_12_05_Satellite_Island,2024-12-05,shallow,shallow 2,12:21:58,12:44:46,,100,yes,
+HSIL/2025/2025_01_27_Centennial,2025-01-27,deep,deep 1,10:02:14,10:22:22,,100,yes,
+HSIL/2025/2025_01_27_Centennial,2025-01-27,deep,deep 2,10:25:26,10:46:15,,100,yes,
+HSIL/2025/2025_01_27_Centennial,2025-01-27,shallow,shallow 3,11:23:48,11:43:36,11:28:30-11:29:30,100,yes,
+HSIL/2025/2025_01_27_Centennial,2025-01-27,shallow,shallow 4,11:34:36,12:03:29,,100,no,logged start (11:34:36) falls inside shallow 3
+HSIL/2025/2025_01_28_EBM,2025-01-28,deep,deep 1,10:06:47,10:27:15,,100,yes,
+HSIL/2025/2025_01_28_EBM,2025-01-28,deep,deep 2,10:27:52,10:47:11,,100,yes,
+HSIL/2025/2025_01_28_EBM,2025-01-28,shallow,shallow 3,11:20:36,11:41:58,,100,yes,
+HSIL/2025/2025_01_28_EBM,2025-01-28,shallow,shallow 4,11:42:52,12:05:40,,100,yes,
+HSIL/2025/2025_08_28_EBM,2025-08-28,,T1,09:44:14,10:00:35,,100,yes,0 to 100 m
+HSIL/2025/2025_08_28_EBM,2025-08-28,,T2,10:01:24,10:19:05,,100,yes,100 to 0 m
+HSIL/2025/2025_08_28_EBM,2025-08-28,,T3,11:34:05,11:52:11,,100,yes,0 to 100 m
+HSIL/2025/2025_08_28_EBM,2025-08-28,,T4,11:55:25,12:28:04,,100,yes,100 to 0 m
+HSIL/2025/2025_08_29_CentennialPark,2025-08-29,deep,T1,09:35:43,09:49:45,,100,yes,
+HSIL/2025/2025_08_29_CentennialPark,2025-08-29,deep,T2,09:54:36,10:09:13,,100,yes,
+HSIL/2025/2025_08_29_CentennialPark,2025-08-29,shallow,T3,11:07:50,11:26:15,,100,yes,
+HSIL/2025/2025_08_29_CentennialPark,2025-08-29,shallow,T4,11:27:56,11:46:26,,100,yes,
+HSIL/2025/2025_09_26_Satellite_Island,2025-09-26,deep,T1_deep,10:50:25,11:16:07,11:06:46-11:14:00,100,yes,
+HSIL/2025/2025_09_26_Satellite_Island,2025-09-26,deep,T2_deep,11:18:16,11:39:41,11:33:40-11:36:40,100,yes,
+HSIL/2025/2025_09_26_Satellite_Island,2025-09-26,shallow,T3_shallow,12:39:36,12:56:00,12:50:11-12:53:20,100,no,split between two vehicles (finished by Nereo at 14:35-14:42)
+HSIL/2025/2025_09_26_Satellite_Island,2025-09-26,shallow,T4_shallow,14:16:23,14:34:16,,100,yes,flown by Nereo
+HSIL/2025/2025_09_27_Shaw_Island,2025-09-27,shallow,T1_shallow,12:04:25,12:18:40,,100,yes,
+HSIL/2025/2025_09_27_Shaw_Island,2025-09-27,shallow,T2_shallow,12:21:21,12:36:53,,100,yes,
+HSIL/2025/2025_09_27_Shaw_Island,2025-09-27,deep,T3_deep,13:00:19,13:14:20,,100,yes,
+HSIL/2025/2025_09_27_Shaw_Island,2025-09-27,deep,T4_deep,13:16:05,13:30:49,,100,yes,
