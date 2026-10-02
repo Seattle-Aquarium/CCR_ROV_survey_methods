@@ -19,6 +19,11 @@ DEFAULTS = {
     #: The folder Madrona saves C3 imagery under, as BlueOS's File Browser
     #: addresses it. Blank means "search the vehicle for it".
     "c3_folder": "",
+    #: The DVL's address. Blank means "the one the BlueOS DVL extension
+    #: reports".
+    "dvl_host": "",
+    #: Acoustic snapshots (echo profile and spectrum) per second; 0 is off.
+    "dvl_snapshot_hz": 5.0,
 }
 
 

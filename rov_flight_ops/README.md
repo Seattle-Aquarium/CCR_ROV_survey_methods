@@ -308,7 +308,57 @@ It is the only part of the program that can write to a vehicle besides
 
 ---
 
-## 3  Transects
+## 3  DVL
+
+The Water Linked DVL A50, beam by beam — and **everything it sends, written
+to the flight folder from the moment one is chosen until the program
+closes**, armed or not, into `logs/dvl/`. Built to find out where DVL
+messages are being lost: the team sees gaps in the mcaps, Cockpit and QGC,
+but not on the DVL's own web page.
+
+**Its own design documents are in [specifications/](specifications/README.md)**:
+what the DVL exposes and what it does not, every file and column, the
+guarantees and the tests that hold them, how to diagnose dropped messages
+against an mcap, and a bench checklist. In outline:
+
+* **What is captured.** The DVL's TCP JSON stream byte for byte (every
+  velocity-and-transducer report, every dead-reckoning report), the web
+  GUI's live stream (orientation at 10 Hz, and the three velocity fields the
+  TCP stream lacks — including whether periodic cycling is under way), the
+  DVL's temperature, warnings, configuration, clock, NTP state and connected
+  clients every two seconds, and its two acoustic views — **each beam's echo
+  strength against range, and each beam's spectral density** — as snapshots,
+  5 a second by default. From the vehicle: the BlueOS DVL extension's status,
+  and how many of its MAVLink messages mavlink2rest counted. Each row carries
+  the flight the recorder had open.
+* **As JSON and as CSV.** The raw stream is kept verbatim and indexed line
+  by line; every report is also a CSV row with every field the DVL sent —
+  anything this program does not know goes into an `extra_json` column
+  rather than being dropped.
+* **Where a gap came from.** Every report's own timestamps let a gap be put
+  on one side of the link: the DVL made nothing (*quiet*), the DVL made
+  reports that never arrived (*missing*), or they arrived late (*stall*).
+  Invalid reports — lost bottom lock — are counted separately, because the
+  stock BlueOS extension **drops every invalid report**, so from the mcap's
+  side an invalid stretch is a gap.
+* **Did it reach the autopilot?** what the DVL emitted, beside what
+  mavlink2rest counted arriving from the extension, and how many clients are
+  connected to the DVL (2 means the extension is; 1 means it is not).
+* **Read-only.** It asks the DVL four questions (`get_config`,
+  `get_version_info`, `get_time_status`, `get_time_ntp`) and issues GETs; a
+  test fails if anything else appears. The one exception is on request:
+  **Water Linked's diagnostic log**, which the DVL records for 15 s to 5 min
+  for their support team, collected only with the vehicle confirmed disarmed.
+* **The DVL's address** comes from the BlueOS DVL extension; type one on the
+  tab to override it. Opening the tab with no flight folder shows the DVL
+  live and writes nothing.
+
+`python -m rov_flight_ops.dvl.simulator --http 8080` runs a stand-in DVL for
+trying the tab without a vehicle: type `127.0.0.1:8080` as the address.
+
+---
+
+## 4  Transects
 
 Straight after the flight, with the vehicle on deck and disarmed.
 
@@ -376,7 +426,7 @@ with the vehicle's own time preserved.
 
 ---
 
-## 4  BlueOS logs
+## 5  BlueOS logs
 
 See what is on the Pi, download it into the flight folder, and clear old files
 off it.
@@ -544,7 +594,7 @@ module issues read-only GETs, and a test fails if a write appears anywhere else.
 
 ---
 
-## 5  Flight summary
+## 6  Flight summary
 
 **Read the day** builds the flight report (PDF) from everything in the flight's
 `logs`; **Recordings / What the check found / Autopilot logs / Transects** are
@@ -564,7 +614,7 @@ How a recording's ending is described is limited to what the logs show:
 * **unexplained** — anything else, including a recording the vehicle never
   closed, where an interrupted recorder and a disarm look alike.
 
-## 6  Analyze transects
+## 7  Analyze transects
 
 Unchanged from UTC for now: per-transect CSVs (with tide-corrected depth) and a
 map via the transect extractor, and a sensor-health report.
@@ -607,6 +657,12 @@ vehicle's SD card.
         flight_*.json            parameters, versions and what changed
         pi_downloads.jsonl       every download: source, size, time, SHA-256
         pi_cleanup_*.txt         what Clean the Pi approved, deleted and kept
+        dvl/
+            dvl_<id>_*           one DVL capture, from folder chosen to program
+                                 closed: the raw streams, a CSV per report type,
+                                 status, echo and spectrum snapshots, events,
+                                 and dvl_<id>.json (specifications/dvl_log_schema.md)
+            dvl_diagnostic_*     Water Linked diagnostic logs, if collected
     photos/
         C3/                      C3 imagery from the Pi (left/, right/, center/, calibration)
 ```
@@ -617,8 +673,9 @@ Older flights with recordings loose in `logs/` are read exactly as before.
 
 ## Settings and cache
 
-* `%LOCALAPPDATA%\CCR_ROV\rov_flight_ops\settings.json` — the vehicle address
-  and the C3 folder, remembered between runs.
+* `%LOCALAPPDATA%\CCR_ROV\rov_flight_ops\settings.json` — the vehicle address,
+  the C3 folder, the DVL address (blank: ask the extension) and the DVL
+  snapshot rate, remembered between runs.
 * `%LOCALAPPDATA%\utc_cache\` — extracted telemetry, per flight. This location
   is shared with ROV Imagery Processing **on purpose**: it is data, not
   code, and sharing it means a `.BIN` telemetry override chosen on Flight summary
@@ -724,6 +781,10 @@ the tests; each wants one look at the real thing:
       large C3 listing with *List individual files*. Afterwards, open
       *Diagnostics* and check `app.log` has no stall reports or errors you did
       not expect, and read the achieved row rate on Monitoring.
+- [ ] **DVL** — its own checklist:
+      [specifications/dvl_bench_checklist.md](specifications/dvl_bench_checklist.md)
+      (connection, whether mavlink2rest sees the extension's messages, the
+      beam positions, the files, and four short experiments).
 
 ---
 
@@ -736,9 +797,11 @@ rov_flight_ops/
     launch.py                entry point for a packaged build
     pyproject.toml           package and dependencies
     assets/                  fonts, logos, icon
+    specifications/          design documents: the DVL capture's sources, schema,
+                             invariants, diagnosis guide, provenance, bench checklist
     rov_flight_ops/          the package
         gui/
-            app.py           the window and its six tabs
+            app.py           the window and its seven tabs
             shell.py         banner fold, tabs, resizable output (same file as imagery's copy)
             widgets.py       cards, resize grips, site/transect editors
             monitorpage.py   Monitoring sections 2-4
@@ -749,6 +812,7 @@ rov_flight_ops/
             navgauges.py     the altitude and power gauges -- built and tested, drawn by nothing since the Navigation restructure
             navstatus.py     configured / receiving / valid / fused, testable without a screen
             navdialogs.py    health, origin, offline maps, start, and review-and-apply
+            dvlpage.py       DVL tab: the beams, stream health, live charts, echo and spectrum
             transectsetup.py Transects tab
             logspage.py      BlueOS logs tab
             summarypage.py, healthpage.py   Flight summary
@@ -770,6 +834,16 @@ rov_flight_ops/
             plan.py          survey-plan geometry: lines, boxes, grids, lanes
             guidance.py      following a line: cross-track and along-track
             replay.py        recorded and synthetic playback
+        dvl/                 the DVL capture, everything that is not a widget
+            protocol.py      the DVL's formats, byte-exact framing, the read-only commands, the beams
+            cadence.py       report intervals on two clocks, and where a gap came from
+            websocket.py     a small WebSocket client for the DVL's web stream
+            webapi.py        the DVL's address, and GETs on one kept-alive connection
+            capture.py       one capture: its threads, its files, its record
+            recorder.py      start, move and stop captures off the window's thread
+            live.py          what the DVL tab draws
+            diagnostic.py    Water Linked's diagnostic log, disarmed only
+            simulator.py     a stand-in DVL for the tests and the bench
         pifiles.py           Pi files: list, spans, choose, download, delete
         diagnostics.py       app.log, faults.log, stall watchdog (same file as imagery's copy)
         previewsource.py     where the transect preview's depth comes from

@@ -10,14 +10,17 @@ day uses it:
 2. **Navigation** -- where the operator sits *during* a flight: the map, the
    flight and power instruments, and the navigation suite. Cockpit is on the
    monitor above and has the camera; this has everything else.
-3. **Transects** -- straight after the flight, with the vehicle disarmed on
+3. **DVL** -- the Water Linked DVL beam by beam, everything it sends captured
+   to the flight folder from the moment one is chosen, and whether what it
+   sends reaches the autopilot.
+4. **Transects** -- straight after the flight, with the vehicle disarmed on
    deck: type the transect times, save them, and check them against the dive
    profile.
-4. **BlueOS logs** -- see what is on the Pi, download it into the flight
+5. **BlueOS logs** -- see what is on the Pi, download it into the flight
    folder, and clear old files off it.
-5. **Flight summary** -- the day read back, and whether the recordings are
+6. **Flight summary** -- the day read back, and whether the recordings are
    sound.
-6. **Analyze transects** -- per-transect CSVs and sensor health.
+7. **Analyze transects** -- per-transect CSVs and sensor health.
 
 Imagery -- photos and video -- is ROV Imagery Processing, a separate program.
 """
@@ -27,6 +30,7 @@ from __future__ import annotations
 import logging
 import re
 import sys
+import threading
 import time
 from datetime import date as _date
 from pathlib import Path
@@ -59,6 +63,11 @@ class App(Shell):
         #: The laptop/tether recorder. Held here so it goes on recording
         #: whichever tab is open -- the operator is busy flying.
         self.recorder = None
+        #: The DVL capture. Like the recorder, held here so it records
+        #: whichever tab is open; made on first use.
+        self.dvl = None
+        self._dvl_closing: threading.Event | None = None
+        self._dvl_close_began = 0.0
         self.discovery: discovery.Discovery | None = None
         self._sites: list[SiteFrame] = []
         #: The recorder's "close" request while the window waits on it.
@@ -139,12 +148,60 @@ class App(Shell):
         logs = self.pages.get("logs")
         if logs is not None:
             logs.forget_vehicle()
+        if self.dvl is not None:
+            self.dvl.set_vehicle_host(shown)
+
+    # ------------------------------------------------------------------
+    #  the DVL capture
+    # ------------------------------------------------------------------
+
+    def dvl_recorder(self):
+        """The application's DVL capture, made on first use."""
+        if self.dvl is None:
+            from ..dvl.capture import DEFAULT_SNAPSHOT_HZ
+            from ..dvl.recorder import DvlRecorder
+            try:
+                hz = float(self.settings.get("dvl_snapshot_hz", DEFAULT_SNAPSHOT_HZ))
+            except (TypeError, ValueError):
+                hz = DEFAULT_SNAPSHOT_HZ
+            self.dvl = DvlRecorder(vehicle_host=self.version_host(),
+                                   dvl_host=self.settings.get("dvl_host", ""),
+                                   snapshot_hz=hz,
+                                   flight_id=self._flight_for_dvl)
+        return self.dvl
+
+    def _flight_for_dvl(self) -> str:
+        """The flight being recorded now, for each DVL row. Read off-thread."""
+        rec = self.recorder
+        if rec is None:
+            return ""
+        st = rec.status
+        return st.flight_id if st.state in ("starting", "recording", "closing") else ""
+
+    def _arm_dvl(self) -> None:
+        """Capture the DVL into the chosen folder, from now until it changes.
+
+        Started with the folder, as the recorder's watch is, and not waiting
+        for arming: the DVL streams whether or not the vehicle is armed, and
+        a fault before the dive is as worth having as one during it.
+        """
+        if not self.flight_dir:
+            return
+        try:
+            from ..dvl.recorder import dvl_folder
+            self.dvl_recorder().use_folder(dvl_folder(self.flight_dir))
+            self._log(f"DVL: capturing everything it sends into "
+                      f"{dvl_folder(self.flight_dir)}.")
+        except Exception as ex:
+            diagnostics.log_exception("starting the DVL capture", *sys.exc_info())
+            self._log(f"The DVL capture could not start: {ex}")
 
     # ------------------------------------------------------------------
     #  tabs
     # ------------------------------------------------------------------
 
     def build_tabs(self) -> None:
+        from .dvlpage import DvlPage
         from .healthpage import HealthPage
         from .logspage import LogsPage
         from .monitorpage import MonitorPage
@@ -173,17 +230,23 @@ class App(Shell):
         nav.grid(row=0, column=0, sticky="nsew")
         self.mount("Navigation", "navigation", nav)
 
-        # 3. Transects.
+        # 3. DVL: the beams, the stream's health, and what reached MAVLink.
+        tab = self.add_tab("DVL", "dvl")
+        dvl = DvlPage(tab, self)
+        dvl.grid(row=0, column=0, sticky="nsew")
+        self.mount("DVL", "dvl", dvl)
+
+        # 4. Transects.
         tab = self.add_tab("Transects", "transects")
         self.mount("Transects", "transects", TransectSetup(tab, self))
 
-        # 4. BlueOS logs.
+        # 5. BlueOS logs.
         tab = self.add_tab("BlueOS logs", "blueos_logs")
         logs = LogsPage(tab, self)
         logs.grid(row=0, column=0, sticky="nsew")
         self.mount("BlueOS logs", "logs", logs)
 
-        # 5. Flight summary: the report, then recording health, in one column.
+        # 6. Flight summary: the report, then recording health, in one column.
         tab = self.add_tab("Flight summary", "flight_summary")
         body = self.scroll_body(tab)
         summary = SummaryPage(body, self, scroll=False)
@@ -193,7 +256,7 @@ class App(Shell):
         self.mount("Flight summary", "summary", summary)
         self.mount("Flight summary", "health", health)
 
-        # 6. Analyze transects.
+        # 7. Analyze transects.
         tab = self.add_tab("Analyze transects", "analyze_transects")
         analyze = TransectPage(tab, self)
         analyze.grid(row=0, column=0, sticky="nsew")
@@ -233,6 +296,12 @@ class App(Shell):
                 text, color = f"Watching {rec.host} for arming", T.TEXT_MUTED
             if st is not None and st.degraded and not st.problem:
                 text, color = f"{text}  ·  ⚠ a recorder worker is stuck", T.WARN
+            # The DVL capture fails separately from the flight recorder, and
+            # a failure in it must be seen from every tab just the same.
+            dvl_problem = self.dvl.problem if self.dvl is not None else ""
+            if dvl_problem:
+                short = dvl_problem if len(dvl_problem) < 70 else dvl_problem[:67] + "…"
+                text, color = f"{text}  ·  ⚠ DVL: {short}", T.WARN
             self.recorder_badge.configure(text=text, text_color=color)
         except Exception:
             diagnostics.log_exception("recorder badge", *sys.exc_info(),
@@ -409,6 +478,7 @@ class App(Shell):
         except Exception as ex:
             diagnostics.log_exception("starting monitoring", *sys.exc_info())
             self._log(f"Monitoring could not start: {ex}")
+        self._arm_dvl()
 
     # ------------------------------------------------------------------
     #  the survey plan -- edited on Transects, read everywhere
@@ -494,6 +564,9 @@ class App(Shell):
             except Exception:
                 diagnostics.log_exception("stopping Navigation", *sys.exc_info(),
                                           level=logging.WARNING)
+        # The DVL capture too, on its own thread: it only has to close files
+        # and join its readers, and it can do that while the flight closes.
+        self._begin_dvl_shutdown()
 
         rec = self.recorder
         waiting = self._close_request
@@ -509,7 +582,8 @@ class App(Shell):
                 self.close_now()
             return False
         if rec is None:
-            return True
+            self._close_after_dvl()
+            return False
         if rec.status.state in ("starting", "recording", "closing"):
             if not messagebox.askyesno(
                 APP_NAME,
@@ -540,7 +614,7 @@ class App(Shell):
             if req.result is True:
                 log.info("recorder closed cleanly in %.1f s; closing the window",
                          waited)
-                self.close_now()
+                self._close_after_dvl()
                 return
             detail = st.degraded or st.problem or st.outcome or st.line()
             log.warning("recorder did not close cleanly after %.1f s: %s",
@@ -569,6 +643,47 @@ class App(Shell):
                 self.close_now()
                 return
         self.after(200, self._await_close)
+
+    #: How long closing the window waits for the DVL capture to close its
+    #: files. Longer than its own stop timeout, so a clean stop is seen.
+    DVL_CLOSE_WAIT_S = 12.0
+
+    def _begin_dvl_shutdown(self) -> None:
+        if self.dvl is None or self._dvl_closing is not None:
+            return
+        done = threading.Event()
+        self._dvl_closing = done
+        self._dvl_close_began = time.monotonic()
+        dvl = self.dvl
+
+        def run() -> None:
+            try:
+                if not dvl.shutdown():
+                    log.warning("the DVL capture did not stop cleanly: %s",
+                                dvl.stuck or "timed out")
+            except Exception:
+                diagnostics.log_exception("closing the DVL capture", *sys.exc_info())
+            finally:
+                done.set()
+
+        threading.Thread(target=run, daemon=True, name="dvl-close").start()
+
+    def _close_after_dvl(self) -> None:
+        """Close the window once the DVL capture has closed its files.
+
+        Waits on the window's own loop, so it keeps redrawing, and gives up
+        after `DVL_CLOSE_WAIT_S`: its files are flushed every second, so the
+        most a capture that will not stop can lose is the last of that.
+        """
+        done = self._dvl_closing
+        if (done is None or done.is_set()
+                or time.monotonic() - self._dvl_close_began > self.DVL_CLOSE_WAIT_S):
+            if done is not None and not done.is_set():
+                log.warning("window closed before the DVL capture finished closing")
+            self.close_now()
+            return
+        self.status.configure(text="Closing the DVL capture…")
+        self.after(150, self._close_after_dvl)
 
 
 def _guess_from_path(p: Path | None) -> tuple[str, str]:
