@@ -54,9 +54,10 @@ def test_the_tabs_run_in_the_order_of_a_survey_day(app):
     3. It sits there because that is the order of the day: the folder is
     chosen on Monitoring before the ROV is wet, Navigation is where the
     operator sits for the whole dive, and the transect times are typed
-    afterwards with the vehicle disarmed on deck.
+    afterwards with the vehicle disarmed on deck. DVL went in at 3 in October
+    2026, beside Navigation, because it is read during the dive too.
     """
-    assert app.nav.sections == ["Monitoring", "Navigation", "Transects",
+    assert app.nav.sections == ["Monitoring", "Navigation", "DVL", "Transects",
                                 "BlueOS logs", "Flight summary",
                                 "Analyze transects"]
     assert "analyze" in app.pages

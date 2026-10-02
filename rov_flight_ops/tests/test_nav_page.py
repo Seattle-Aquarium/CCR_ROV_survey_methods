@@ -800,7 +800,10 @@ def test_the_trust_line_is_hidden_until_it_has_something_to_say(app):
                  "horiz_pos_rel": M.good(1.0, recv_mono=now),
                  "const_pos_mode": M.good(0.0, recv_mono=now)}
         page._render_trust(s, now)
-        app.update()
+        # Idle tasks only. A full update() also runs the page's own redraw
+        # timer, which re-renders from the replay collector -- no position --
+        # and hides the line again whenever its tick happens to fall here.
+        app.update_idletasks()
         assert page._trust_shown is True
         assert page.trust_label.grid_info() != {}
         assert "dead-reckoned" in page.trust_label.cget("text")
@@ -1055,10 +1058,18 @@ def test_the_health_drawer_leads_with_observations_and_offers_no_repair(
     place a "repair navigation" button would be most tempting to add."""
     from rov_flight_ops.gui import navdialogs
     from rov_flight_ops.nav import model as MM
+    from rov_flight_ops.nav import origin as O
 
     page = _nav_page(app)
     _no_http(monkeypatch)
     previous = page.collector
+    # Pinned, like everything else the drawer is given here. Left alone it is
+    # whatever the session's live collector last read -- and a parameter read
+    # that happened to land inside test_monitor's fake vehicle leaves an origin
+    # explanation ("…does not survive a reboot") that has nothing to do with
+    # what this test is checking.
+    previous_origin = page.origin_state
+    page.origin_state = O.detect(None)
     dlg = None
     try:
         now = time.monotonic()
@@ -1109,6 +1120,7 @@ def test_the_health_drawer_leads_with_observations_and_offers_no_repair(
             dlg.destroy()
         page.collector = previous
         page.profile_key = before_profile
+        page.origin_state = previous_origin
         app.update()
 
 
