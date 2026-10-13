@@ -1,0 +1,88 @@
+name: BlueOS Light Monitor
+
+# Tests the extension and the light controller's telemetry logic, then builds
+# the extension's Docker image for the Pi (arm/v7 and arm64) and pushes it to
+# Docker Hub, which is where BlueOS installs extensions from.
+#
+# Pushing needs two repository secrets (Settings -> Secrets and variables ->
+# Actions):
+#   DOCKER_USERNAME   the Docker Hub account, lower case (e.g. zhrandell)
+#   DOCKER_PASSWORD   a Docker Hub *access token* for it, not the password
+# Without them the image is still built (so a broken Dockerfile still fails
+# the run) but not pushed.
+#
+# Tags pushed: `main` from the main branch, `0.1.0` and `latest` from a git
+# tag `light-monitor-v0.1.0`, and the branch name from a manual run
+# (Actions -> BlueOS Light Monitor -> Run workflow) on any branch -- which is
+# how to put a test build on the bench vehicle before anything is merged.
+on:
+  push:
+    branches: [main]
+    tags: ["light-monitor-v*"]
+    paths:
+      - "blueos_extensions/light_monitor/**"
+      - "lighting/code/**"
+      - ".github/workflows/blueos-light-monitor.yml"
+  pull_request:
+    paths:
+      - "blueos_extensions/light_monitor/**"
+      - "lighting/code/**"
+      - ".github/workflows/blueos-light-monitor.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: python -m pip install --upgrade pip pytest pyserial==3.5 mpy-cross
+      - name: Extension tests
+        run: python -m pytest -q blueos_extensions/light_monitor/tests
+      - name: Light controller logic tests (CPython, fake hardware)
+        run: python -m pytest -q lighting/code/tests
+      - name: Light controller compiles for MicroPython
+        working-directory: lighting/code/src
+        run: |
+          for f in $(git ls-files '*.py'); do python -m mpy_cross -o /tmp/x.mpy "$f"; done
+
+  image:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      HAVE_DOCKER: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKER_PASSWORD != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tags
+        id: tags
+        run: |
+          user="${{ secrets.DOCKER_USERNAME }}"
+          image="${user:-local}/blueos-light-monitor"
+          ref="${GITHUB_REF#refs/*/}"
+          if [[ "$GITHUB_REF" == refs/tags/light-monitor-v* ]]; then
+            v="${ref#light-monitor-v}"
+            echo "tags=$image:$v,$image:latest" >> "$GITHUB_OUTPUT"
+          else
+            safe="$(echo "$ref" | tr '/' '-' | tr -cd 'A-Za-z0-9_.-')"
+            echo "tags=$image:$safe" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: env.HAVE_DOCKER == 'true'
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: blueos_extensions/light_monitor
+          platforms: linux/arm/v7,linux/arm64/v8
+          push: ${{ env.HAVE_DOCKER == 'true' }}
+          tags: ${{ steps.tags.outputs.tags }}
+      - name: Not pushed
+        if: env.HAVE_DOCKER != 'true'
+        run: echo "::notice::Built but not pushed -- add DOCKER_USERNAME and DOCKER_PASSWORD secrets to push to Docker Hub."

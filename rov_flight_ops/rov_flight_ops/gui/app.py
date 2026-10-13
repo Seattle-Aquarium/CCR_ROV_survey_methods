@@ -13,14 +13,18 @@ day uses it:
 3. **DVL** -- the Water Linked DVL beam by beam, everything it sends captured
    to the flight folder from the moment one is chosen, and whether what it
    sends reaches the autopilot.
-4. **Transects** -- straight after the flight, with the vehicle disarmed on
+4. **Lights** -- the four DeepSea lights as the BlueOS Light Monitor extension
+   hears them from their controller: each light's level, temperatures,
+   power-on count and faults, and the vehicle's supply. A copy of the
+   extension's recording is kept in the flight folder.
+5. **Transects** -- straight after the flight, with the vehicle disarmed on
    deck: type the transect times, save them, and check them against the dive
    profile.
-5. **BlueOS logs** -- see what is on the Pi, download it into the flight
+6. **BlueOS logs** -- see what is on the Pi, download it into the flight
    folder, and clear old files off it.
-6. **Flight summary** -- the day read back, and whether the recordings are
+7. **Flight summary** -- the day read back, and whether the recordings are
    sound.
-7. **Analyze transects** -- per-transect CSVs and sensor health.
+8. **Analyze transects** -- per-transect CSVs and sensor health.
 
 Imagery -- photos and video -- is ROV Imagery Processing, a separate program.
 """
@@ -66,6 +70,10 @@ class App(Shell):
         #: The DVL capture. Like the recorder, held here so it records
         #: whichever tab is open; made on first use.
         self.dvl = None
+        #: The Light Monitor reader. Like the DVL capture, held here so the
+        #: Lights tab and the Navigation row share one, and its copy of the
+        #: recording goes on whichever tab is open; made on first use.
+        self.lights = None
         self._dvl_closing: threading.Event | None = None
         self._dvl_close_began = 0.0
         self.discovery: discovery.Discovery | None = None
@@ -150,6 +158,8 @@ class App(Shell):
             logs.forget_vehicle()
         if self.dvl is not None:
             self.dvl.set_vehicle_host(shown)
+        if self.lights is not None:
+            self.lights.set_host(shown)
 
     # ------------------------------------------------------------------
     #  the DVL capture
@@ -197,12 +207,39 @@ class App(Shell):
             self._log(f"The DVL capture could not start: {ex}")
 
     # ------------------------------------------------------------------
+    #  the Light Monitor
+    # ------------------------------------------------------------------
+
+    def lights_client(self):
+        """The application's Light Monitor reader, started on first use."""
+        if self.lights is None:
+            from ..lights import DEFAULT_PORT, LightsClient
+            try:
+                port = int(self.settings.get("lights_port") or DEFAULT_PORT)
+            except (TypeError, ValueError):
+                port = DEFAULT_PORT
+            self.lights = LightsClient(self.version_host(), port)
+        self.lights.ensure_running()
+        return self.lights
+
+    def _arm_lights(self) -> None:
+        """Copy the extension's recording into the chosen folder from now on."""
+        if not self.flight_dir:
+            return
+        try:
+            from ..lights import lights_folder
+            self.lights_client().use_folder(lights_folder(self.flight_dir))
+        except Exception:
+            diagnostics.log_exception("starting the lights copy", *sys.exc_info())
+
+    # ------------------------------------------------------------------
     #  tabs
     # ------------------------------------------------------------------
 
     def build_tabs(self) -> None:
         from .dvlpage import DvlPage
         from .healthpage import HealthPage
+        from .lightspage import LightsPage
         from .logspage import LogsPage
         from .monitorpage import MonitorPage
         from .navpage import NavigationPage
@@ -236,17 +273,23 @@ class App(Shell):
         dvl.grid(row=0, column=0, sticky="nsew")
         self.mount("DVL", "dvl", dvl)
 
-        # 4. Transects.
+        # 4. Lights: the four DeepSea lights, from the Light Monitor extension.
+        tab = self.add_tab("Lights", "lights")
+        lights = LightsPage(tab, self)
+        lights.grid(row=0, column=0, sticky="nsew")
+        self.mount("Lights", "lights", lights)
+
+        # 5. Transects.
         tab = self.add_tab("Transects", "transects")
         self.mount("Transects", "transects", TransectSetup(tab, self))
 
-        # 5. BlueOS logs.
+        # 6. BlueOS logs.
         tab = self.add_tab("BlueOS logs", "blueos_logs")
         logs = LogsPage(tab, self)
         logs.grid(row=0, column=0, sticky="nsew")
         self.mount("BlueOS logs", "logs", logs)
 
-        # 6. Flight summary: the report, then recording health, in one column.
+        # 7. Flight summary: the report, then recording health, in one column.
         tab = self.add_tab("Flight summary", "flight_summary")
         body = self.scroll_body(tab)
         summary = SummaryPage(body, self, scroll=False)
@@ -256,7 +299,7 @@ class App(Shell):
         self.mount("Flight summary", "summary", summary)
         self.mount("Flight summary", "health", health)
 
-        # 7. Analyze transects.
+        # 8. Analyze transects.
         tab = self.add_tab("Analyze transects", "analyze_transects")
         analyze = TransectPage(tab, self)
         analyze.grid(row=0, column=0, sticky="nsew")
@@ -479,6 +522,7 @@ class App(Shell):
             diagnostics.log_exception("starting monitoring", *sys.exc_info())
             self._log(f"Monitoring could not start: {ex}")
         self._arm_dvl()
+        self._arm_lights()
 
     # ------------------------------------------------------------------
     #  the survey plan -- edited on Transects, read everywhere
@@ -567,6 +611,13 @@ class App(Shell):
         # The DVL capture too, on its own thread: it only has to close files
         # and join its readers, and it can do that while the flight closes.
         self._begin_dvl_shutdown()
+        # The Light Monitor reader: one thread and one open file, closed here
+        # without waiting for its current request.
+        if self.lights is not None and not getattr(self, "_lights_stopped", False):
+            self._lights_stopped = True
+            lights = self.lights
+            threading.Thread(target=lambda: lights.shutdown(wait=3.0), daemon=True,
+                             name="lights-close").start()
 
         rec = self.recorder
         waiting = self._close_request

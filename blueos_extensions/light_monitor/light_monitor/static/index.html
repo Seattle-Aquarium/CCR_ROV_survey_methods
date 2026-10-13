@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Light Monitor</title>
+  <link rel="stylesheet" href="static/style.css">
+  <script>
+    // Apply a saved theme before first paint, so the page never flashes.
+    try { const t = localStorage.getItem("lm-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+</head>
+<body>
+  <header>
+    <img class="logo" id="logo" src="static/logo_white.png" alt="Seattle Aquarium">
+    <div class="titles">
+      <h1>Light monitor</h1>
+      <div class="sub" id="subtitle">Four DeepSea SeaLites and their controller, live and recorded</div>
+    </div>
+    <div class="pills">
+      <span class="pill" id="pill-link"><span class="dot"></span><span>Controller</span></span>
+      <span class="pill" id="pill-rec"><span class="dot"></span><span>Recording</span></span>
+      <span class="pill" id="pill-mav"><span class="dot"></span><span>MAVLink</span></span>
+      <button id="theme" type="button" aria-label="Switch between dark and light">Light</button>
+    </div>
+  </header>
+  <div class="rule" role="presentation"></div>
+
+  <main>
+    <section class="stage" aria-label="The four lights">
+      <article class="card light" id="light-1"></article>
+      <article class="card light" id="light-2"></article>
+
+      <div class="rov-panel">
+        <svg viewBox="0 0 360 440" role="img" aria-labelledby="rov-title rov-desc" id="rov">
+          <title id="rov-title">Lutris from above</title>
+          <desc id="rov-desc">The four lights at the corners of the vehicle, forward at the top. Each light's ring shows the level it reports.</desc>
+          <defs>
+            <linearGradient id="ring-grad" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0" stop-color="#00C389"/>
+              <stop offset="0.7" stop-color="#3CCBDA"/>
+              <stop offset="0.95" stop-color="#3CCBDA"/>
+            </linearGradient>
+          </defs>
+          <!-- forward -->
+          <path class="rov-arrow" d="M180 6 L192 24 L184 24 L184 36 L176 36 L176 24 L168 24 Z"/>
+          <text class="rov-text" x="180" y="52" text-anchor="middle">Forward</text>
+          <!-- frame, tubes, dome -->
+          <rect class="rov-frame" x="92" y="78" width="176" height="300" rx="22"/>
+          <rect class="rov-tube" x="146" y="98" width="68" height="160" rx="30"/>
+          <rect class="rov-tube" x="152" y="276" width="56" height="88" rx="24"/>
+          <path class="rov-dome" d="M150 104 A30 30 0 0 1 210 104"/>
+          <!-- thrusters: four vectored at the corners, four vertical -->
+          <circle class="rov-thruster" cx="114" cy="104" r="14"/>
+          <circle class="rov-thruster" cx="246" cy="104" r="14"/>
+          <circle class="rov-thruster" cx="114" cy="352" r="14"/>
+          <circle class="rov-thruster" cx="246" cy="352" r="14"/>
+          <circle class="rov-thruster" cx="118" cy="190" r="11"/>
+          <circle class="rov-thruster" cx="242" cy="190" r="11"/>
+          <circle class="rov-thruster" cx="118" cy="268" r="11"/>
+          <circle class="rov-thruster" cx="242" cy="268" r="11"/>
+          <!-- lights: filled in by app.js -->
+          <g id="lamps"></g>
+        </svg>
+        <div class="rov-caption" id="rov-caption">Ring = the level each light reports</div>
+      </div>
+
+      <article class="card light" id="light-4"></article>
+      <article class="card light" id="light-3"></article>
+    </section>
+
+    <section class="row3">
+      <article class="card" id="power">
+        <h2>Power</h2>
+        <div class="section-label">Vehicle supply · ArduSub, measured</div>
+        <div class="big-num" id="veh-v">—</div>
+        <div class="gauge" aria-hidden="true"><div class="zone" id="veh-zone"></div><div class="needle" id="veh-needle"></div></div>
+        <div class="gauge-scale"><span>8 V</span><span id="veh-scale-mid">dropout 8.6 V · warn 10.5 V</span><span>16 V</span></div>
+        <div class="trio">
+          <div><div class="label">Current</div><div id="veh-a">—</div></div>
+          <div><div class="label">Power</div><div id="veh-w">—</div></div>
+          <div><div class="label">Pilot gain</div><div id="pilot-gain">—</div></div>
+        </div>
+        <div class="section-label">Light supply · power monitor</div>
+        <div id="rail">—</div>
+        <div class="section-label">Lights · expected from their levels</div>
+        <div class="trio">
+          <div><div class="label">All four</div><div id="exp-w">—</div></div>
+          <div><div class="label">Current</div><div id="exp-a">—</div></div>
+          <div><div class="label">Pilot asked</div><div id="pilot-lights">—</div></div>
+        </div>
+        <div class="note" id="power-note"></div>
+      </article>
+
+      <article class="card" id="controller">
+        <h2>Controller</h2>
+        <dl class="kv" id="ctl-kv"></dl>
+        <div class="note" id="ctl-note"></div>
+      </article>
+
+      <article class="card" id="recording">
+        <h2>Recording and port</h2>
+        <dl class="kv" id="rec-kv"></dl>
+        <div class="section-label">Files on the Pi</div>
+        <ul class="files" id="files"></ul>
+        <div class="actions">
+          <label for="release-min" class="note" style="margin:0">Release port for</label>
+          <select id="release-min" aria-label="Minutes to release the port">
+            <option value="5">5 min</option><option value="15" selected>15 min</option>
+            <option value="30">30 min</option><option value="60">60 min</option>
+          </select>
+          <button id="release" type="button">Release</button>
+          <button id="resume" type="button" class="primary">Resume now</button>
+        </div>
+        <div class="note" id="release-note">Releasing closes the controller's port so mpremote can use it. It reopens by itself.</div>
+      </article>
+    </section>
+
+    <section class="card events" aria-live="polite">
+      <h2>Events</h2>
+      <ol id="events"><li class="empty">Nothing yet.</li></ol>
+    </section>
+  </main>
+  <footer id="footer">Light Monitor</footer>
+  <script src="static/app.js"></script>
+</body>
+</html>

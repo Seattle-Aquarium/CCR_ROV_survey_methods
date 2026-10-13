@@ -85,7 +85,8 @@ class PeripheralBase:
             # Zero-length response ... typically from a comms timeout
             raise DSPLTimeoutError
 
-        elif result[0] == "?":
+        elif result[:1] == b"?":
+            # result is bytes, so result[0] is an int and never equals "?".
             # NACK
             raise DSPLNackError
 
@@ -117,7 +118,7 @@ class PeripheralBase:
             # Zero-length response ... typically from a comms timeout
             raise DSPLTimeoutError
 
-        elif result[0] == "?":
+        elif result[:1] == b"?":
             # NACK
             raise DSPLNackError
 

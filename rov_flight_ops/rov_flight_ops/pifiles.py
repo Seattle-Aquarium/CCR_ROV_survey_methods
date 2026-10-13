@@ -85,6 +85,13 @@ SAME_TIME_S = 1.0
 
 TLOG_FB_PATHS = ("/ardupilot_logs/logs",)
 
+#: The BlueOS Light Monitor extension's recording (blueos_extensions/
+#: light_monitor): its Dockerfile binds /usr/blueos/userdata/light_monitor on
+#: the Pi to the folder it writes, and File Browser reaches the Pi's root as
+#: /system_root.
+LIGHTS_FB_PATH = "/system_root/usr/blueos/userdata/light_monitor"
+LIGHTS_NAME = re.compile(r"^lights_\d{8}_\d{6}(?:_1hz)?\.(?:jsonl|csv)$")
+
 #: Where Madrona's folder is looked for when none has been set. Its docs say
 #: images go "underneath the folder they select", so there is no fixed path;
 #: a folder holding left/, right/ and center/ is what gives it away.
@@ -135,6 +142,8 @@ CATEGORIES: tuple[Category, ...] = (
     Category("c3", "C3 imagery", "photos/C3"),
     Category("video", "video", "logs/mcap_video"),
     Category("tlog", "tlog", "logs/tlog"),
+    # Beside the topside copy rov_flight_ops keeps in logs/lights itself.
+    Category("lights", "light logs", "logs/lights/pi"),
 )
 BY_KEY = {c.key: c for c in CATEGORIES}
 _ORDER = [c.key for c in CATEGORIES]
@@ -543,6 +552,10 @@ def fill_spans(inv: Inventory, *, progress: ProgressCB | None = None,
             f.end_estimated = True
     for f in inv.files.get("c3", []):
         f.start = f.end = f.modified
+    for f in inv.files.get("lights", []):
+        # Named for when the extension opened it (UTC); written until modified.
+        f.start = stamp_time(f.name) or f.modified
+        f.end = f.modified if f.modified is not None else f.start
 
 
 def match(files: Iterable[PiFile], windows: Sequence[tuple[str, float, float]],
@@ -721,6 +734,17 @@ def search(host: str | None, kinds: Iterable[str], *, c3_folder: str = "",
                     notes.append(f"{root}: {why}")
                 files += [_pifile(kind, r) for r in raw
                           if r["name"].lower().endswith(".tlog")]
+        elif kind == "lights":
+            roots = [LIGHTS_FB_PATH]
+            raw, why = walk(found, token, roots[0], depth=0, cancel=cancel)
+            if why and not raw:
+                notes.append(f"{roots[0]}: not on this vehicle ({why}) -- the Light "
+                             f"Monitor extension writes here once it is installed")
+                roots = []
+            else:
+                if why:
+                    notes.append(f"{roots[0]}: {why}")
+                files = [_pifile(kind, r) for r in raw if LIGHTS_NAME.match(r["name"])]
         elif kind == "c3":
             if progress and not c3_folder:
                 progress(n / max(1, len(kinds)) * 0.5,

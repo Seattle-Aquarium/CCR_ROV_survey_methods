@@ -15,12 +15,15 @@ and used wherever navigation needs it.
     |                                   |  survey plan:        |
     +-----------------------------------+  tools, features,    |
     |  guidance / site / origin strip    |  inspector          |
+    |  lights: 1 4 2 3 · vehicle supply  |                     |
     +-----------------------------------+----------------------+
 
 Two thirds of the width is the map, because the map is the problem. The strip
 beneath it carries what must never need looking for: which line is being
 followed and how far off it the vehicle is, the site, and whether the origin
-is confirmed. Details expand into a drawer over the page; the map stays
+is confirmed. Under that, one row for the four lights -- each one's level and
+expected draw, and the vehicle's supply -- from the Light Monitor extension
+(the Lights tab has the rest). Details expand into a drawer over the page; the map stays
 visible behind them.
 
 **It works with no vehicle.** The map opens on Pier 59 from a basemap that
@@ -234,6 +237,11 @@ class NavigationPage(ctk.CTkFrame):
         self._trust_shown = False
 
         self._build_strip(col, row=3)
+
+        from .lightspage import LightsStrip
+        self.lights_strip = LightsStrip(col, self.app)
+        self.lights_strip.grid(row=4, column=0, sticky="ew", pady=(6, 0))
+        self._lights_ticks = 0
 
     def _build_strip(self, parent, row: int) -> None:
         """The three things that must never need looking for."""
@@ -749,6 +757,11 @@ class NavigationPage(ctk.CTkFrame):
 
     def _tick(self) -> None:
         try:
+            self._render_lights()
+        except Exception:
+            diagnostics.log_exception("navigation lights row", *sys.exc_info(),
+                                      level=logging.WARNING)
+        try:
             self._render()
         except Exception as ex:
             diagnostics.log_exception("navigation redraw", *sys.exc_info(),
@@ -759,6 +772,18 @@ class NavigationPage(ctk.CTkFrame):
             except Exception:
                 pass
         self.after(REFRESH_MS, self._tick)
+
+    def _render_lights(self) -> None:
+        """The lights row, twice a second, and only while it is on screen --
+        so the Light Monitor is not polled for a tab nobody is looking at."""
+        self._lights_ticks += 1
+        if self._lights_ticks % 2 or not self.lights_strip.winfo_ismapped():
+            return
+        get = getattr(self.app, "lights_client", None)
+        if get is None:
+            return
+        state, status = get().snapshot()
+        self.lights_strip.update_from(state, status)
 
     def _render(self) -> None:
         if self.collector is None:

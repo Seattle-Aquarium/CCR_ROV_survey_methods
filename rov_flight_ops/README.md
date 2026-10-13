@@ -358,7 +358,54 @@ trying the tab without a vehicle: type `127.0.0.1:8080` as the address.
 
 ---
 
-## 4  Transects
+## 4  Lights
+
+The four DeepSea lights on Lutris, as the **BlueOS Light Monitor** extension
+hears them from their controller in the light box
+([`../blueos_extensions/light_monitor`](../blueos_extensions/light_monitor/README.md)).
+This program never talks to the controller: the extension on the Pi is the
+only thing that reads its USB port, and this tab, the extension's own page and
+Cockpit (through MAVLink) all read the extension — so they can all be open at
+once.
+
+* **Each light** where it sits on the vehicle — 1 front left, 2 rear left,
+  3 rear right, 4 front right — with the level it *reports* against the level
+  it was *told*, its temperatures, highest temperature, humidity, **power-on
+  count** (and how many restarts this session: the brown-out signature), run
+  time, DeepSea's fault flags, how long since it last answered, and its serial
+  number and firmware. A light that stops answering, restarts, reports the
+  wrong level, or raises a flag turns red.
+* **Power.** The vehicle's supply voltage, current and power are ArduSub's
+  measurement. Each light's watts and amps are **expected** values (≈): what
+  it should draw at the level it reports, from 98 W at full output and
+  DeepSea's dimming curve. One monitor's worth of wiring serves all four
+  lights and Lutris has none fitted (October 2026), so per-light power is
+  never measured; with a monitor fitted, its voltage, current and power
+  appear beside the expectation, and a measured total well below the expected
+  one says a light is dark while still answering.
+* **The controller**: which port the extension is reading (the telemetry port,
+  or the console read-only), firmware and MicroPython versions, uptime, the
+  PWM it reads and the level it is commanding, lines lost, and how many of its
+  questions the lights answered.
+* **Events** from the extension, newest first. Warnings also go to Cockpit and
+  QGC as STATUSTEXT and into the tlog / mcap.
+* **A copy of the extension's recording** goes into the flight folder's
+  `logs/lights/` from the moment a folder is chosen, so a flight whose Pi
+  files are never downloaded still has them. The Pi's own files are also on
+  **BlueOS logs → light logs** (into `logs/lights/pi/`).
+
+**Navigation** carries one row of the same under the map: each light's level
+and expected watts and amps, and the vehicle supply.
+
+The extension is found at the vehicle address on port 9420 (`lights_port` in
+the settings file to change it). Without a vehicle, run its simulator —
+`python -m light_monitor --simulate --no-mavlink` in
+`blueos_extensions/light_monitor` — and set the vehicle address to
+`127.0.0.1`.
+
+---
+
+## 5  Transects
 
 Straight after the flight, with the vehicle on deck and disarmed.
 
@@ -426,7 +473,7 @@ with the vehicle's own time preserved.
 
 ---
 
-## 5  BlueOS logs
+## 6  BlueOS logs
 
 See what is on the Pi, download it into the flight folder, and clear old files
 off it.
@@ -594,7 +641,7 @@ module issues read-only GETs, and a test fails if a write appears anywhere else.
 
 ---
 
-## 6  Flight summary
+## 7  Flight summary
 
 **Read the day** builds the flight report (PDF) from everything in the flight's
 `logs`; **Recordings / What the check found / Autopilot logs / Transects** are
@@ -614,7 +661,7 @@ How a recording's ending is described is limited to what the logs show:
 * **unexplained** — anything else, including a recording the vehicle never
   closed, where an interrupted recorder and a disarm look alike.
 
-## 7  Analyze transects
+## 8  Analyze transects
 
 Unchanged from UTC for now: per-transect CSVs (with tide-corrected depth) and a
 map via the transect extractor, and a sensor-health report.

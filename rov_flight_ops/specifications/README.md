@@ -16,6 +16,14 @@ in a form that can be checked against the code and the files it writes.
 | [dvl_artifacts_and_provenance.md](dvl_artifacts_and_provenance.md) | What was built, what it was built from (documents, versions, commits, probes of the demo DVL), and what has not yet been checked against a real vehicle |
 | [dvl_bench_checklist.md](dvl_bench_checklist.md) | The checks to run once on Nereo or Lutris before trusting a capture |
 
+## The lights (tab 4, `rov_flight_ops/lights/`)
+
+| Document | What it answers |
+|---|---|
+| [lights_data_sources.md](lights_data_sources.md) | Where each number on the Lights tab comes from -- answered, measured or expected -- what the states mean, what this program writes, and how the light values reach the mcap and tlog |
+| [../../lighting/code/TELEMETRY.md](../../lighting/code/TELEMETRY.md) | The light controller's telemetry format (`ccr.lights/1`), the second USB port, and the bench checklist |
+| [../../blueos_extensions/light_monitor/README.md](../../blueos_extensions/light_monitor/README.md) | The BlueOS Light Monitor extension: installing it, its recording, its MAVLink names, its API, and its assumptions |
+
 ## Keeping these true
 
 A change to the capture's files or behaviour changes these documents in the

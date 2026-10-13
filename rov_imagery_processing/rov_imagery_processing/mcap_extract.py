@@ -86,6 +86,15 @@ WANTED: dict[str, tuple[str, ...]] = {
 SPECIAL = ("NAMED_VALUE_FLOAT", "STATUSTEXT", "BATTERY_STATUS", "HEARTBEAT",
            "DISTANCE_SENSOR")
 
+#: Message types read from *every* sender, not just the preferred one. These
+#: carry a name or a sentence rather than a reading of one sensor, so two
+#: senders are two different things, not two copies of one: the autopilot's
+#: `Lights1` and `RFTarget`, and the BlueOS Light Monitor extension's `LT4_LVL`
+#: (system 1, component 191). Choosing one sender per type -- right for
+#: DISTANCE_SENSOR, which arrives as both 1/1 and 255/0 -- silently dropped
+#: the extension's.
+MULTI_SOURCE = ("NAMED_VALUE_FLOAT", "STATUSTEXT")
+
 #: Minimum seconds between kept samples, per message type.
 #:
 #: ArduSub emits some streams very fast -- AHRS2 and SCALED_PRESSURE2 arrive at
@@ -346,15 +355,22 @@ def _sysid_rank(topic: str) -> tuple[int, int]:
 
 def select_channels(reader) -> tuple[dict[str, str], list[str]]:
     """Map message type -> chosen topic, plus the video topic list."""
-    chosen, video = _select_indexed(reader)
+    chosen, video, _also = _select_indexed(reader)
     return chosen, sorted(video)
 
 
-def _select_indexed(reader) -> tuple[dict[str, str], dict[str, int]]:
-    """`select_channels`, with each video topic's message count."""
+def _also_read(by_type: dict) -> dict[str, str]:
+    """topic -> type, for the other senders of the MULTI_SOURCE types."""
+    return {topic: mt for mt in MULTI_SOURCE
+            for _rank, _n, topic in sorted(by_type.get(mt, []))[1:]}
+
+
+def _select_indexed(reader) -> tuple[dict[str, str], dict[str, int], dict[str, str]]:
+    """`select_channels`, with each video topic's message count, and the extra
+    topics read for the MULTI_SOURCE types."""
     summary = reader.get_summary()
     if summary is None:
-        return {}, {}
+        return {}, {}, {}
 
     counts: dict[int, int] = {}
     if summary.statistics:
@@ -379,7 +395,7 @@ def _select_indexed(reader) -> tuple[dict[str, str], dict[str, int]]:
             )
 
     chosen = {mt: sorted(v)[0][2] for mt, v in by_type.items()}
-    return chosen, video
+    return chosen, video, _also_read(by_type)
 
 
 def choose_video_topic(counts: dict[str, int]) -> str | None:
@@ -412,13 +428,13 @@ def select_channels_streaming(
     it up front rather than as topics appear matters: a better channel
     discovered late would already have had the worse one's rows written.
     """
-    chosen, video = _select_streaming(path, health, limit)
+    chosen, video, _also = _select_streaming(path, health, limit)
     return chosen, sorted(video)
 
 
 def _select_streaming(
     path: Path, health: McapHealth, limit: int = _DISCOVERY_MESSAGES
-) -> tuple[dict[str, str], dict[str, int]]:
+) -> tuple[dict[str, str], dict[str, int], dict[str, str]]:
     """`select_channels_streaming`, with each video topic's message count
     within the first `limit` messages."""
     from mcap.reader import NonSeekingReader
@@ -446,7 +462,7 @@ def _select_streaming(
             (_sysid_rank(topic), -counts.get(topic, 0), topic)
         )
     chosen = {mt: sorted(v)[0][2] for mt, v in by_type.items()}
-    return chosen, video
+    return chosen, video, _also_read(by_type)
 
 
 # --------------------------------------------------------------------------
@@ -702,6 +718,7 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
                 if rec.error is not None:
                     raise rec.error
                 chosen = rec.chosen
+                also = rec.also
                 present = sorted(t for t, n in rec.video.items() if n > 0)
                 video_topics = [video_topic] if video_topic in present else []
                 if not video_topics:
@@ -717,7 +734,7 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
                         reader = NonSeekingReader(f)
                         # NonSeekingReader has no topic filter, so the loop
                         # below skips what we did not choose.
-                        keep = set(chosen.values()) | set(video_topics)
+                        keep = set(chosen.values()) | set(also) | set(video_topics)
                         topics = None
                         if not keep:
                             warnings.append(
@@ -727,7 +744,7 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
                     else:
                         keep = None
                         reader = make_reader(f)
-                        topics = list(chosen.values()) + video_topics
+                        topics = list(chosen.values()) + list(also) + video_topics
                         if not topics:
                             warnings.append(
                                 f"{mpath.name}: nothing recognizable, skipped")
@@ -735,6 +752,7 @@ def _extract(mcaps, cache_dir, h264_path, frames_csv, telem_csv, marker,
                             continue
 
                     topic_type = {v: k for k, v in chosen.items()}
+                    topic_type.update(also)
                     last_kept: dict[str, float] = {}
                     nread = 0
 
@@ -848,6 +866,8 @@ class _Recording:
     truncated: bool = False
     chosen: dict[str, str] = field(default_factory=dict)
     video: dict[str, int] = field(default_factory=dict)   # topic -> messages
+    #: Further topics read for MULTI_SOURCE types: topic -> message type.
+    also: dict[str, str] = field(default_factory=dict)
     error: Exception | None = None
 
 
@@ -870,10 +890,10 @@ def _survey_recordings(ordered: Sequence[Path], cancel=None) -> dict[Path, _Reco
         rec.truncated = bool(rec.health and rec.health.recoverable)
         try:
             if rec.truncated:
-                rec.chosen, rec.video = _select_streaming(mpath, rec.health)
+                rec.chosen, rec.video, rec.also = _select_streaming(mpath, rec.health)
             else:
                 with open(mpath, "rb") as f:
-                    rec.chosen, rec.video = _select_indexed(make_reader(f))
+                    rec.chosen, rec.video, rec.also = _select_indexed(make_reader(f))
         except Exception as ex:
             rec.error = ex
         out[mpath] = rec
