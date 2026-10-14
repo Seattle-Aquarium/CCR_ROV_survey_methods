@@ -188,11 +188,17 @@ class LightCard(ctk.CTkFrame):
         _set(self.state, text=lt.get("state_text") or "—",
              text_color=T.WARN if k == "bad" else T.TEXT_MUTED)
         _set(self, border_color=T.WARN if k == "bad" else T.BORDER)
+        # A light that has stopped answering has no current level: its last
+        # report is history, not "100%" for a light that may be dark.
         lvl = lt.get("level_pct")
-        _set(self.level, text="—" if lvl is None else f"{lvl:.0f}%")
+        silent = lt.get("answering") is False
+        _set(self.level, text="—" if silent or lvl is None else f"{lvl:.0f}%")
         told = lt.get("commanded_pct")
-        _set(self.told, text="" if told is None else f"told {told:.0f}%")
-        self.bar.set(max(0.0, min(1.0, (lvl or 0) / 100.0)))
+        told_text = "" if told is None else f"told {told:.0f}%"
+        if silent and lvl is not None:
+            told_text = f"last reported {lvl:.0f}%" + (f" · {told_text}" if told_text else "")
+        _set(self.told, text=told_text)
+        self.bar.set(0.0 if silent else max(0.0, min(1.0, (lvl or 0) / 100.0)))
         temps = [t for t in (lt.get("temp2_c"), lt.get("temp3_c")) if t is not None]
         restarts = lt.get("restarts_this_session") or 0
         info = lt.get("info") or {}

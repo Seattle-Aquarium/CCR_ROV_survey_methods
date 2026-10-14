@@ -162,9 +162,22 @@ def test_the_lights_tab_shows_each_light_and_the_fault(shown):
     assert one.values["expected"].cget("text").startswith("≈ 98 W")
     assert one.values["temps"].cget("text") == "24.0 · 21.1 °C"
     assert four.state.cget("text").startswith("Not answering")
+    # a silent light's last report is not shown as its current level
+    assert four.level.cget("text") == "—"
+    assert four.told.cget("text") == "told 100%"     # no report at all in this state
     assert "(+1 this session)" in four.values["power_ons"].cget("text")
     assert page.power["veh_v"].cget("text") == "12.90 V"
     assert page.power["rail"].cget("text") == "no power monitor fitted"
+
+
+def test_a_silent_lights_last_report_is_history_not_its_level(shown):
+    page, _fake = shown
+    lt = dict(state_doc(l4_answering=False)["lights"][3], level_pct=100.0)
+    card = page.cards[4]
+    card.show(lt)
+    assert card.level.cget("text") == "—"
+    assert card.told.cget("text") == "last reported 100% · told 100%"
+    assert card.bar.get() == 0.0
 
 
 def test_the_drawing_draws_the_vehicle_and_four_lights(shown):

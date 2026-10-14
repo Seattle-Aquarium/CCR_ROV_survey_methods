@@ -116,11 +116,18 @@ function drawLight(lt, rail) {
   st.className = `state ${cls === "bad" ? "bad" : ""}`;
   st.innerHTML = `<span class="dot ${cls === "bad" ? "warn" : cls === "unknown" ? "" : "ok"}"></span><span>${esc(lt.state_text)}</span>`;
 
+  // A light that has stopped answering has no current level: its last report
+  // is history, and showing it as the big number would say "100%" for a light
+  // that may well be dark.
   const lvl = lt.level_pct;
-  $(`lv${id}`).innerHTML = lvl === null || lvl === undefined ? "—" : `${Math.round(lvl)}<small>%</small>`;
-  $(`told${id}`).textContent = lt.commanded_pct === null || lt.commanded_pct === undefined
+  const silent = lt.answering === false;
+  const known = lvl !== null && lvl !== undefined;
+  $(`lv${id}`).innerHTML = silent || !known ? "—" : `${Math.round(lvl)}<small>%</small>`;
+  const told = lt.commanded_pct === null || lt.commanded_pct === undefined
     ? "" : `told ${Math.round(lt.commanded_pct)}%`;
-  $(`bf${id}`).style.width = `${Math.max(0, Math.min(100, lvl || 0))}%`;
+  $(`told${id}`).textContent = silent && known
+    ? `last reported ${Math.round(lvl)}%${told ? ` · ${told}` : ""}` : told;
+  $(`bf${id}`).style.width = `${silent ? 0 : Math.max(0, Math.min(100, lvl || 0))}%`;
   const tick = $(`bt${id}`);
   if (lt.commanded_pct !== null && lt.commanded_pct !== undefined) {
     tick.hidden = false;
