@@ -11,13 +11,15 @@ name: BlueOS Light Monitor
 # Without them the image is still built (so a broken Dockerfile still fails
 # the run) but not pushed.
 #
-# Tags pushed: `main` from the main branch, `0.1.0` and `latest` from a git
-# tag `light-monitor-v0.1.0`, and the branch name from a manual run
-# (Actions -> BlueOS Light Monitor -> Run workflow) on any branch -- which is
-# how to put a test build on the bench vehicle before anything is merged.
+# Tags pushed: the branch name from any push that changes the extension, the
+# controller code or this file (`main` from main; `zhr_light_telemetry` from
+# that branch -- how a test build gets onto the bench vehicle before anything
+# is merged), and `0.1.0` + `latest` from a git tag `light-monitor-v0.1.0`.
+# A manual run (Actions -> BlueOS Light Monitor -> Run workflow) works too,
+# but GitHub only offers it once this file is on the default branch.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
     tags: ["light-monitor-v*"]
     paths:
       - "blueos_extensions/light_monitor/**"

@@ -77,10 +77,9 @@ extraction they appear as `NVF.LT4_LVL` and so on.
    Personal access tokens). The workflow
    `.github/workflows/blueos-light-monitor.yml` then builds the image for the
    Pi (arm/v7 and arm64) on GitHub's machines and pushes it:
-   * from a branch — Actions → *BlueOS Light Monitor* → *Run workflow* →
-     tag `zhrandell/blueos-light-monitor:<branch>` (how to put a test build on
-     the bench vehicle before merging);
-   * from `main` — `:main`;
+   * from any push that changes the extension or the controller code — tag
+     `zhrandell/blueos-light-monitor:<branch>`, e.g. `:zhr_light_telemetry`
+     (how to put a test build on the bench vehicle before merging) or `:main`;
    * from a git tag `light-monitor-v0.1.0` — `:0.1.0` and `:latest`.
 2. **On the vehicle** (it needs internet once, to pull the image — BlueOS
    installs extensions from Docker Hub): BlueOS → *Extensions* → *Installed* →
