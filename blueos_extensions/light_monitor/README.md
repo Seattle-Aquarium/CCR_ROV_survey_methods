@@ -17,7 +17,7 @@ under thrust. The telemetry tells the possibilities apart:
 | a light **answers with a level other than the one it was told** | a command lost on the bus, or a restart into a stale level |
 | **all four** drop together as the **vehicle supply** falls toward ~8.6 V | the light converter dropping out (Aaron, #50) |
 
-![The extension's page, against the simulated controller](../../images/light_monitor_page.jpg)
+![The Light Monitor page against its simulated controller, moments after light 4 stopped answering](../../images/light_monitor_page.png)
 
 ## What it does
 
