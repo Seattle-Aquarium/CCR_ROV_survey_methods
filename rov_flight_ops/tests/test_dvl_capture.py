@@ -67,6 +67,22 @@ def start(sim, folder, **kw) -> CAP.DvlCapture:
     return cap
 
 
+def wait_for_data(cap, *, lines: bool = False) -> None:
+    """Until bytes -- or whole lines -- have arrived from the simulated DVL.
+
+    `start` waits only for the connection. On a busy CI runner the first
+    report can take longer than a short fixed sleep to arrive, and a test that
+    then looks for data finds none. The capture counts a chunk only after its
+    raw bytes have gone to the file, so this also means there is something to
+    have written.
+    """
+    if lines:
+        arrived = lambda: cap.live.snapshot(history=False).lines_in > 0  # noqa: E731
+    else:
+        arrived = lambda: cap.live.snapshot(history=False).bytes_in > 0  # noqa: E731
+    assert wait_for(arrived), "nothing ever arrived from the simulated DVL"
+
+
 def assert_every_byte(raw: bytes, sim) -> None:
     """The raw file is exactly what arrived: what the DVL sent, in order, up to
     whatever was still in flight when the capture stopped -- a line or two."""
@@ -330,7 +346,8 @@ def test_periodic_cycling_being_on_is_called_out(tmp_path):
 def test_a_live_view_writes_nothing(sim, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     cap = start(sim, None)
-    time.sleep(0.6)
+    wait_for_data(cap, lines=True)
+    time.sleep(0.3)                  # long enough to write, if it were going to
     cap.stop()
     assert list(tmp_path.iterdir()) == []
     snap = cap.live.snapshot(history=False)
@@ -371,7 +388,7 @@ def test_nothing_is_ever_replaced(sim, tmp_path, monkeypatch):
     monkeypatch.setattr(CAP, "unique_capture_id", lambda folder, when=None: stamp)
     (tmp_path / f"dvl_{stamp}_velocity.csv").write_text("precious\n")
     cap = start(sim, tmp_path)
-    time.sleep(0.3)
+    wait_for_data(cap)
     cap.stop()
     assert (tmp_path / f"dvl_{stamp}_velocity.csv").read_text() == "precious\n"
     assert cap.problem.startswith(f"could not create dvl_{stamp}_velocity.csv")
@@ -382,7 +399,7 @@ def test_nothing_is_ever_replaced(sim, tmp_path, monkeypatch):
 def test_a_full_disk_stops_writing_and_says_so(sim, tmp_path, monkeypatch):
     monkeypatch.setattr(CAP, "DISK_CRITICAL_BYTES", 1 << 62)
     cap = start(sim, tmp_path)
-    time.sleep(0.5)
+    wait_for_data(cap)
     cap.stop()
     assert cap.problem.startswith("DVL CAPTURE STOPPED WRITING")
     assert files(cap)["tcp_raw"].stat().st_size == 0
