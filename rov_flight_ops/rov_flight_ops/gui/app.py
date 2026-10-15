@@ -215,7 +215,7 @@ class App(Shell):
         tab = self.add_tab("Monitoring", "monitoring")
         body = self.scroll_body(tab)
         self._build_folder_card(body, row=0)
-        left, right = self.pair(body, row=1)
+        left, right = self.pair(body, row=1, split_key="monitor_pair_share")
         charts = ctk.CTkFrame(body, fg_color="transparent")
         charts.grid(row=2, column=0, sticky="ew")
         charts.grid_columnconfigure(0, weight=1)

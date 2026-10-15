@@ -59,13 +59,26 @@ confirm a specific change.
 |                                     |  Navigation readiness     |
 |                                     |  profile · Start… Health… |
 |                MAP                  |  matrix, one row a source |
-|                                     +---------------------------+
-|                                     |  Survey plan              |
-|   lat/lon · source · age            |  tools · features         |
-+-------------------------------------+  inspector: meters, °T    |
-| GUIDANCE  |  SITE / ORIGIN | TO SITE|                           |
+|                                     ‖============ ═ ============|
+|                                     ‖  Survey plan              |
+|   lat/lon · source · age            ‖  tools · features         |
++-------------------------------------‖ ─ ─ ─ ─ ─ ═ ─ ─ ─ ─ ─ ─ ─ |
+| GUIDANCE  |  SITE / ORIGIN | TO SITE‖  inspector: meters, °T    |
 +-------------------------------------+---------------------------+
 ```
+
+**Every boundary on the page can be dragged** (the `‖` and `═` above): the
+map against the right-hand column, readiness against the survey plan, and the
+plan's feature list against its inspector. Each handle is a short bar that
+lights up under the pointer; double-click it to put the default back. Where
+each was left is remembered in `settings.json`, per laptop. The map stops at
+the width of its own tool bar, so **＋ Waypoint** is never cut off; readiness
+always keeps its profile row and the footer with **Allow writes**, and the
+matrix scrolls in whatever height is left. When the column is too narrow for
+the profile selector and its three buttons on one line, the buttons move to a
+line of their own rather than losing **Apply**. To give the map more height,
+drag the log pane at the foot of the window closed — the map takes whatever
+height the page has.
 
 **The flight and power gauges are gone.** The altitude gauge, the 0–1,000 W
 power gauge and their rows used to sit here; live, in the water, nobody looked
@@ -1042,11 +1055,16 @@ scrolls, which the design tries to avoid. At 150% scaling that means a
 1920×1200 panel; at 100% it means a 1280×800 one.
 
 Below 1100 logical pixels wide the side column moves under the map rather than
-beside it. Within the column, readiness and the survey plan share the height in
-a **uniform** grid group with floors of 260 and 240 logical pixels — without
-`uniform` Tk gives each row its requested height first and splits only the
-remainder, and the plan panel asks for far more than a matrix of labels does,
-which left the readiness card one row tall.
+beside it, and the divider between them turns horizontal. Within the column,
+readiness and the survey plan share the height in a **uniform** grid group —
+without `uniform` Tk gives each row its requested height first and splits only
+the remainder, and the plan panel asks for far more than a matrix of labels
+does, which left the readiness card one row tall. The dividers hold their
+splits as weights in those groups, so a window made larger or smaller keeps
+the proportions the operator chose. Their floors (215 and 245 logical pixels
+for readiness and the plan) limit how far a *drag* can go and are not grid
+minimums: in a window too small for both, the two cards shrink together and
+their contents scroll, rather than the lower one being cut off.
 
 ---
 

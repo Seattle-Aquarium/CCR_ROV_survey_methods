@@ -17,7 +17,11 @@ and used wherever navigation needs it.
     |  guidance / site / origin strip    |  inspector          |
     +-----------------------------------+----------------------+
 
-Two thirds of the width is the map, because the map is the problem. The strip
+Two thirds of the width is the map, because the map is the problem -- until
+the operator drags the divider beside it. Two more divide the right-hand
+column (readiness / plan, and the plan's list / inspector); double-clicking
+any of them puts it back, and the settings file remembers where each was
+left. The strip
 beneath it carries what must never need looking for: which line is being
 followed and how far off it the vehicle is, the site, and whether the origin
 is confirmed. Details expand into a drawer over the page; the map stays
@@ -54,7 +58,7 @@ from . import navdraw, navmap
 from . import theme as T
 from .navmap import MapCanvas, Marker, format_position
 from .navplanpanel import PlanPanel
-from .widgets import Card, button, label
+from .widgets import Card, Repaint, Splitter, button, label
 
 log = logging.getLogger(__name__)
 
@@ -65,16 +69,28 @@ REFRESH_MS = 250
 #: it goes under the map instead.
 NARROW_PX = 1100
 
-#: The map takes two thirds; the right column is readiness, profile, health
-#: and the plan inspector.
-MAP_WEIGHT, SIDE_WEIGHT = 64, 36
+#: The map takes about two thirds of the width until the divider beside it is
+#: dragged; the right column is readiness, profile, health and the plan
+#: inspector.
+MAP_SHARE = 0.64
+
+#: Below the threshold the column goes under the map, and the two share the
+#: height evenly until that divider is dragged.
+NARROW_MAP_SHARE = 0.5
+
+#: Readiness above the survey plan, a little under half the column's height.
+READINESS_SHARE = 0.48
 
 #: What "follow this line" draws as a corridor unless the operator changes it.
 DEFAULT_CORRIDOR_M = 1.0
 
-#: Floors for the two cards in the side column, in logical pixels. Enough for
-#: the readiness header plus about six sources, and for the plan's tool bar,
-#: a few features and the first inspector fields.
+#: How small the dividers may make each side, in logical pixels. The map
+#: keeps enough to be a chart rather than a keyhole -- and never less than
+#: its own tool bar, see `_map_floor` -- and the column enough for the
+#: matrix's sources and marks to read.
+MAP_MIN_PX, SIDE_MIN_PX = 360, 380
+NARROW_MAP_MIN_PX, NARROW_SIDE_MIN_PX = 160, 200
+
 #: The share of the matrix's width the Detail column gets, and the floor
 #: below which eliding it stops being useful. 13 of 32 is the column's grid
 #: weight; keeping the two in step is what makes the elide match what is
@@ -82,8 +98,20 @@ DEFAULT_CORRIDOR_M = 1.0
 DETAIL_SHARE = 13 / 32
 DETAIL_MIN_PX = 120
 
-READINESS_MIN_PX = 260
-PLAN_MIN_PX = 240
+#: How small the divider between the two cards may make each, in logical
+#: pixels: readiness keeps its heading, profile row -- two lines of it in a
+#: narrow column -- and the footer with "Allow writes" (the matrix scrolls in
+#: whatever is left); the plan keeps its heading, tool bars, a row of the
+#: feature list and the inspector's heading. Low on purpose -- the point of
+#: the divider is to let one card have most of the column when that is what
+#: is needed.
+READINESS_MIN_PX = 215
+PLAN_MIN_PX = 245
+
+#: Where each divider was left, in the settings file, as the share of the
+#: space on its left or above it.
+SPLIT_KEYS = {"wide": "nav_map_share", "narrow": "nav_map_share_narrow",
+              "side": "nav_readiness_share", "plan": "nav_plan_list_share"}
 
 
 def _set_label(widget, *, text=None, text_color=None, font=None) -> None:
@@ -147,12 +175,10 @@ class NavigationPage(ctk.CTkFrame):
         self._narrow = False
         self._centered_once = False
 
-        self.grid_columnconfigure(0, weight=MAP_WEIGHT, uniform="nav")
-        self.grid_columnconfigure(1, weight=SIDE_WEIGHT, uniform="nav")
-        self.grid_rowconfigure(0, weight=1)
-
         self._build_map_column()
         self._build_side_column()
+        self._build_splitters()
+        self._lay_out(narrow=False)
 
         self.editor = navdraw.PlanEditor(self.map, on_change=self._plan_changed,
                                          on_select=lambda _f: self.plan_panel.refresh())
@@ -173,7 +199,8 @@ class NavigationPage(ctk.CTkFrame):
 
     def _build_map_column(self) -> None:
         col = ctk.CTkFrame(self, fg_color="transparent")
-        col.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        # No padding of its own: the divider beside it is the gap.
+        col.grid(row=0, column=0, sticky="nsew")
         col.grid_columnconfigure(0, weight=1)
         col.grid_rowconfigure(1, weight=1)
         self.map_col = col
@@ -200,6 +227,7 @@ class NavigationPage(ctk.CTkFrame):
         self.wp_button = button(bar, "＋ Waypoint", self._create_waypoint,
                                 "primary", width=120)
         self.wp_button.grid(row=0, column=6)
+        self.map_bar = bar
 
         self.map = MapCanvas(col, cache=self.tile_cache)
         self.map.grid(row=1, column=0, sticky="nsew")
@@ -252,29 +280,31 @@ class NavigationPage(ctk.CTkFrame):
 
     def _build_side_column(self) -> None:
         col = ctk.CTkFrame(self, fg_color="transparent")
-        col.grid(row=0, column=1, sticky="nsew")
         col.grid_columnconfigure(0, weight=1)
-        # `uniform` matters more than the weights here. Without it Tk hands
+        # Readiness in row 0 and the plan in row 2, with the divider between
+        # them in row 1; `_build_splitters` gives the two their weights.
+        # `uniform` matters more than the weights there. Without it Tk hands
         # each row its requested height first and splits only the remainder,
         # and the plan panel -- a scrollable list plus an inspector full of
         # entry boxes -- asks for far more than the matrix does. The readiness
         # card ended up one row tall, which is the opposite of the point of
         # taking the flight gauges out of this chapter. In a uniform group the
-        # two are sized in proportion to their weights whatever they ask for,
-        # and the minsize keeps the header and several sources visible even in
-        # a short window.
-        col.grid_rowconfigure(0, weight=48, uniform="navside",
-                              minsize=READINESS_MIN_PX)
-        col.grid_rowconfigure(1, weight=52, uniform="navside",
-                              minsize=PLAN_MIN_PX)
+        # two are sized in proportion to their weights whatever they ask for.
         self.side_col = col
 
         top = Card(col, "Navigation readiness",
                    "Configured, receiving, valid and fused are four different "
                    "questions.")
-        top.grid(row=0, column=0, sticky="nsew", pady=(0, 6))
+        top.grid(row=0, column=0, sticky="nsew")
+        # The card's body has to be allowed to shrink with the card. Without a
+        # weight on its row Tk gives the body all the height it asks for and
+        # lets the card cut off the rest -- which was the footer, "Allow
+        # writes" included, and the bottom of the matrix with it, so the
+        # matrix never got short enough to need its own scrollbar.
+        top.grid_rowconfigure(1, weight=1)
         top.body.grid_rowconfigure(1, weight=1)
         top.body.grid_columnconfigure(0, weight=1)
+        self.readiness_card = top
 
         head = ctk.CTkFrame(top.body, fg_color="transparent")
         head.grid(row=0, column=0, sticky="ew", pady=(0, 5))
@@ -287,13 +317,24 @@ class NavigationPage(ctk.CTkFrame):
         self.profile_menu.grid(row=0, column=0)
         self.check_label = label(head, "not checked", muted=True)
         self.check_label.grid(row=0, column=1, padx=(8, 0))
-        button(head, "Start…", self._open_start, "ghost", width=70
-               ).grid(row=0, column=3, padx=(4, 0))
-        button(head, "Health…", self._open_details, "ghost", width=78
-               ).grid(row=0, column=4, padx=(4, 0))
-        self.apply_button = button(head, "Apply (locked)", self._open_apply,
-                                   "primary", width=118)
-        self.apply_button.grid(row=0, column=5, padx=(4, 0))
+        # The three buttons travel together: beside the profile when the
+        # column is wide enough, on a line of their own under it when not
+        # (`_fit_head`). Left beside it, a narrow column cut "Apply" in half.
+        self.head = head
+        self.head_buttons = ctk.CTkFrame(head, fg_color="transparent")
+        button(self.head_buttons, "Start…", self._open_start, "ghost",
+               width=70).grid(row=0, column=0, padx=(4, 0))
+        button(self.head_buttons, "Health…", self._open_details, "ghost",
+               width=78).grid(row=0, column=1, padx=(4, 0))
+        self.apply_button = button(self.head_buttons, "Apply (locked)",
+                                   self._open_apply, "primary", width=118)
+        self.apply_button.grid(row=0, column=2, padx=(4, 0))
+        self._head_wrapped: bool | None = None
+        self._fit_head()
+        # The label's own <Configure> too: a longer check summary needs the
+        # room just as much as a narrower column takes it away.
+        for w in (head, self.check_label):
+            w.bind("<Configure>", self._fit_head, add="+")
 
         self.matrix = _SensorMatrix(top.body)
         self.matrix.grid(row=1, column=0, sticky="nsew")
@@ -312,11 +353,115 @@ class NavigationPage(ctk.CTkFrame):
         plan_card = Card(col, "Survey plan",
                          "Measured lines, rotated boxes and the lanes that "
                          "fill them. Meters, never pixels.")
-        plan_card.grid(row=1, column=0, sticky="nsew")
+        plan_card.grid(row=2, column=0, sticky="nsew")
+        # As for readiness: without it the feature list took the height and
+        # the inspector beneath it was cut off the bottom of the card.
+        plan_card.grid_rowconfigure(1, weight=1)
         plan_card.body.grid_rowconfigure(0, weight=1)
         plan_card.body.grid_columnconfigure(0, weight=1)
+        self.plan_card = plan_card
         self.plan_panel = PlanPanel(plan_card.body, self)
         self.plan_panel.grid(row=0, column=0, sticky="nsew")
+
+    def _fit_head(self, _event=None) -> None:
+        """Readiness buttons beside the profile, or under it if they won't fit.
+
+        Decided from requested widths, which do not change when the buttons
+        move, so moving them cannot reverse the decision that moved them.
+        """
+        try:
+            have = self.head.winfo_width()
+            need = (self.profile_menu.winfo_reqwidth()
+                    + self.check_label.winfo_reqwidth()
+                    + self.head_buttons.winfo_reqwidth()
+                    + 12 * (ctk.ScalingTracker.get_widget_scaling(self) or 1.0))
+        except Exception:
+            return
+        wrapped = 1 < have < need          # 1 px is "not laid out yet"
+        if wrapped == self._head_wrapped:
+            return
+        self._head_wrapped = wrapped
+        if wrapped:
+            self.head_buttons.grid(row=1, column=0, columnspan=4, sticky="e",
+                                   pady=(4, 0))
+        else:
+            self.head_buttons.grid(row=0, column=3, columnspan=1, sticky="e",
+                                   pady=0)
+
+    def _build_splitters(self) -> None:
+        """The dividers: map | column, map / column, readiness / plan.
+
+        Each is a handle in a grid track of its own, dragged to trade space
+        between its neighbors and double-clicked to put the default back.
+        Where each was left is kept in the settings file, so a laptop opens
+        laid out the way its operator last had it. The map's two are one at a
+        time: beside the column when the page is wide, above it when narrow.
+        """
+        self._map_repaint = Repaint(self.map, self.map.draw)
+        self.split_wide = Splitter(
+            self, axis="x", uniform="nav", default=MAP_SHARE,
+            fraction=self.split_share("wide", MAP_SHARE),
+            minimum=(self._map_floor, SIDE_MIN_PX),
+            on_change=self._map_repaint.ask,
+            on_release=self.split_saver("wide"))
+        self.split_narrow = Splitter(
+            self, axis="y", uniform="navrow", default=NARROW_MAP_SHARE,
+            fraction=self.split_share("narrow", NARROW_MAP_SHARE),
+            minimum=(NARROW_MAP_MIN_PX, NARROW_SIDE_MIN_PX),
+            on_change=self._map_repaint.ask,
+            on_release=self.split_saver("narrow"))
+        self.split_side = Splitter(
+            self.side_col, axis="y", uniform="navside",
+            default=READINESS_SHARE,
+            fraction=self.split_share("side", READINESS_SHARE),
+            minimum=(READINESS_MIN_PX, PLAN_MIN_PX),
+            on_release=self.split_saver("side"))
+        self.split_side.grid(row=1, column=0, sticky="ew")
+        self.split_side.apply()
+
+    def _map_floor(self) -> float:
+        """The map is never dragged narrower than its own tool bar.
+
+        Measured rather than written down, so a button added to the bar moves
+        the floor with it: below this "＋ Waypoint" is the first thing cut off.
+        """
+        try:
+            s = ctk.ScalingTracker.get_widget_scaling(self) or 1.0
+            return max(MAP_MIN_PX, self.map_bar.winfo_reqwidth() / s)
+        except Exception:
+            return MAP_MIN_PX
+
+    def split_share(self, which: str, default: float) -> float:
+        """Where a divider was left last time, or `default`."""
+        return self.app.split_share(SPLIT_KEYS[which], default)
+
+    def split_saver(self, which: str):
+        """What a divider calls when it is let go: remember where."""
+        return self.app.split_saver(SPLIT_KEYS[which])
+
+    def _lay_out(self, narrow: bool) -> None:
+        """Put the map and the column side by side, or one above the other.
+
+        Whichever direction is not in use is cleared back to nothing --
+        weights, uniform groups and floors -- so a track left over from the
+        other layout cannot claim space in this one.
+        """
+        if narrow:
+            self.split_wide.grid_remove()
+            for c in (0, 1, 2):
+                self.grid_columnconfigure(c, weight=1 if c == 0 else 0,
+                                          uniform="", minsize=0)
+            self.side_col.grid(row=2, column=0, sticky="nsew")
+            self.split_narrow.grid(row=1, column=0, sticky="ew")
+            self.split_narrow.apply()
+        else:
+            self.split_narrow.grid_remove()
+            for r in (0, 1, 2):
+                self.grid_rowconfigure(r, weight=1 if r == 0 else 0,
+                                       uniform="", minsize=0)
+            self.side_col.grid(row=0, column=2, sticky="nsew")
+            self.split_wide.grid(row=0, column=1, sticky="ns")
+            self.split_wide.apply()
 
     def _on_resize(self, event=None) -> None:
         try:
@@ -337,15 +482,7 @@ class NavigationPage(ctk.CTkFrame):
         if narrow == self._narrow:
             return
         self._narrow = narrow
-        if narrow:
-            self.grid_columnconfigure(1, weight=0, uniform="")
-            self.grid_rowconfigure((0, 1), weight=1, uniform="navrow")
-            self.side_col.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
-        else:
-            self.grid_columnconfigure(0, weight=MAP_WEIGHT, uniform="nav")
-            self.grid_columnconfigure(1, weight=SIDE_WEIGHT, uniform="nav")
-            self.grid_rowconfigure(1, weight=0)
-            self.side_col.grid(row=0, column=1, sticky="nsew", pady=0)
+        self._lay_out(narrow)
 
     # ------------------------------------------------------------------
     #  the site
@@ -1291,7 +1428,12 @@ class _SensorMatrix(ctk.CTkScrollableFrame):
             detail._full = ""
             self._cells[key] = (*marks, detail)
         self._detail_px = 0
-        self.bind("<Configure>", self._refit)
+        # `add="+"` is the whole difference between a matrix that scrolls and
+        # one that cannot. CTkScrollableFrame keeps its scroll region up to
+        # date from a <Configure> binding on this same frame, and a plain
+        # `bind` replaces it: the region then stayed empty, the scrollbar
+        # thumb filled the track, and neither it nor the wheel would move.
+        self.bind("<Configure>", self._refit, add="+")
 
     def _refit(self, _event=None) -> None:
         """Give the detail column a width, and fit its sentences to it.

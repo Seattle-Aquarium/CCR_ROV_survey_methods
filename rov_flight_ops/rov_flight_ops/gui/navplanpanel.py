@@ -17,10 +17,19 @@ import customtkinter as ctk
 from ..nav import plan as P
 from . import navdraw
 from . import theme as T
-from .widgets import button, entry, label
+from .widgets import Splitter, button, entry, label
 
 #: Tools offered, in the order they are used.
 PALETTE = ("pan", "line", "polyline", "rect", "grid", "circle", "polygon")
+
+#: The feature list's share of the height it shares with the inspector,
+#: until the divider between them is dragged. The inspector gets the larger
+#: part: a survey grid's fields run to a dozen rows.
+LIST_SHARE = 0.3
+
+#: How small that divider may make each, in logical pixels: a row of the
+#: list, and the inspector's heading.
+LIST_MIN_PX, INSPECTOR_MIN_PX = 38, 40
 
 GLYPH = {"pan": "✋", "line": "╱", "polyline": "⌁", "rect": "▭",
          "grid": "▦", "circle": "◯", "polygon": "⬠"}
@@ -46,13 +55,19 @@ def _set(widget, **kw) -> None:
 
 
 class PlanPanel(ctk.CTkFrame):
-    """Tools on top, then the feature list, then the inspector."""
+    """Tools on top, then the feature list, a divider, and the inspector.
+
+    The list and the inspector each scroll, and share what height the tool
+    bars leave in proportion. Before they did, the inspector simply sat
+    under the list at whatever height it asked for, and a survey grid's
+    dozen fields ran off the bottom of the card -- taking "Fly this grid"
+    and "Apply" with them.
+    """
 
     def __init__(self, master, page, **kw):
         super().__init__(master, fg_color="transparent", **kw)
         self.page = page
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
         self._rows: dict[str, ctk.CTkFrame] = {}
         self._fields: dict[str, ctk.CTkEntry] = {}
         self._showing: str | None = None
@@ -60,6 +75,13 @@ class PlanPanel(ctk.CTkFrame):
         self._build_tools()
         self._build_list()
         self._build_inspector()
+        self.split = Splitter(
+            self, axis="y", uniform="planpanel", default=LIST_SHARE,
+            fraction=page.split_share("plan", LIST_SHARE),
+            minimum=(LIST_MIN_PX, INSPECTOR_MIN_PX),
+            on_release=page.split_saver("plan"), thickness=10)
+        self.split.grid(row=3, column=0, sticky="ew")
+        self.split.apply()
 
     # ------------------------------------------------------------------
 
@@ -98,12 +120,13 @@ class PlanPanel(ctk.CTkFrame):
     def _build_list(self) -> None:
         self.listbox = ctk.CTkScrollableFrame(self, fg_color=T.FIELD_BG,
                                               height=110, corner_radius=6)
-        self.listbox.grid(row=2, column=0, sticky="nsew", pady=(0, 6))
+        self.listbox.grid(row=2, column=0, sticky="nsew")
         self.listbox.grid_columnconfigure(0, weight=1)
 
     def _build_inspector(self) -> None:
-        box = ctk.CTkFrame(self, fg_color=T.SURFACE_ALT, corner_radius=6)
-        box.grid(row=3, column=0, sticky="ew")
+        box = ctk.CTkScrollableFrame(self, fg_color=T.SURFACE_ALT,
+                                     height=120, corner_radius=6)
+        box.grid(row=4, column=0, sticky="nsew")
         box.grid_columnconfigure(0, weight=1)
         self.inspector = box
         self.title = ctk.CTkLabel(box, text="Nothing selected", font=T.FONT_H2,
@@ -113,7 +136,11 @@ class PlanPanel(ctk.CTkFrame):
                                     text_color=T.TEXT_MUTED, anchor="w",
                                     justify="left")
         self.summary.grid(row=1, column=0, sticky="ew", padx=8)
-        self.body = ctk.CTkFrame(box, fg_color="transparent")
+        # `height=0`: with nothing selected this frame is empty, and an empty
+        # CTkFrame asks for its default 200 logical pixels -- blank space that
+        # the feature list above then had to give up. It grows with its fields.
+        self.body = ctk.CTkFrame(box, fg_color="transparent", width=0,
+                                 height=0)
         self.body.grid(row=2, column=0, sticky="ew", padx=8, pady=(4, 8))
         self.body.grid_columnconfigure(1, weight=1)
 

@@ -24,6 +24,15 @@ DEFAULTS = {
     "dvl_host": "",
     #: Acoustic snapshots (echo profile and spectrum) per second; 0 is off.
     "dvl_snapshot_hz": 5.0,
+    #: Where the dividers between sections were left, as the share of the
+    #: space left of or above each. None is the page's own default.
+    "nav_map_share": None,
+    "nav_map_share_narrow": None,
+    "nav_readiness_share": None,
+    "nav_plan_list_share": None,
+    "monitor_pair_share": None,
+    "dvl_pair_share": None,
+    "logs_pair_share": None,
 }
 
 

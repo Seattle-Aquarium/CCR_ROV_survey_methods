@@ -1,10 +1,13 @@
 """
-Two corrections to CustomTkinter, applied once when the window is built.
+Corrections to CustomTkinter, applied once when the window is built.
 
-Both are about the same thing: dragging a window edge used to leave the
-interface visibly catching up in small stuttered jumps, a second or more behind
-the pointer. Profiling a drag across 320 pixels on the Monitoring tab showed
-where the time went, and the two largest entries were not this program's code.
+The scrollbar's two are about the same thing: dragging a window edge used to
+leave the interface visibly catching up in small stuttered jumps, a second or
+more behind the pointer. Profiling a drag across 320 pixels on the Monitoring
+tab showed where the time went, and the two largest entries were not this
+program's code. The scrollable frame's is about width: a scrolling tab's
+content could end up wider than the window it scrolls in, with its right-hand
+cards cut off at the edge.
 
 They are kept here, apart from everything else, because they reach into another
 library's private methods. That is a thing worth being able to find and delete
@@ -26,11 +29,12 @@ _applied = False
 
 
 def apply() -> bool:
-    """Apply both corrections. True if they went on. Safe to call twice."""
+    """Apply the corrections. True if they all went on. Safe to call twice."""
     global _applied
     if _applied:
         return True
     ok = _quieten_scrollbars()
+    ok = _hold_scrollable_width() and ok
     _applied = True
     return ok
 
@@ -101,4 +105,78 @@ def _quieten_scrollbars() -> bool:
     CTkScrollbar._draw = draw                         # type: ignore[assignment]
     CTkScrollbar.set = set_                           # type: ignore[assignment]
     log.info("CustomTkinter scrollbars tuned for resizing")
+    return True
+
+
+def _hold_scrollable_width() -> bool:
+    """Keep a scrolling frame's content as wide as the canvas it scrolls in.
+
+    ``CTkScrollableFrame`` gives its content the canvas's width by setting the
+    width of the canvas's window item, each time the canvas is configured. Tk
+    does not always hold the content to it. On the Lights and BlueOS logs tabs
+    the content was measured at its own *requested* width -- 2,649 pixels in a
+    2,168-pixel canvas -- while the item still reported 2,168, so the cards on
+    the right ran off the edge of the window and were cut off. Setting the
+    same width again put it right at once.
+
+    So each scrollable frame checks, whenever its content or its canvas is
+    configured or the canvas is mapped, whether the two disagree, and if they
+    do sets the width again -- at most once per idle cycle, and never while
+    the canvas has no size yet. Watching the content alone is not enough: it
+    takes its wide size while the canvas is still 1 pixel, and when the canvas
+    then gets its width it is the width Tk fails to pass on, so the content
+    never changes and never says so. A horizontal frame is held to the
+    canvas's height the same way.
+    """
+    try:
+        from customtkinter.windows.widgets.ctk_scrollable_frame import (
+            CTkScrollableFrame,
+        )
+    except Exception:                                 # pragma: no cover
+        log.warning("CustomTkinter's scrollable frame could not be found; "
+                    "the width correction was not applied")
+        return False
+
+    original_init = CTkScrollableFrame.__init__
+    if getattr(original_init, "_ccr_tuned", False):
+        return True
+
+    def init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        canvas = getattr(self, "_parent_canvas", None)
+        item = getattr(self, "_create_window_id", None)
+        if canvas is None or item is None:            # pragma: no cover
+            return                                    # a different shape now
+        pending = [False]
+
+        def hold() -> None:
+            pending[0] = False
+            try:
+                if getattr(self, "_orientation", "vertical") == "horizontal":
+                    want, have, option = (canvas.winfo_height(),
+                                          self.winfo_height(), "height")
+                else:
+                    want, have, option = (canvas.winfo_width(),
+                                          self.winfo_width(), "width")
+                if want > 1 and have != want:
+                    canvas.itemconfigure(item, **{option: want})
+            except Exception:
+                pass                                  # the window is going away
+
+        def ask(_event=None) -> None:
+            if not pending[0]:
+                pending[0] = True
+                try:
+                    self.after_idle(hold)
+                except Exception:
+                    pending[0] = False
+
+        self.bind("<Configure>", ask, add="+")
+        canvas.bind("<Configure>", ask, add="+")
+        canvas.bind("<Map>", ask, add="+")
+        self._ccr_hold_width = hold
+
+    init._ccr_tuned = True                            # type: ignore[attr-defined]
+    CTkScrollableFrame.__init__ = init                # type: ignore[assignment]
+    log.info("CustomTkinter scrollable frames held to their canvas width")
     return True
