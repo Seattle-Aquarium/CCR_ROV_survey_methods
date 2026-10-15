@@ -111,7 +111,12 @@ def test_freshness_age_counts_from_the_last_new_message(fake_mav):
     for _ in range(5):
         mav.read("RANGEFINDER")               # successful, unchanged
     assert health.last_change_mono == moved_at
-    assert health.quality(max_age=0.0) is Quality.STALE
+    # A stated "now" rather than the clock: on Windows before Python 3.12
+    # time.monotonic() ticks every 15.6 ms, so a reading taken straight after
+    # the message is exactly 0.0 s old -- not stale by any max_age >= 0.
+    assert health.age(now_mono=moved_at + 5.0) == pytest.approx(5.0)
+    assert health.quality(max_age=1.0, now_mono=moved_at + 5.0) is Quality.STALE
+    assert health.quality(max_age=10.0, now_mono=moved_at + 5.0) is Quality.OK
 
 
 def test_a_counter_going_backwards_is_a_restart(fake_mav):

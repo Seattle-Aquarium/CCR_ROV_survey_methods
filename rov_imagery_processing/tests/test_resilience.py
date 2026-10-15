@@ -167,7 +167,11 @@ def test_secrets_are_scrubbed_from_diagnostics():
 def test_the_watchdog_reports_one_stall_once_and_its_recovery(caplog):
     caplog.set_level(logging.WARNING, logger=diagnostics.PACKAGE)
     dog = diagnostics.Watchdog(hang_after=1.0)
-    t0 = time.monotonic()
+    # The stalled beat is set in the past. Set to "now", the beat() below
+    # can land on the very same reading -- time.monotonic() ticks every
+    # 15.6 ms on Windows before Python 3.12 -- and a beat no later than the
+    # stall is, correctly, no recovery.
+    t0 = time.monotonic() - 10.0
     dog._beat = t0
     assert dog.check(now=t0 + 0.5) == ""
     assert dog.check(now=t0 + 1.5) == "stalled"
