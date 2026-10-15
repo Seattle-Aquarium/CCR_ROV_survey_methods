@@ -35,7 +35,7 @@ STATUS_PATHS = (
     "/api/v1/warnings/",         # active warnings, e.g. temperature_high
     "/api/v1/outputs/",          # each output's port, format and client count
     "/api/v1/config",            # speed of sound, mounting offset, range mode, …
-    "/api/v1/time",              # the DVL's clock and its NTP state
+    "/api/v1/time",              # the DVL's clock and NTP state; 404 on 2.7.2
 )
 SLOW_PATHS = (
     "/api/v1/about",             # chip id, product, variant, software version

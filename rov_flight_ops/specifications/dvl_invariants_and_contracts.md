@@ -156,16 +156,25 @@ than the DVL's. Classification:
 | `dvl_quiet` | DVL interval is a gap otherwise |
 | `delivery_stall` | DVL interval normal, laptop interval long |
 | `clock_step` | DVL interval ≤ 0 |
+| `acoustics_off` | any of the first three, while an acoustics-off period (from the configuration reads) overlaps the laptop interval |
 
 Gaps do not enter the median. Nothing is judged before 5 intervals. The
+first report after an acoustics-off silence has a stale time of validity
+(software 2.7.2), so the DVL interval after it is not judged. The
 thresholds are written into every capture record. *Held by*
 `test_dvl_cadence.py`, and end to end by
-`test_each_kind_of_gap_is_put_on_its_own_side`.
+`test_each_kind_of_gap_is_put_on_its_own_side` and
+`test_a_silence_with_the_acoustics_off_is_not_a_fault`.
 
 **INV-22  Invalid is not a gap.** Reports with `velocity_valid` false are
-counted as invalid reports and stretches, not as gaps. *Held by*
+counted as invalid reports and stretches, not as gaps. A stretch is measured
+on the DVL's clock unless that disagrees with the laptop's by more than a
+stall's slack, so it never starts before the capture; an open stretch counts
+in the totals, to its latest report. *Held by*
 `test_invalid_stretches_are_counted_apart_from_gaps`,
-`test_an_invalid_stretch_is_counted_and_is_not_a_gap`.
+`test_an_invalid_stretch_is_counted_and_is_not_a_gap`,
+`test_an_invalid_stretch_cannot_reach_back_before_the_capture`,
+`test_an_invalid_stretch_still_open_is_counted`.
 
 ## Contracts
 

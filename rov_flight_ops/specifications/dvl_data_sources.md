@@ -26,7 +26,7 @@ records it (`about` in the capture record) the first time it connects.
 | Warnings | HTTP `/api/v1/warnings/` | every 2 s | **yes** | same |
 | Output ports and **connected clients** | HTTP `/api/v1/outputs/` | every 2 s | **yes** | same |
 | Configuration | HTTP `/api/v1/config` (and TCP `get_config`) | every 2 s (TCP every 60 s) | **yes** | same, and `_commands.csv` |
-| The DVL's clock and NTP state | HTTP `/api/v1/time` (and TCP `get_time_status`, 2.7.2+) | every 2 s (TCP every 30 s) | **yes** | same |
+| The DVL's clock and NTP state | HTTP `/api/v1/time` — **404 on 2.7.2** — and TCP `get_time_status`, 2.7.2+ | every 2 s (TCP every 30 s) | **yes** | same, and `_commands.csv` |
 | Identity and software version | HTTP `/api/v1/about` (and TCP `get_version_info`, 2.7.2+) | every 60 s | **yes** | same |
 | Network configuration | HTTP `/api/v1/ip`, `/api/v1/ip/current` | every 60 s | **yes** | `_http.jsonl` |
 | **Echo profile** — signal strength against range, per beam | HTTP `/api/graph` | snapshot; default **5 /s** | **yes, whole** | `_echo.jsonl` |
@@ -139,7 +139,7 @@ It lacks the TCP report's `status`, `format`, `type` and
 | `/api/v1/warnings/` | list of active warnings, e.g. `warnings:temperature_high` |
 | `/api/v1/outputs/` | each output: `id` (`tcp_water_linked`, `tcp_pd6`, `tcp_pd4`, `serial`), `port`, `format`, **`clients`** (connected client count), `error` |
 | `/api/v1/config` | `speed_of_sound`, `mounting_rotation_offset`, `acoustic_enabled`, `dark_mode_enabled`, `range_mode`, `periodic_cycling_enabled` |
-| `/api/v1/time` | `time` (RFC 3339 to the nanosecond), `ntp_enabled`, `ntp_server`, `ntp_synchronized` |
+| `/api/v1/time` | `time` (RFC 3339 to the nanosecond), `ntp_enabled`, `ntp_server`, `ntp_synchronized`. **Not served by 2.7.2** (404, seen 15 October 2026); the clock is then TCP `get_time_status`: `system_time` (whole seconds), `ntp_synced`, `ntp_synced_to`, `ntp_seconds_since_last_sync` |
 | `/api/v1/about` | `chipid`, `hardware_revision`, `product_id`, `product_name`, `variant`, `version`, `version_short`, `is_ready` |
 | `/api/v1/ip`, `/api/v1/ip/current` | configured and current address, DHCP, prefix |
 
@@ -209,7 +209,7 @@ noise." Against what exists:
 | Time of transmission (ping) | **Not exposed.** `time_of_validity` is the centre of the ping's *reflection*, not the transmit time | `time_of_validity_us` |
 | Time received, per beam | **Not exposed as a time.** The echo profile gives received strength against *range* per beam; *t = 2d/c* turns it into a receive-time profile | `_echo.jsonl` |
 | Time analysed | **Not exposed per beam.** `time_of_transmission` is when the finished report was sent; `tx_minus_tov_ms` is reflection-to-send, which Water Linked describe as acoustic travel back plus decoding and processing | `time_of_transmission_us`, `tx_minus_tov_ms` |
-| The DVL's clock | **Yes**: every report's two timestamps, `/api/v1/time` every 2 s with NTP state, and `get_time_status` | `_velocity.csv`, `_status.csv` (`dvl_clock_minus_laptop_ms`) |
+| The DVL's clock | **Yes**: every report's two timestamps, `/api/v1/time` every 2 s with NTP state where served, and `get_time_status` every 30 s | `_velocity.csv`, `_status.csv` (`dvl_clock_minus_laptop_ms`) |
 | Spectral density | **Yes**: per-beam spectrum, ~969–1031 kHz | `_spectrum.jsonl` |
 | Spectral noise | **Yes**: `nsd` per beam per report (noise spectral density, dBm), and the noise floor in the spectrum | `t*_nsd`, `_spectrum.jsonl` |
 | Received signal strength | **Yes**: `rssi` per beam per report, and the echo profile | `t*_rssi`, `_echo.jsonl` |
