@@ -346,6 +346,11 @@ class FlightRecorder:
         #: Called on any state change, from a worker thread. The GUI must
         #: marshal it onto the main thread itself -- Tk is not thread-safe.
         self.on_change = on_change
+        #: Where the fast trace echoes the DVL, as the witness that places a
+        #: vehicle outage: an address, or a function the trace asks again as
+        #: it runs (the application hands over its DVL capture's). Empty is
+        #: `nettrace.DVL_DEFAULT_HOST`.
+        self.dvl_host = ""
 
         self.status = Status()
         #: Half an hour, the longest window the Monitoring charts offer.
@@ -353,6 +358,7 @@ class FlightRecorder:
         self.capabilities: dict[str, str] = {}
 
         self._tether_read_at = 0.0
+        self._link_read_at = 0.0
         self._pi_interface = ""
         #: None until the tether diagnostics extension has been asked once.
         self._tether_ok: bool | None = None
@@ -627,9 +633,26 @@ class FlightRecorder:
                 got = True
         except Exception:
             pass
+        # Whether that port has carrier, and how often it has lost it, from
+        # BlueOS's network manager. A separate service from the counters
+        # above, so held forward and expired on its own clock.
+        try:
+            links = blueos.read_link_state(self.host, timeout=3.0)
+            link = links.get(self._pi_interface or "eth0")
+            if link is None and len(links) == 1:
+                link = next(iter(links.values()))
+            if link is not None:
+                vehicle.eth_carrier = link.get("carrier")
+                vehicle.eth_carrier_drops = link.get("carrier_drops")
+                self._link_read_at = time.monotonic()
+        except Exception:
+            pass
+        stale = TETHER_POLL_S * STALE_AFTER_POLLS
+        if time.monotonic() - self._link_read_at > stale:
+            vehicle.eth_carrier = vehicle.eth_carrier_drops = None
         if got:
             self._tether_read_at = time.monotonic()
-        elif time.monotonic() - self._tether_read_at > TETHER_POLL_S * STALE_AFTER_POLLS:
+        elif time.monotonic() - self._tether_read_at > stale:
             # Held forward for a few polls, then shown as unknown.
             vehicle.eth_rx_bytes = vehicle.eth_rx_errors = None
         # The tether extension is asked every poll. A vehicle without it is
@@ -812,7 +835,8 @@ class FlightRecorder:
         # its own files. Started after the CSV is open and the state is set, so
         # that a station where it cannot start -- no bridge, no ICMP, a folder
         # that refuses a fourth file -- still records the flight.
-        tracer = nettrace.Tracer(host=self.host, folder=folder, flight_id=stamp)
+        tracer = nettrace.Tracer(host=self.host, folder=folder, flight_id=stamp,
+                                 dvl_host=self.dvl_host)
         try:
             if tracer.start():
                 session.tracer = tracer

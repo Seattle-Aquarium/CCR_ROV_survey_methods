@@ -56,8 +56,9 @@ FAST_PERIOD_S = 0.25
 SLOW_PERIOD_S = 2.0
 #: The extensions' own HTTP APIs, which are Python web apps on the Pi.
 EXT_PERIOD_S = 2.0
-#: How often the parameter set is re-read. Expensive (it reads the head of a
-#: dataflash log) and it only changes when somebody changes it.
+#: How often the parameter set is re-read. It only changes when somebody
+#: changes it, and reading it means fetching the dataflash log over the tether --
+#: with `blueos.ParameterFollower`, only what the log gained since last time.
 PARAM_PERIOD_S = 120.0
 
 #: Backoff after a failed cycle, growing to this cap. A vehicle that is off
@@ -386,10 +387,11 @@ class NavCollector:
     def _refresh_params(self) -> None:
         """Re-read the parameters, on a thread of their own.
 
-        Not on the collector's thread. Reading them means fetching the head of
-        the autopilot's newest dataflash log over File Browser -- a third of a
-        second against a healthy vehicle, and seconds against a busy or
-        half-answering one. Doing that inside the poll cycle would hold the
+        Not on the collector's thread. Reading them means fetching the
+        autopilot's newest dataflash log over File Browser -- the page wires
+        `blueos.ParameterFollower`, which takes the whole log once and then
+        only its new tail, but even a tail is a second or more against a busy
+        or half-answering vehicle. Doing that inside the poll cycle would hold the
         4 Hz instruments for its whole duration, every two minutes, which is
         exactly the sort of periodic hitch that gets reported as "the page
         freezes" and is miserable to track down.

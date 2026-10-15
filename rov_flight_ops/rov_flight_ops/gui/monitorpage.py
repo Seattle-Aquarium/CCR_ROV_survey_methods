@@ -79,6 +79,8 @@ SLOWER_THAN_ROW = {
     "pi_soc_temp_c": flightlog.PI_POLL_S,
     "pi_eth_rx_bytes": flightlog.TETHER_POLL_S,
     "pi_eth_rx_errors": flightlog.TETHER_POLL_S,
+    "pi_eth_carrier": flightlog.TETHER_POLL_S,
+    "pi_eth_carrier_drops": flightlog.TETHER_POLL_S,
     "tether_link_mbps": flightlog.TETHER_POLL_S,
     "tether_tx_mbps": flightlog.TETHER_POLL_S,
     "tether_rx_mbps": flightlog.TETHER_POLL_S,
@@ -410,6 +412,7 @@ class MonitorPage(ctk.CTkFrame):
                                  flight_dir=self.app.flight_dir)
             self.app.recorder = rec
         rec.flight_dir = self.app.flight_dir
+        rec.dvl_host = getattr(self.app, "dvl_address", "")
         return rec
 
     def _host(self) -> str:
