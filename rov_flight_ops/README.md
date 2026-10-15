@@ -157,6 +157,16 @@ From a terminal: `python -m rov_flight_ops` (in the environment above).
   handle to jump between one line and a comfortable height. They never shrink
   below one line, and the progress bar and status line are never inside the
   part that shrinks.
+* **Sections that sit side by side are divided by draggable handles.** On
+  Navigation: the map against the right-hand column, readiness against the
+  survey plan, and the plan's feature list against its inspector. On
+  Monitoring, DVL and BlueOS logs: between the two sections in each pair.
+  Double-click a handle to put it back. Where each was left is kept in
+  `settings.json`, so a laptop opens laid out the way it was last used. No
+  section can be dragged narrower than its widest row of buttons, so nothing
+  is cut off; the map stops at its own tool bar. Stacked sections have no
+  divider — a scrolling tab's sections are as tall as their content, and the
+  report boxes inside them have their own handles.
 * **Small sections sit side by side** where they are short enough to.
 * **The recorder's state is on every tab**, at the right of the tab row:
   *Watching 192.168.2.2 for arming*, *● Recording … · rows · host*, or a warning

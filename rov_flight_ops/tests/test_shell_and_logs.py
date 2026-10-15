@@ -166,6 +166,93 @@ def test_rates_are_shown_beside_each_reading():
 
 
 # --------------------------------------------------------------------------
+#  dividers between paired sections
+# --------------------------------------------------------------------------
+
+
+PAIRS = ("monitor_pair_share", "dvl_pair_share", "logs_pair_share")
+
+
+def test_every_pair_of_sections_has_a_divider(app):
+    """Monitoring, DVL and BlueOS logs each put two sections side by side,
+    and each pair can be re-divided: the two columns share one uniform group
+    and the divider's own column takes none of the width."""
+    for key in PAIRS:
+        split = app.splits[key]
+        frame = split.master
+        a, b = frame.grid_columnconfigure(0), frame.grid_columnconfigure(2)
+        assert a["uniform"] == b["uniform"] == "pair"
+        assert int(a["weight"]) == int(b["weight"]) > 0, key
+        assert int(frame.grid_columnconfigure(1)["weight"]) == 0
+        assert split.fraction == pytest.approx(0.5)
+
+
+def test_a_pair_divider_is_dragged_remembered_and_reset(app, monkeypatch):
+    split = app.splits["logs_pair_share"]
+    before = app.settings.get("logs_pair_share")
+    monkeypatch.setattr(split, "_sizes", lambda: (500, 500))
+    monkeypatch.setattr(split, "_scaling", lambda: 1.0)
+    monkeypatch.setattr(split, "floors", lambda: (300.0, 300.0))
+    monkeypatch.setattr(app, "save_settings", lambda: None)
+
+    class E:
+        def __init__(self, x):
+            self.x_root, self.y_root = x, 0
+
+    try:
+        split._press(E(100))
+        split._drag(E(0))
+        split._release(E(0))
+        assert split.fraction == pytest.approx(0.4)
+        assert app.settings["logs_pair_share"] == pytest.approx(0.4)
+        a = int(split.master.grid_columnconfigure(0)["weight"])
+        b = int(split.master.grid_columnconfigure(2)["weight"])
+        assert a / (a + b) == pytest.approx(0.4, abs=0.002)
+
+        split._press(E(100))
+        split._drag(E(-900))
+        split._release(E(-900))
+        assert split.fraction == pytest.approx(0.3), "the floor holds"
+
+        split.reset()
+        assert split.fraction == pytest.approx(0.5)
+        assert app.settings["logs_pair_share"] == pytest.approx(0.5)
+    finally:
+        split.fraction = 0.5
+        split.apply()
+        app.settings["logs_pair_share"] = before
+
+
+def test_a_section_is_never_dragged_narrower_than_its_buttons(app):
+    """The floor is the widest row that cannot wrap. Wrapped text is left
+    out of it: it asks for whatever width it was last wrapped to, and would
+    otherwise stop a section shrinking at all."""
+    from rov_flight_ops.gui.widgets import button, rigid_width
+
+    s = ctk.ScalingTracker.get_widget_scaling(app) or 1.0
+    holder = ctk.CTkFrame(app)
+    try:
+        row = ctk.CTkFrame(holder)
+        row.grid(row=0, column=0, sticky="w")
+        for i in range(3):
+            button(row, f"Button {i}", lambda: None, "ghost",
+                   width=150).grid(row=0, column=i)
+        prose = ctk.CTkFrame(holder)
+        prose.grid(row=1, column=0, sticky="w")
+        ctk.CTkLabel(prose, text="word " * 200, wraplength=2000
+                     ).grid(row=0, column=0)
+        ctk.CTkButton(prose, text="beside the prose", width=60
+                      ).grid(row=0, column=1)
+        app.update_idletasks()
+        floor = rigid_width(holder)
+        assert floor >= 450 - 1, "the row of three 150-px buttons"
+        assert floor < prose.winfo_reqwidth() / s, (
+            "a row holding wrapped text must not set the floor")
+    finally:
+        holder.destroy()
+
+
+# --------------------------------------------------------------------------
 #  the BlueOS logs tab
 # --------------------------------------------------------------------------
 

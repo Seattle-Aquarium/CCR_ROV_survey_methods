@@ -305,5 +305,42 @@ def test_a_scrollbar_still_draws_and_still_reports_its_position(app):
         sb.destroy()
 
 
+def test_the_scrollable_frame_width_correction_went_on():
+    from customtkinter.windows.widgets.ctk_scrollable_frame import (
+        CTkScrollableFrame,
+    )
+
+    assert ctk_tuning.apply() is True
+    assert getattr(CTkScrollableFrame.__init__, "_ccr_tuned", False)
+    once = CTkScrollableFrame.__init__
+    ctk_tuning._applied = False            # force it to try again
+    ctk_tuning.apply()
+    assert CTkScrollableFrame.__init__ is once, "the patch must not wrap itself"
+
+
+def test_a_scrolling_page_wider_than_its_canvas_is_pulled_back(app, monkeypatch):
+    """Tk once left the Lights and BlueOS logs pages at their requested width
+    inside a narrower canvas, cutting the right-hand cards off. The content
+    must be put back to the canvas's width whenever the two disagree."""
+    import customtkinter as ctk
+
+    body = ctk.CTkScrollableFrame(app)
+    try:
+        canvas = body._parent_canvas
+        monkeypatch.setattr(canvas, "winfo_width", lambda: 300)
+        monkeypatch.setattr(body, "winfo_width", lambda: 500)
+        canvas.itemconfigure(body._create_window_id, width=0)
+        body._ccr_hold_width()
+        assert int(float(canvas.itemcget(body._create_window_id, "width"))) == 300
+
+        # Not before the canvas has a size of its own.
+        monkeypatch.setattr(canvas, "winfo_width", lambda: 1)
+        canvas.itemconfigure(body._create_window_id, width=0)
+        body._ccr_hold_width()
+        assert int(float(canvas.itemcget(body._create_window_id, "width"))) == 0
+    finally:
+        body.destroy()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

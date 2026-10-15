@@ -99,7 +99,8 @@ class LogsPage(ctk.CTkFrame):
         body.grid(row=0, column=0, sticky="nsew")
         body.grid_columnconfigure(0, weight=1)
         self._build_files(body)
-        left, right = app.pair(body, row=1, pady=(0, 4))
+        left, right = app.pair(body, row=1, pady=(0, 4),
+                               split_key="logs_pair_share")
         self.download = ActionPanel(
             left, self, "2.  Download files",
             "Copies into the flight folder chosen on Monitoring, each type "

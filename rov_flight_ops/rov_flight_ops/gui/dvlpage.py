@@ -135,16 +135,7 @@ class DvlPage(ctk.CTkFrame):
         body.grid_columnconfigure(0, weight=1)
         self.body = body
 
-        pair = ctk.CTkFrame(body, fg_color="transparent")
-        pair.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        pair.grid_columnconfigure((0, 1), weight=1, uniform="pair")
-        left = ctk.CTkFrame(pair, fg_color="transparent")
-        right = ctk.CTkFrame(pair, fg_color="transparent")
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-        for f in (left, right):
-            f.grid_columnconfigure(0, weight=1)
-            f.grid_rowconfigure(0, weight=1)
+        left, right = app.pair(body, row=0, split_key="dvl_pair_share")
         self._build_connection(left)
         self._build_delivery(right)
         self._build_beams(body, 1)

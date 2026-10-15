@@ -49,7 +49,15 @@ from .. import diagnostics
 from . import ctk_tuning
 from . import gradients as G
 from . import theme as T
-from .widgets import Grip, OutputBox, Repaint, button, one_line_height
+from .widgets import (
+    Grip,
+    OutputBox,
+    Repaint,
+    Splitter,
+    button,
+    one_line_height,
+    rigid_width,
+)
 
 log = logging.getLogger(__name__)
 #: The shared output pane, copied into the diagnostics log.
@@ -208,6 +216,11 @@ class Lamp(ctk.CTkFrame):
 
 #: The log pane may be dragged open to at most this share of the window.
 LOG_MAX_SHARE = 0.6
+
+#: The least the divider in a pair of sections may make either one, in
+#: logical pixels, whatever is in it. Usually the floor is higher: no section
+#: is made narrower than its widest row of buttons (`widgets.rigid_width`).
+PAIR_MIN_PX = 320
 
 
 class TabStrip(ctk.CTkFrame):
@@ -444,6 +457,8 @@ class Shell(ctk.CTk):
         self.configure(fg_color=T.BG)
 
         self.pages: dict[str, object] = {}
+        #: settings key -> the divider of a pair of sections built by `pair`.
+        self.splits: dict[str, Splitter] = {}
         #: tab name -> the pages built into it, each refreshed when it shows.
         self._tab_pages: dict[str, list] = {}
         self._queue: queue.Queue[tuple] = queue.Queue()
@@ -957,21 +972,55 @@ class Shell(ctk.CTk):
         body.grid_columnconfigure(0, weight=1)
         return body
 
-    @staticmethod
-    def pair(body, row: int, pady=(0, 12)) -> tuple[ctk.CTkFrame, ctk.CTkFrame]:
-        """Two equal columns, for sections small enough to sit side by side."""
+    def pair(self, body, row: int, pady=(0, 12), *, split_key: str = ""
+             ) -> tuple[ctk.CTkFrame, ctk.CTkFrame]:
+        """Two columns, for sections small enough to sit side by side.
+
+        They start equal, with a divider between them that can be dragged to
+        give either one more width and double-clicked to even them up again.
+        With `split_key`, where it was left is remembered under that key in
+        the settings file, and the divider is kept in `self.splits`.
+        """
         frame = ctk.CTkFrame(body, fg_color="transparent")
         frame.grid(row=row, column=0, sticky="ew", pady=pady)
-        frame.grid_columnconfigure((0, 1), weight=1, uniform="pair")
         frame.grid_rowconfigure(0, weight=1)
         left = ctk.CTkFrame(frame, fg_color="transparent")
         right = ctk.CTkFrame(frame, fg_color="transparent")
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        # No padding of their own: the divider between them is the gap.
+        left.grid(row=0, column=0, sticky="nsew")
+        right.grid(row=0, column=2, sticky="nsew")
         for f in (left, right):
             f.grid_columnconfigure(0, weight=1)
             f.grid_rowconfigure(0, weight=1)
+        split = Splitter(
+            frame, axis="x", uniform="pair", default=0.5,
+            fraction=self.split_share(split_key, 0.5) if split_key else 0.5,
+            minimum=(lambda: max(PAIR_MIN_PX, rigid_width(left)),
+                     lambda: max(PAIR_MIN_PX, rigid_width(right))),
+            on_release=self.split_saver(split_key) if split_key else None)
+        split.grid(row=0, column=1, sticky="ns")
+        split.apply()
+        if split_key:
+            self.splits[split_key] = split
         return left, right
+
+    def split_share(self, key: str, default: float) -> float:
+        """Where the divider saved under `key` was left last time, or
+        `default`. The divider itself checks that it is a usable share."""
+        settings = getattr(self, "settings", None) or {}
+        return settings.get(key) or default
+
+    def split_saver(self, key: str) -> Callable[[float], None]:
+        """What a divider calls when it is let go: remember where."""
+        def save(fraction: float) -> None:
+            settings = getattr(self, "settings", None)
+            if settings is None:
+                return
+            settings[key] = round(fraction, 4)
+            saver = getattr(self, "save_settings", None)
+            if callable(saver):
+                saver()
+        return save
 
     # ------------------------------------------------------------------
     #  the shared output pane

@@ -175,6 +175,261 @@ class Grip(ctk.CTkFrame):
                              else self.minimum))
 
 
+#: Widgets that keep the width they were given: a row of these cannot wrap,
+#: so it is cut off when its section is made narrower than the row.
+_RIGID = (ctk.CTkButton, ctk.CTkEntry, ctk.CTkCheckBox, ctk.CTkRadioButton,
+          ctk.CTkSwitch, ctk.CTkOptionMenu, ctk.CTkSegmentedButton)
+
+
+def rigid_width(root) -> float:
+    """The widest row under `root` that cannot wrap, in logical pixels.
+
+    Each frame directly holding buttons, entries, check boxes or menus is a
+    row; its requested width, plus the inset at which it sits inside `root`
+    on both sides, is how narrow `root` can be before something is cut off.
+    A frame that also holds wrapped text is skipped: wrapped text asks for
+    the width it was last wrapped to, so it would only report back whatever
+    width `root` already has. Measured on screen, so call it once `root` is
+    laid out -- at the press of a divider, say.
+    """
+    try:
+        scale = float(ctk.ScalingTracker.get_widget_scaling(root)) or 1.0
+        left = root.winfo_rootx()
+    except Exception:
+        return 0.0
+    rows, widest = set(), 0.0
+    stack = [root]
+    while stack:
+        w = stack.pop()
+        try:
+            children = w.winfo_children()
+        except Exception:
+            continue
+        stack.extend(children)
+        if isinstance(w, _RIGID) or (isinstance(w, ctk.CTkLabel)
+                                     and not _wraps(w)):
+            rows.add(w.master)
+    for row in rows:
+        try:
+            if any(_wraps(c) for c in row.winfo_children()):
+                continue
+            inset = max(0, row.winfo_rootx() - left)
+            widest = max(widest, row.winfo_reqwidth() + 2 * inset)
+        except Exception:
+            continue
+    return widest / scale
+
+
+def _wraps(widget) -> bool:
+    if not isinstance(widget, ctk.CTkLabel):
+        return False
+    try:
+        return int(widget.cget("wraplength") or 0) > 0
+    except Exception:
+        return False
+
+
+def split_after_drag(first_px: float, second_px: float, moved_px: float,
+                     min_first_px: float, min_second_px: float) -> float:
+    """The share of two tracks' space the first has once their boundary moves.
+
+    Clamped so neither side goes below its floor. When there is not room for
+    both floors, the space is split in proportion to them, so neither side is
+    the one that loses everything.
+    """
+    total = first_px + second_px
+    if total <= 0:
+        return 0.5
+    low, high = min_first_px, total - min_second_px
+    if high < low:
+        floors = min_first_px + min_second_px
+        return min_first_px / floors if floors > 0 else 0.5
+    return min(high, max(low, first_px + moved_px)) / total
+
+
+class Splitter(ctk.CTkFrame):
+    """A handle that moves the boundary between two grid tracks.
+
+    It sits in a track of its own between the two it divides -- a column for
+    ``axis="x"``, which drags sideways, or a row for ``axis="y"`` -- and reads
+    which tracks those are from where it is gridded, so a page can move it
+    when its layout changes.
+
+    The split is kept as weights in a ``uniform`` group rather than as pixels.
+    Tk then sizes the two tracks in proportion to their weights whatever their
+    contents ask for, which is what lets one be dragged smaller than its
+    widgets would like; and a window made larger or smaller keeps the split
+    the operator chose instead of handing the whole change to one side.
+
+    `minimum` is the least each side may be *dragged* to, in logical pixels --
+    a number, or a callable for a floor that depends on what is in the track.
+    It is deliberately not made a grid ``minsize``: when the window itself is
+    too small for both floors, a floor would keep one side whole and cut the
+    other off the bottom, where without one both shrink in proportion and
+    whatever scrolls inside them scrolls. Double-click puts `default` back.
+    """
+
+    #: The two weights always sum to this, so one unit is a tenth of a
+    #: percent of the space -- finer than a pixel on any screen this runs on.
+    RESOLUTION = 1000
+
+    def __init__(self, master, *, axis: str, fraction: float,
+                 minimum: tuple[float | Callable[[], float],
+                                float | Callable[[], float]],
+                 uniform: str,
+                 default: float | None = None,
+                 on_change: Callable[[], None] | None = None,
+                 on_release: Callable[[float], None] | None = None,
+                 thickness: int = 12):
+        if axis not in ("x", "y"):
+            raise ValueError(f"axis must be 'x' or 'y', not {axis!r}")
+        cursor = "sb_h_double_arrow" if axis == "x" else "sb_v_double_arrow"
+        super().__init__(master, fg_color="transparent", corner_radius=0,
+                         width=thickness, height=thickness, cursor=cursor)
+        self.axis = axis
+        self.minimum = (minimum[0], minimum[1])
+        self.uniform = uniform
+        self.default = self._valid(default, 0.5)
+        self.fraction = self._valid(fraction, self.default)
+        self.on_change = on_change
+        self.on_release = on_release
+        #: (pointer, first_px, second_px, floor_px, floor_px) for the drag in
+        #: progress, all in device pixels.
+        self._start: tuple | None = None
+        self._scheduled = False
+        self._applied: tuple | None = None
+        size = (4, 46) if axis == "x" else (46, 4)
+        self.bar = ctk.CTkFrame(self, width=size[0], height=size[1],
+                                corner_radius=2, fg_color=T.BORDER,
+                                cursor=cursor)
+        self.bar.place(relx=0.5, rely=0.5, anchor="center")
+        for w in (self, self.bar):
+            w.bind("<ButtonPress-1>", self._press, add="+")
+            w.bind("<B1-Motion>", self._drag, add="+")
+            w.bind("<ButtonRelease-1>", self._release, add="+")
+            w.bind("<Double-Button-1>", self.reset, add="+")
+            w.bind("<Enter>", lambda _e: self.bar.configure(fg_color=T.ACCENT),
+                   add="+")
+            w.bind("<Leave>", lambda _e: self.bar.configure(fg_color=T.BORDER),
+                   add="+")
+
+    @staticmethod
+    def _valid(value, fallback: float) -> float:
+        """A share read from a settings file is a share, or the fallback."""
+        try:
+            f = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        return f if 0.05 <= f <= 0.95 else fallback
+
+    def _scaling(self) -> float:
+        try:
+            return float(ctk.ScalingTracker.get_widget_scaling(self)) or 1.0
+        except Exception:
+            return 1.0
+
+    def floors(self) -> tuple[float, float]:
+        """Both floors now, in logical pixels."""
+        return tuple(float(m() if callable(m) else m)   # type: ignore[return-value]
+                     for m in self.minimum)
+
+    def _tracks(self) -> tuple[int, int, int] | None:
+        """(before, after, across): the tracks either side of the handle, and
+        the index of the line it sits on in the other direction."""
+        info = self.grid_info()
+        if not info:
+            return None
+        along = int(info["column" if self.axis == "x" else "row"])
+        across = int(info["row" if self.axis == "x" else "column"])
+        return along - 1, along + 1, across
+
+    def _sizes(self) -> tuple[int, int]:
+        before, after, across = self._tracks()
+        m = self.master
+        if self.axis == "x":
+            return m.grid_bbox(before, across)[2], m.grid_bbox(after, across)[2]
+        return m.grid_bbox(across, before)[3], m.grid_bbox(across, after)[3]
+
+    def apply(self) -> None:
+        """Put the current split into the grid. Call after (re)gridding."""
+        tracks = self._tracks()
+        if tracks is None:
+            return
+        before, after, _ = tracks
+        s = self._scaling()
+        first = round(self.fraction * self.RESOLUTION)
+        self._applied = (before, after, first, s)
+        conf = (self.master.grid_columnconfigure if self.axis == "x"
+                else self.master.grid_rowconfigure)
+        conf(before, weight=first, uniform=self.uniform, minsize=0)
+        conf(before + 1, weight=0, uniform="", minsize=0)
+        conf(after, weight=self.RESOLUTION - first, uniform=self.uniform,
+             minsize=0)
+
+    def reset(self, _event=None) -> None:
+        self._start = None
+        self.fraction = self.default
+        self._changed()
+        if self.on_release is not None:
+            self.on_release(self.fraction)
+
+    # ---- dragging ------------------------------------------------------
+
+    def _pointer(self, event) -> int:
+        return event.x_root if self.axis == "x" else event.y_root
+
+    def _press(self, event) -> None:
+        try:
+            first, second = self._sizes()
+            s = self._scaling()
+            floors = tuple(f * s for f in self.floors())
+        except Exception:
+            self._start = None
+            return
+        # Measured once, at the press: the floors and sizes stay put for the
+        # length of one drag, and reading them on every motion event would
+        # mean a layout query sixty times a second.
+        self._start = (self._pointer(event), first, second, *floors)
+
+    def _drag(self, event) -> None:
+        if self._start is None:
+            return
+        p0, first, second, floor_a, floor_b = self._start
+        self.fraction = split_after_drag(
+            first, second, self._pointer(event) - p0, floor_a, floor_b)
+        # Motion arrives far faster than a column of cards can be laid out
+        # again, so only the latest position is applied, once a frame.
+        if not self._scheduled:
+            self._scheduled = True
+            self.after(16, self._changed)
+
+    def _release(self, _event=None) -> None:
+        if self._start is None:
+            return
+        self._start = None
+        self._changed()
+        if self.on_release is not None:
+            self.on_release(self.fraction)
+
+    def _changed(self) -> None:
+        self._scheduled = False
+        try:
+            tracks = self._tracks()
+            if tracks is None:
+                return
+            # Reconfiguring a grid track lays the whole container out again,
+            # so a step that lands on the weights already there is skipped.
+            state = (tracks[0], tracks[1],
+                     round(self.fraction * self.RESOLUTION), self._scaling())
+            if state == self._applied:
+                return
+            self.apply()
+        except Exception:
+            return                    # the window is going away
+        if self.on_change is not None:
+            self.on_change()
+
+
 class Repaint:
     """Runs a redraw at most once a frame, and once more when it settles.
 

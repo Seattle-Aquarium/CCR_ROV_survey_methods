@@ -219,6 +219,15 @@ def test_the_web_stream_status_and_snapshots_are_captured(sim, tmp_path):
     cap = start(sim, tmp_path, snapshot_hz=5.0)
     assert wait_for(lambda: cap.live.snapshot(history=False).rates.get("echo", 0) > 0)
     time.sleep(1.2)
+    # The status poll runs every STATUS_PERIOD_S from the moment the capture
+    # starts, so its first poll can land before the DVL has registered this
+    # capture's TCP connection, and a fixed sleep then decided whether a
+    # second poll got in before the stop -- about one run in five did not.
+    # Wait for a poll that saw the connection instead.
+    assert wait_for(lambda: (cap.live.snapshot(history=False).status
+                             .get("json_clients") or 0) >= 1,
+                    timeout=3 * CAP.STATUS_PERIOD_S), \
+        "no status poll ever saw this capture's TCP connection"
     cap.stop()
     f = files(cap)
     ws = [json.loads(line) for line in f["ws_raw"].read_text(encoding="utf-8").splitlines()]
