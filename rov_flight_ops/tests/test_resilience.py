@@ -217,6 +217,7 @@ def test_a_closing_snapshot_that_never_answers_still_closes_the_flight(
 
 def test_a_stuck_sampler_keeps_its_stop_signal_and_its_file(tmp_path, fakes,
                                                            monkeypatch):
+    normal_join_s = flightlog.WORKER_JOIN_S
     monkeypatch.setattr(flightlog, "WORKER_JOIN_S", 0.2)
     rec = flightlog.FlightRecorder(host="test", flight_dir=tmp_path)
     assert rec.start_manually()
@@ -244,6 +245,10 @@ def test_a_stuck_sampler_keeps_its_stop_signal_and_its_file(tmp_path, fakes,
     assert stuck.stopped.wait(5), "the old worker did not close what it owned"
     assert wait_for(lambda: old.fh is None)
     assert old.csv_path != new.csv_path
+    # The 0.2 s join was for the stuck worker. A healthy one closing on a busy
+    # CI runner can take longer than that to wind down, and was then
+    # (correctly) reported stuck -- so the new flight closes on the real one.
+    monkeypatch.setattr(flightlog, "WORKER_JOIN_S", normal_join_s)
     assert rec.stop_manually(wait=True)
     with open(new.csv_path, encoding="utf-8") as fh:
         ids = {row["flight_id"] for row in csv.DictReader(fh)}
