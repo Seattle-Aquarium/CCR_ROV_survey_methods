@@ -16,6 +16,12 @@ in a form that can be checked against the code and the files it writes.
 | [dvl_artifacts_and_provenance.md](dvl_artifacts_and_provenance.md) | What was built, what it was built from (documents, versions, commits, probes of the demo DVL), and what has not yet been checked against a real vehicle |
 | [dvl_bench_checklist.md](dvl_bench_checklist.md) | The checks to run once on Nereo or Lutris before trusting a capture |
 
+## The UGPS capture (`rov_flight_ops/ugps/`, the Navigation tab's receiver row)
+
+| Document | What it answers |
+|---|---|
+| [ugps_log_schema.md](ugps_log_schema.md) | What is read from the G2 topside and how often, every file and column the capture writes, how the receiver row judges the four receivers, and the extension's own logs on the Pi |
+
 ## Keeping these true
 
 A change to the capture's files or behaviour changes these documents in the

@@ -66,6 +66,10 @@ class App(Shell):
         #: The DVL capture. Like the recorder, held here so it records
         #: whichever tab is open; made on first use.
         self.dvl = None
+        #: The UGPS G2 reader. Read directly from the laptop -- the G2 topside
+        #: is on this side of the tether -- and held here, like the DVL
+        #: capture, so it records whichever tab is open; made on first use.
+        self.ugps = None
         self._dvl_closing: threading.Event | None = None
         self._dvl_close_began = 0.0
         self.discovery: discovery.Discovery | None = None
@@ -213,6 +217,38 @@ class App(Shell):
         except Exception as ex:
             diagnostics.log_exception("starting the DVL capture", *sys.exc_info())
             self._log(f"The DVL capture could not start: {ex}")
+
+    # ------------------------------------------------------------------
+    #  the UGPS G2
+    # ------------------------------------------------------------------
+
+    def ugps_capture(self):
+        """The application's G2 reader, started on first use.
+
+        Polled whether or not a flight folder is chosen, so the Navigation
+        tab's receiver row works on the bench; written to disk only once a
+        folder is. The address is the settings file's `ugps_host`.
+        """
+        if self.ugps is None:
+            from ..ugps import DEFAULT_HOST, UgpsCapture
+            self.ugps = UgpsCapture(self.settings.get("ugps_host") or DEFAULT_HOST,
+                                    flight_id=self._flight_for_dvl)
+        self.ugps.ensure_running()
+        return self.ugps
+
+    def _arm_ugps(self) -> None:
+        """Log the G2's acoustic solution, receiver by receiver, into the folder."""
+        if not self.flight_dir:
+            return
+        try:
+            from ..ugps import ugps_folder
+            cap = self.ugps_capture()
+            cap.use_folder(ugps_folder(self.flight_dir))
+            self._log(f"UGPS: logging each receiver's signal and noise from the G2 "
+                      f"at {cap.host} into {ugps_folder(self.flight_dir)}.")
+        except Exception as ex:
+            diagnostics.log_exception("starting the UGPS capture", *sys.exc_info())
+            self._log(f"The UGPS capture could not start: {ex}")
 
     # ------------------------------------------------------------------
     #  tabs
@@ -498,6 +534,7 @@ class App(Shell):
             diagnostics.log_exception("starting monitoring", *sys.exc_info())
             self._log(f"Monitoring could not start: {ex}")
         self._arm_dvl()
+        self._arm_ugps()
 
     # ------------------------------------------------------------------
     #  the survey plan -- edited on Transects, read everywhere
@@ -586,6 +623,12 @@ class App(Shell):
         # The DVL capture too, on its own thread: it only has to close files
         # and join its readers, and it can do that while the flight closes.
         self._begin_dvl_shutdown()
+        # The UGPS reader: one thread, five files, closed the same way.
+        if self.ugps is not None and not getattr(self, "_ugps_stopped", False):
+            self._ugps_stopped = True
+            ugps = self.ugps
+            threading.Thread(target=lambda: ugps.shutdown(wait=4.0), daemon=True,
+                             name="ugps-close").start()
 
         rec = self.recorder
         waiting = self._close_request

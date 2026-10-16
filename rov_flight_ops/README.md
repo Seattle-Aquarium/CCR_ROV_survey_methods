@@ -310,7 +310,15 @@ source, the compatibility matrix and a bench checklist. In outline:
   review → apply → read-back path that is locked until the operator unlocks it
   and refused while the vehicle is armed;
 * **EKF origin** setup, which is what makes a DVL-only dive have coordinates at
-  all.
+  all;
+* a **UGPS receivers** row under the map: each of the G2 antenna's four
+  receivers' signal-to-noise and noise floor over the last minute, with a
+  sparkline, and a line saying whether any receiver stands out from the other
+  three (low SNR, noisy, or dropping out). It is read straight from the G2
+  topside, so it keeps working when the Pi drops off the tether. The same
+  reader logs every receiver into `logs/ugps/` from the moment a flight folder
+  is chosen; see [specifications/ugps_log_schema.md](specifications/ugps_log_schema.md).
+  The G2's address is `ugps_host` in the settings file (default 192.168.2.94).
 
 Everything it reads is read-only except the profile and origin writes above.
 It is the only part of the program that can write to a vehicle besides
@@ -673,6 +681,13 @@ vehicle's SD card.
                                  status, echo and spectrum snapshots, events,
                                  and dvl_<id>.json (specifications/dvl_log_schema.md)
             dvl_diagnostic_*     Water Linked diagnostic logs, if collected
+        ugps/
+            ugps_<id>_*          one UGPS capture: each receiver's distance,
+                                 signal, noise and validity, positions, status,
+                                 events, and ugps_<id>.json
+                                 (specifications/ugps_log_schema.md)
+            pi/<date>/           the WL UGPS External extension's own logs,
+                                 from BlueOS logs → UGPS logs
     photos/
         C3/                      C3 imagery from the Pi (left/, right/, center/, calibration)
 ```

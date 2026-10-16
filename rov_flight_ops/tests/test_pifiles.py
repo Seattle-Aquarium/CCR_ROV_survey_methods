@@ -535,3 +535,35 @@ def test_the_preview_reads_depth_from_the_vehicle_s_log(vehicle, tmp_path):
     assert store.t_start == pytest.approx(START + 30, abs=2)
     assert any("file time" in n for n in notes)
     assert {m for m, _ in vehicle.seen} == {"GET"}
+
+
+# --------------------------------------------------------------------------
+#  the WL UGPS External extension's own logs
+# --------------------------------------------------------------------------
+
+UGPS_EXT = "/system_root/usr/blueos/extensions/wl_ugps_external/logs"
+
+
+def test_ugps_external_logs_are_listed_placed_and_downloaded(vehicle, tmp_path):
+    opened = 1_792_078_000.0                      # 2026-10-15 15:26:40 UTC
+    vehicle.add(f"{UGPS_EXT}/2026-10-15/2026-10-15_15-26-40_g2_acoustic.csv",
+                b"timestamp,position_valid,x,y,z,std,distance_r0\n", opened + 600)
+    vehicle.add(f"{UGPS_EXT}/2026-10-15/2026-10-15_15-26-40_GGA.csv", b"t\n", opened + 600)
+    vehicle.add(f"{UGPS_EXT}/2026-10-15/notes.txt", b"not a log", opened)
+    vehicle.add(f"{UGPS_EXT}/stray_top_level.csv", b"x", opened)
+    inv = PF.search(vehicle.host, ["ugps"])
+    got = sorted(f.rel for f in inv.files["ugps"])
+    assert got == ["2026-10-15/2026-10-15_15-26-40_GGA.csv",
+                   "2026-10-15/2026-10-15_15-26-40_g2_acoustic.csv"]
+    acoustic = [f for f in inv.files["ugps"] if f.name.endswith("g2_acoustic.csv")][0]
+    assert acoustic.start == pytest.approx(opened)
+    assert acoustic.end == pytest.approx(opened + 600, abs=1)
+    rep = PF.download(inv.all_files(), tmp_path, inv.host, inv.token)
+    assert not rep.failed, rep.summary()
+    assert (tmp_path / "logs/ugps/pi/2026-10-15/2026-10-15_15-26-40_g2_acoustic.csv").is_file()
+
+
+def test_a_vehicle_without_ugps_external_says_so(vehicle):
+    inv = PF.search(vehicle.host, ["ugps"])
+    assert inv.files["ugps"] == []
+    assert any("WL UGPS External" in n for n in inv.notes["ugps"])

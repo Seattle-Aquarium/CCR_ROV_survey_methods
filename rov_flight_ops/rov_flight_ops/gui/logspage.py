@@ -105,7 +105,8 @@ class LogsPage(ctk.CTkFrame):
             left, self, "2.  Download files",
             "Copies into the flight folder chosen on Monitoring, each type "
             "into its own folder: logs/mcap, logs/BIN, photos/C3, "
-            "logs/mcap_video, logs/tlog. Files already there are skipped. "
+            "logs/mcap_video, logs/tlog, logs/ugps/pi. "
+            "Files already there are skipped. "
             "This flight is the usual one, straight after surfacing.",
             "Download files", danger=False, command=self._download,
             periods=DOWNLOAD_PERIODS)
