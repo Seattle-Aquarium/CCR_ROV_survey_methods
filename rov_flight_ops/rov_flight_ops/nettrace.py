@@ -22,12 +22,21 @@ So this module runs beside the 1 Hz sampler rather than replacing it, and
 records three narrow things fast instead of sixty wide things slowly:
 
   `network_fast_*.csv`    every watched interface's counters, 10 Hz
-  `network_pings_*.csv`   one row per ICMP echo, 5 Hz, with its status code
+  `network_pings_*.csv`   one row per ICMP echo, 5 Hz to the vehicle and 5 Hz
+                          to the DVL, with its status code and its target
   `network_events_*.txt`  the transitions, in the order they happened
 
 Cumulative counters are written rather than rates. A rate computed here would
 hide the counter it came from, and a missed tick would land as a plausible
 average instead of the visible jump it should be.
+
+**The DVL is echoed as a witness.** It hangs off the same switch inside the
+vehicle and comes up the same tether, so when the Pi stops answering the DVL
+says which half of the vehicle went: still answering means the Pi's own leg
+(its Ethernet port, cable, switch port, or the Pi itself), silent too means
+the tether, the switch, or this side of them. On 15 October 2026 that
+distinction took a manual review of a capture that happened to be running;
+here every outage is placed in the events file as it closes.
 
 **It must never cost a flight.** Everything runs on its own threads, every
 write is wrapped, and a failure anywhere stops this trace and nothing else.
@@ -40,12 +49,15 @@ import csv
 import json
 import threading
 import time
-from dataclasses import dataclass
+from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import netdiag
 from . import wincounters as W
+from .flightscan import ALONE, BOTH, MIXED, WITNESS_FRESH_S, place_outage
 
 #: Ten times a second. Chosen against the three-second failsafe rather than
 #: against what the hardware could bear: it puts a 100 ms error bar on the
@@ -74,6 +86,30 @@ RESCAN_S = 20.0
 #: Rows between flushes. A flight that ends in a crash should still leave the
 #: seconds that led up to it on disk.
 FLUSH_EVERY = 50
+
+#: Where the DVL is when nothing better says: Water Linked's factory address
+#: on the BlueOS network. The application passes the address its DVL capture
+#: is actually using, and that is asked for again every `DVL_RESOLVE_S`.
+DVL_DEFAULT_HOST = "192.168.2.95"
+
+#: How often the DVL's address is asked for again. The capture learns it from
+#: the BlueOS extension some seconds after it starts, so the echo may begin on
+#: the default and move.
+DVL_RESOLVE_S = 10.0
+
+#: Unanswered echoes in a row before a target is called silent. Two at 5 Hz is
+#: 400 ms: one lost echo on a busy link is noise, two is an outage starting.
+SILENT_AFTER = 2
+
+#: The ping file's columns. The first six are the original file's, in the
+#: original order; `target` and `host` came with the DVL echo. A row without a
+#: target -- any file written before then -- is the vehicle's.
+PING_COLUMNS = ("timestamp_utc", "elapsed_s", "sequence", "rtt_ms",
+                "status_code", "status", "target", "host")
+
+#: Closed outages kept for the JSON sidecar. A flight that flaps for an hour
+#: keeps its most recent ones; the events file has all of them.
+MAX_OUTAGES = 1000
 
 
 def _slug(alias: str) -> str:
@@ -130,6 +166,29 @@ class _Watch:
     moved: int = 0
 
 
+@dataclass
+class _Target:
+    """One address being echoed, and what its echoes have said lately."""
+
+    #: The ping file's `target` column: "vehicle" or "dvl".
+    name: str
+    #: What the events call it.
+    label: str
+    host: str = ""
+    sent: int = 0
+    lost: int = 0
+    #: Unanswered echoes in a row, now, and when the first of them was sent.
+    run: int = 0
+    run_from: float = 0.0
+    last_reply: float = 0.0
+    #: The last few seconds of results, so an outage confirmed on its second
+    #: loss can still count what the other target did from its first.
+    recent: deque = field(default_factory=lambda: deque(maxlen=16))
+    #: The outage under way, once `SILENT_AFTER` echoes in a row have gone:
+    #: when it began, and what the other target's echoes did meanwhile.
+    outage: dict | None = None
+
+
 def _close_quietly(handle) -> None:
     if handle is not None:
         try:
@@ -142,15 +201,20 @@ def _close_quietly(handle) -> None:
 class Tracer:
     """The fast network trace for one flight. Start it, stop it, read it.
 
-    Owns two threads: one walking the interface table, one pinging. Neither
-    touches the 1 Hz sampler, and both are daemons, so a stop that hangs
-    cannot keep the application open.
+    Owns three threads: one walking the interface table, one pinging the
+    vehicle, one pinging the DVL. None touches the 1 Hz sampler, and all are
+    daemons, so a stop that hangs cannot keep the application open.
+
+    `dvl_host` is the DVL's address, or a function returning it (asked again
+    every `DVL_RESOLVE_S`); empty means `DVL_DEFAULT_HOST`, and None leaves
+    the DVL alone.
     """
 
     def __init__(self, *, host: str = "192.168.2.2",
                  folder: Path | None = None, flight_id: str = "",
                  period: float = FAST_PERIOD_S,
-                 echo_period: float = ECHO_PERIOD_S):
+                 echo_period: float = ECHO_PERIOD_S,
+                 dvl_host: str | Callable[[], str] | None = DVL_DEFAULT_HOST):
         self.host = host
         self.folder = Path(folder) if folder else None
         self.flight_id = flight_id or datetime.now().strftime("%Y-%m-%d_%H%M")
@@ -160,11 +224,14 @@ class Tracer:
         self.events: list[Event] = []
         self.problem = ""
         self.ticks = 0
+        #: The vehicle's echoes. The DVL's are counted on its `_Target`.
         self.echoes = 0
         self.lost = 0
         #: Whether the last reading said the link was carrying traffic. Read
         #: by the GUI, which wants a light rather than a file.
         self.alive: bool | None = None
+        #: Every outage that has closed, placed where the witness allows.
+        self.outages: list[dict] = []
 
         self._watch: dict[int, _Watch] = {}
         self._order: list[_Watch] = []
@@ -175,10 +242,19 @@ class Tracer:
         self._fast_writer = None
         self._ping_fh = None
         self._ping_writer = None
+        #: Both echo threads write the ping file; this keeps their rows whole.
+        self._ping_lock = threading.Lock()
+        self._echo_loops = 0
         self._rows = 0
         self._ping_rows = 0
         self._started = 0.0
         self._echo_state: tuple[bool, float] | None = None
+
+        self._vehicle = _Target("vehicle", "Pi", host=host)
+        self._dvl_source = dvl_host
+        self._dvl = None if dvl_host is None else _Target("dvl", "DVL")
+        #: Guards both targets' state. Never held while waiting on the network.
+        self._echo_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     #  lifecycle
@@ -204,28 +280,38 @@ class Tracer:
         self._note("trace started",
                    ", ".join(f"{w.alias} (index {w.index})" for w in self._order))
         self._stop.clear()
-        for target, name in ((self._fast_loop, "utc-nettrace"),
-                             (self._echo_loop, "utc-netecho")):
-            thread = threading.Thread(target=target, daemon=True, name=name)
+        loops = [(self._fast_loop, (), "utc-nettrace"),
+                 (self._echo_loop, (self._vehicle,), "utc-netecho")]
+        if self._dvl is not None:
+            loops.append((self._echo_loop, (self._dvl,), "utc-netecho-dvl"))
+        # Counted before any starts: the last echo loop out closes the file.
+        self._echo_loops = len(loops) - 1
+        for target, args, name in loops:
+            thread = threading.Thread(target=target, args=args, daemon=True,
+                                      name=name)
             thread.start()
             self._threads.append(thread)
         return True
 
     def stop(self) -> bool:
-        """Stop both threads and close the files. Safe to call twice.
+        """Stop the threads and close the files. Safe to call twice.
 
         Each loop closes the file it writes as it exits, so a loop still
         running when the wait runs out is not written to after its file is
-        closed -- it closes the file itself when it gets there. True when both
-        loops have gone.
+        closed -- it closes the file itself when it gets there. True when all
+        the loops have gone.
         """
         self._stop.set()
         for thread in self._threads:
             thread.join(timeout=3.0)
         alive = [t.name for t in self._threads if t.is_alive()]
+        self._close_open_outages()
+        dvl = self._dvl
         self._note("trace stopped",
                    f"{self.ticks} ticks, {self.echoes} echoes, "
                    f"{self.lost} of them lost"
+                   + (f"; DVL {dvl.sent} echoes, {dvl.lost} lost"
+                      if dvl is not None and dvl.sent else "")
                    + (f"; {', '.join(alive)} still finishing" if alive else ""))
         if not self._threads:
             self._close_files()                      # never started
@@ -282,9 +368,7 @@ class Tracer:
             pings = self.folder / f"network_pings_{self.flight_id}.csv"
             self._ping_fh = pings.open("w", newline="", encoding="utf-8")
             self._ping_writer = csv.writer(self._ping_fh)
-            self._ping_writer.writerow(
-                ["timestamp_utc", "elapsed_s", "sequence",
-                 "rtt_ms", "status_code", "status"])
+            self._ping_writer.writerow(PING_COLUMNS)
             self.fast_path = fast
             self.ping_path = pings
             return True
@@ -302,7 +386,8 @@ class Tracer:
         _close_quietly(handle)
 
     def _close_pings(self) -> None:
-        handle, self._ping_fh, self._ping_writer = self._ping_fh, None, None
+        with self._ping_lock:
+            handle, self._ping_fh, self._ping_writer = self._ping_fh, None, None
         _close_quietly(handle)
 
     def _write_sidecars(self) -> None:
@@ -310,9 +395,13 @@ class Tracer:
         if self.folder is None:
             return
         try:
+            dvl = self._dvl
             lines = [
                 f"Network trace — flight {self.flight_id}",
                 f"Vehicle {self.host}",
+                *([f"DVL {dvl.host or '(no address)'}, echoed as a witness: "
+                   f"OUTAGE lines say whether the Pi went alone or the whole "
+                   f"vehicle did"] if dvl is not None else []),
                 f"{self.ticks} interface ticks at {1 / self.period:.0f} Hz, "
                 f"{self.echoes} echoes at {1 / self.echo_period:.0f} Hz",
                 "",
@@ -337,6 +426,12 @@ class Tracer:
                  "what": e.what, "detail": e.detail}
                 for e in self.events]
             payload["counter_granularity"] = self.granularity()
+            with self._echo_lock:
+                payload["echo_targets"] = [
+                    {"target": t.name, "host": t.host, "sent": t.sent,
+                     "lost": t.lost}
+                    for t in (self._vehicle, self._dvl) if t is not None]
+                payload["outages"] = list(self.outages)
             path = self.folder / f"network_trace_{self.flight_id}.json"
             path.write_text(json.dumps(payload, indent=2, sort_keys=True),
                             encoding="utf-8")
@@ -446,54 +541,94 @@ class Tracer:
                 del self.events[:1000]
 
     # ------------------------------------------------------------------
-    #  the echo thread
+    #  the echo threads
     # ------------------------------------------------------------------
 
-    def _echo_loop(self) -> None:
+    def _echo_loop(self, target: _Target | None = None) -> None:
         try:
-            self._echo_run()
+            self._echo_run(target or self._vehicle)
         finally:
-            self._close_pings()
+            with self._ping_lock:
+                self._echo_loops -= 1
+                last = self._echo_loops <= 0
+            if last:
+                self._close_pings()
 
-    def _echo_run(self) -> None:
-        echo = W.Echo(self.host)
-        if not echo.open():
-            echo.close()
-            self._note("echo unavailable",
-                       "ICMP could not be opened; the ping file will be empty")
-            return
+    def _address(self, target: _Target) -> str:
+        """Where to send `target`'s echoes now. Never raises."""
+        if target is self._vehicle:
+            return self.host
+        source = self._dvl_source
+        try:
+            found = source() if callable(source) else source
+        except Exception:
+            found = ""
+        return str(found or "").strip() or DVL_DEFAULT_HOST
+
+    def _echo_run(self, target: _Target) -> None:
+        echo = None
         sequence = 0
         tick = time.monotonic()
+        resolve_at = tick
         try:
             while not self._stop.is_set():
                 tick += self.echo_period
+                if time.monotonic() >= resolve_at:
+                    resolve_at = time.monotonic() + DVL_RESOLVE_S
+                    host = self._address(target)
+                    if echo is None or host != target.host:
+                        before = target.host if echo is not None else ""
+                        if echo is not None:
+                            echo.close()
+                        with self._echo_lock:
+                            target.host = host
+                        echo = W.Echo(host)
+                        if not echo.open():
+                            echo.close()
+                            echo = None
+                            if target is self._vehicle:
+                                self._note("echo unavailable", "ICMP could not "
+                                           "be opened; the ping file will be empty")
+                            else:
+                                self._note(f"{target.label} echo unavailable",
+                                           f"ICMP to {host} could not be opened; "
+                                           f"outages cannot be placed")
+                            return
+                        if target is not self._vehicle:
+                            self._note(f"{target.label} echo",
+                                       f"moved from {before} to {host}" if before
+                                       else f"witness at {host}")
                 sequence += 1
                 now = time.time()
                 try:
                     rtt, status = echo.ping(ECHO_TIMEOUT_MS)
                 except Exception:
                     rtt, status = None, 11050
-                self.echoes += 1
-                if rtt is None:
-                    self.lost += 1
-                self._echo_transition(rtt is not None, now)
-                if self._ping_writer is not None:
-                    try:
-                        self._ping_writer.writerow([
-                            datetime.fromtimestamp(now, timezone.utc)
-                            .isoformat(timespec="milliseconds"),
-                            round(now - self._started, 3), sequence,
-                            "" if rtt is None else rtt, status,
-                            W.ICMP_STATUS.get(status, str(status))])
-                        self._ping_rows += 1
-                        if (self._ping_rows % FLUSH_EVERY == 0
-                                and self._ping_fh is not None):
-                            self._ping_fh.flush()
-                    except Exception:
-                        pass
+                self._echo_result(target, rtt is not None, now)
+                self._write_ping([
+                    datetime.fromtimestamp(now, timezone.utc)
+                    .isoformat(timespec="milliseconds"),
+                    round(now - self._started, 3), sequence,
+                    "" if rtt is None else rtt, status,
+                    W.ICMP_STATUS.get(status, str(status)),
+                    target.name, target.host])
                 self._stop.wait(max(0.0, tick - time.monotonic()))
         finally:
-            echo.close()
+            if echo is not None:
+                echo.close()
+
+    def _write_ping(self, row: list) -> None:
+        with self._ping_lock:
+            if self._ping_writer is None:
+                return
+            try:
+                self._ping_writer.writerow(row)
+                self._ping_rows += 1
+                if (self._ping_rows % FLUSH_EVERY == 0
+                        and self._ping_fh is not None):
+                    self._ping_fh.flush()
+            except Exception:
+                pass
 
     def _echo_transition(self, ok: bool, now: float) -> None:
         """Note the first loss and the recovery, not the ones in between.
@@ -517,6 +652,146 @@ class Tracer:
             self._note("ECHO LOST", "no reply to ICMP", now)
         self._echo_state = (ok, now)
         self.alive = ok
+
+    # ------------------------------------------------------------------
+    #  placing an outage: the Pi alone, or the whole vehicle
+    # ------------------------------------------------------------------
+
+    def _other(self, target: _Target) -> _Target | None:
+        return self._dvl if target is self._vehicle else self._vehicle
+
+    def _echo_result(self, target: _Target, ok: bool, now: float) -> None:
+        """Count one echo, and open or close an outage on its target.
+
+        Each target is the other's witness: while one is silent, every echo
+        the other sends is counted against that silence, and the count decides
+        where the outage is placed when it closes.
+        """
+        if target is self._vehicle:
+            self.echoes += 1
+            if not ok:
+                self.lost += 1
+            self._echo_transition(ok, now)
+        notes: list[tuple[str, str, float]] = []
+        with self._echo_lock:
+            target.sent += 1
+            target.recent.append((now, ok))
+            other = self._other(target)
+            if other is not None and other.outage is not None:
+                other.outage["answered" if ok else "lost"] += 1
+            if ok:
+                target.last_reply = now
+                if target.outage is not None:
+                    notes += self._close_outage(target, now)
+                target.run = 0
+            else:
+                target.lost += 1
+                if target.run == 0:
+                    target.run_from = now
+                target.run += 1
+                if target.run == SILENT_AFTER:
+                    notes += self._open_outage(target)
+        for what, detail, when in notes:
+            self._note(what, detail, when)
+
+    def _open_outage(self, target: _Target) -> list[tuple[str, str, float]]:
+        """`target` has gone silent. Called with `_echo_lock` held."""
+        start = target.run_from
+        other = self._other(target)
+        outage = {"start": start, "witness": other is not None,
+                  "witness_up": False, "answered": 0, "lost": 0}
+        if other is not None:
+            outage["witness_up"] = (other.last_reply > 0 and
+                                    other.last_reply >= start - WITNESS_FRESH_S)
+            # What the witness did between the first loss and this one: the
+            # outage began at the first.
+            for when, ok in other.recent:
+                if when >= start:
+                    outage["answered" if ok else "lost"] += 1
+        target.outage = outage
+        if target is self._vehicle:
+            return []                  # `_echo_transition` has said so already
+        return [(f"{target.label} echo lost", f"no reply from {target.host}",
+                 start)]
+
+    def _close_outage(self, target: _Target, now: float,
+                      still: bool = False) -> list[tuple[str, str, float]]:
+        """`target` answered again, or the trace stopped while it had not.
+
+        Called with `_echo_lock` held. Returns the events to note.
+        """
+        outage, target.outage = target.outage, None
+        if outage is None:
+            return []
+        seconds = now - outage["start"]
+        place = (place_outage(outage["answered"], outage["lost"],
+                              outage["witness_up"])
+                 if outage["witness"] else "")
+        self.outages.append({
+            "target": target.name, "host": target.host,
+            "start": datetime.fromtimestamp(outage["start"], timezone.utc)
+            .isoformat(timespec="milliseconds"),
+            "end": datetime.fromtimestamp(now, timezone.utc)
+            .isoformat(timespec="milliseconds"),
+            "seconds": round(seconds, 2), "still_silent_at_stop": still,
+            "witness_up": outage["witness_up"],
+            "witness_answered": outage["answered"],
+            "witness_lost": outage["lost"], "place": place})
+        if len(self.outages) > MAX_OUTAGES:
+            del self.outages[:len(self.outages) - MAX_OUTAGES]
+        notes = []
+        if target is not self._vehicle and not still:
+            notes.append((f"{target.label} echo returned",
+                          f"after {seconds:.1f} s of silence", now))
+        verdict = self._verdict(target, outage, place, seconds, still)
+        if verdict:
+            notes.append((*verdict, now))
+        return notes
+
+    def _verdict(self, target: _Target, outage: dict, place: str,
+                 seconds: float, still: bool) -> tuple[str, str] | None:
+        """The events-file line that says where an outage was."""
+        other = self._other(target)
+        if not outage["witness"] or other is None:
+            return None
+        seen = (f"the {other.label} answered {outage['answered']} of "
+                f"{outage['answered'] + outage['lost']} echoes meanwhile")
+        span = (f"{seconds:.1f} s and still silent when the trace stopped"
+                if still else f"{seconds:.1f} s")
+        if target is not self._vehicle:
+            # The DVL going quiet matters on its own only when the Pi did not.
+            # When both went, the Pi's own outage line already says so.
+            if place != ALONE:
+                return None
+            return ("DVL only", f"{span}; {seen} — the DVL itself (its power, "
+                                f"a reboot) or its own cable, not the tether")
+        if place == ALONE:
+            return ("OUTAGE: Pi only",
+                    f"{span}; {seen} — the Pi's own Ethernet leg (eth0, its "
+                    f"cable, its switch port) or the Pi itself; the tether "
+                    f"and the vehicle's switch were carrying")
+        if place == BOTH:
+            return ("OUTAGE: whole vehicle",
+                    f"{span}; {seen} — the tether, the vehicle's switch, or "
+                    f"this side of them; see the adapter lines around it")
+        if place == MIXED:
+            return ("OUTAGE: unclear", f"{span}; {seen} — partly, so neither "
+                                       f"the Pi alone nor the whole vehicle")
+        why = ("no DVL echo landed inside it" if outage["witness_up"]
+               else f"the DVL ({other.host}) had not answered in the "
+                    f"{WITNESS_FRESH_S:g} s before it began")
+        return ("OUTAGE: unplaced", f"{span}; {why}")
+
+    def _close_open_outages(self) -> None:
+        """Place any outage still open when the trace stops, as far as it goes."""
+        notes: list[tuple[str, str, float]] = []
+        now = time.time()
+        with self._echo_lock:
+            for target in (self._vehicle, self._dvl):
+                if target is not None and target.outage is not None:
+                    notes += self._close_outage(target, now, still=True)
+        for what, detail, when in notes:
+            self._note(what, detail, when)
 
     # ------------------------------------------------------------------
     #  how fast the counters really move on this machine

@@ -221,8 +221,10 @@ COLUMNS: tuple[str, ...] = (
     # is the bridge's own, and the adapter underneath it is measured here.
     "nic_carrier", "nic_low_power", "phy_carrier", "phy_rx_bytes",
     "rov_arp_ok",
-    # and what the vehicle counted on its own side of the same link
-    "pi_eth_rx_bytes", "pi_eth_rx_errors", "tether_link_mbps",
+    # and what the vehicle counted on its own side of the same link,
+    # including how many times its port has lost carrier since boot
+    "pi_eth_rx_bytes", "pi_eth_rx_errors", "pi_eth_carrier",
+    "pi_eth_carrier_drops", "tether_link_mbps",
     # the tether modem pair itself, via williangalvani.plc-diagnostics --
     # separate from everything above because a link can measure perfectly
     # healthy on both hosts while the powerline pair between them is the
@@ -286,6 +288,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
               "motherboard_temp_c", "pi_soc_temp_c", "system_uptime_s"),
     "Tether": ("nic_carrier", "phy_carrier", "nic_low_power",
                "phy_rx_bytes", "rov_arp_ok", "pi_eth_rx_bytes",
+               "pi_eth_carrier_drops",
                "tether_link_mbps", "tether_tx_mbps", "tether_rx_mbps",
                "tether_remote_seen"),
 }
@@ -320,7 +323,10 @@ GROUP_NOTES: dict[str, str] = {
               "different carrier. phy_rx_bytes still climbing while the "
               "bridge has gone quiet means the bridge stopped forwarding, not "
               "that the tether dropped. pi_eth_rx_bytes is the vehicle's own "
-              "count of what arrived. tether_tx/rx_mbps and "
+              "count of what arrived; pi_eth_carrier_drops is how many times "
+              "the Pi's port has lost its link since boot, so a step in it "
+              "after an outage means the Pi's cable or port physically "
+              "dropped. tether_tx/rx_mbps and "
               "tether_remote_seen are the Fathom-X pair's own negotiated "
               "rate and whether it can hear its partner at all -- the one "
               "thing that can fail while every column above still reads "
@@ -427,6 +433,11 @@ class VehicleState:
     #: down -- which is the one thing the topside cannot work out alone.
     eth_rx_bytes: int | None = None
     eth_rx_errors: int | None = None
+    #: Whether the Pi's tether port has carrier, and how many times it has
+    #: lost it since boot. The count is the one that matters: a link that
+    #: flapped during an outage shows as a step in it on the first read after.
+    eth_carrier: bool | None = None
+    eth_carrier_drops: int | None = None
     #: The negotiated rate between the two Fathom-X boards, when the tether
     #: diagnostics extension is installed to report it. Two directions,
     #: because a mismatch between them (README: >~20 Mbps apart) is itself a
@@ -886,6 +897,8 @@ class Sampler:
         v = self.vehicle
         row["pi_eth_rx_bytes"] = v.eth_rx_bytes
         row["pi_eth_rx_errors"] = v.eth_rx_errors
+        row["pi_eth_carrier"] = _b(v.eth_carrier)
+        row["pi_eth_carrier_drops"] = v.eth_carrier_drops
         row["tether_tx_mbps"] = _f(v.tether_tx_mbps, 1)
         row["tether_rx_mbps"] = _f(v.tether_rx_mbps, 1)
         # The worse of the two, kept under the original column name: a single

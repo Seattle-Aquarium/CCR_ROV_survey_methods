@@ -170,6 +170,24 @@ class App(Shell):
                                    flight_id=self._flight_for_dvl)
         return self.dvl
 
+    def dvl_address(self) -> str:
+        """The DVL's host, for the network trace's witness echo. Read off-thread.
+
+        The running capture's address wins -- it is the one the BlueOS
+        extension reported, or the one typed on the DVL tab -- then whatever
+        was typed there, then "" for the trace's own default.
+        """
+        cap = self.dvl.capture if self.dvl is not None else None
+        addr = getattr(cap, "address", None)
+        if addr is not None and getattr(addr, "host", ""):
+            return addr.host
+        try:
+            from ..dvl.webapi import Address
+            typed = Address.parse(self.settings.get("dvl_host", ""))
+        except Exception:
+            typed = None
+        return typed.host if typed is not None else ""
+
     def _flight_for_dvl(self) -> str:
         """The flight being recorded now, for each DVL row. Read off-thread."""
         rec = self.recorder
@@ -467,6 +485,7 @@ class App(Shell):
             if self.recorder is None:
                 self.recorder = FlightRecorder(host=host, flight_dir=self.flight_dir)
             self.recorder.flight_dir = self.flight_dir
+            self.recorder.dvl_host = self.dvl_address
             if not self.recorder.watching:
                 self.recorder.retarget(host)
                 # Queued, not done here: opening the performance counters and

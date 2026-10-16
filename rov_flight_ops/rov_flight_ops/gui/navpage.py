@@ -838,8 +838,10 @@ class NavigationPage(ctk.CTkFrame):
         self._sync_profile_to_collector()
         try:
             from .. import blueos
+            # Follows the newest log rather than downloading it whole on every
+            # refresh: each refresh moves only what the log has gained.
             self.collector.set_parameter_reader(
-                lambda: blueos.read_parameters_now(host)[0])
+                blueos.ParameterFollower(host).read)
         except Exception as ex:
             log.warning("navigation could not wire the parameter reader: %s", ex)
         self.collector.start(self.session.session_id if self.session else "")
