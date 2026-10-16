@@ -800,7 +800,10 @@ def test_the_trust_line_is_hidden_until_it_has_something_to_say(app):
                  "horiz_pos_rel": M.good(1.0, recv_mono=now),
                  "const_pos_mode": M.good(0.0, recv_mono=now)}
         page._render_trust(s, now)
-        app.update()
+        # Idle tasks only. A full update() also runs the page's own redraw
+        # timer, which re-renders from the replay collector -- no position --
+        # and hides the line again whenever its tick happens to fall here.
+        app.update_idletasks()
         assert page._trust_shown is True
         assert page.trust_label.grid_info() != {}
         assert "dead-reckoned" in page.trust_label.cget("text")
@@ -1055,10 +1058,18 @@ def test_the_health_drawer_leads_with_observations_and_offers_no_repair(
     place a "repair navigation" button would be most tempting to add."""
     from rov_flight_ops.gui import navdialogs
     from rov_flight_ops.nav import model as MM
+    from rov_flight_ops.nav import origin as O
 
     page = _nav_page(app)
     _no_http(monkeypatch)
     previous = page.collector
+    # Pinned, like everything else the drawer is given here. Left alone it is
+    # whatever the session's live collector last read -- and a parameter read
+    # that happened to land inside test_monitor's fake vehicle leaves an origin
+    # explanation ("…does not survive a reboot") that has nothing to do with
+    # what this test is checking.
+    previous_origin = page.origin_state
+    page.origin_state = O.detect(None)
     dlg = None
     try:
         now = time.monotonic()
@@ -1109,6 +1120,7 @@ def test_the_health_drawer_leads_with_observations_and_offers_no_repair(
             dlg.destroy()
         page.collector = previous
         page.profile_key = before_profile
+        page.origin_state = previous_origin
         app.update()
 
 
@@ -1163,35 +1175,168 @@ def test_the_map_keeps_the_larger_share_of_the_page(app):
 
     The session window is withdrawn, so measuring a child's width there
     returns 1 and proves nothing. The contract that matters is the one in the
-    grid: the map column carries more weight than the side column, and both
-    are real columns rather than one squeezing the other out.
+    grid: until the divider is dragged, the map column carries more weight
+    than the side column, and both are real columns in one uniform group
+    rather than one squeezing the other out.
     """
     from rov_flight_ops.gui import navpage as NP
 
     page = _nav_page(app)
-    assert NP.MAP_WEIGHT > NP.SIDE_WEIGHT
-    assert NP.MAP_WEIGHT / (NP.MAP_WEIGHT + NP.SIDE_WEIGHT) >= 0.6, (
-        "the map should keep about two thirds of the page")
-    info = page.grid_columnconfigure(0)
-    assert int(info["weight"]) == NP.MAP_WEIGHT
+    assert NP.MAP_SHARE >= 0.6, "the map should keep about two thirds"
+    assert page.split_wide.fraction == pytest.approx(NP.MAP_SHARE)
+    map_col, side_col = page.grid_columnconfigure(0), page.grid_columnconfigure(2)
+    assert int(map_col["weight"]) > int(side_col["weight"]) > 0
+    assert map_col["uniform"] == side_col["uniform"] == "nav"
+    assert int(page.grid_columnconfigure(1)["weight"]) == 0, (
+        "the divider's own column must not take a share of the width")
 
 
 def test_a_narrow_page_puts_the_side_column_under_the_map(app):
     """The compact fallback: below the threshold the matrix and the plan
-    inspector go under the map rather than being squeezed beside it."""
+    inspector go under the map rather than being squeezed beside it, and the
+    divider between them turns to match."""
     page = _nav_page(app)
     was_narrow = page._narrow
     try:
         page._narrow = False
         page._on_resize_to(900.0)
         assert page._narrow is True
-        assert int(page.side_col.grid_info()["row"]) == 1
+        assert int(page.side_col.grid_info()["row"]) == 2
+        assert page.split_narrow.grid_info() and not page.split_wide.grid_info()
+        assert int(page.grid_rowconfigure(0)["weight"]) > 0
+        assert int(page.grid_columnconfigure(2)["weight"]) == 0, (
+            "a column left over from the wide layout must not claim width")
 
         page._on_resize_to(1600.0)
         assert page._narrow is False
-        assert int(page.side_col.grid_info()["column"]) == 1
+        assert int(page.side_col.grid_info()["column"]) == 2
+        assert page.split_wide.grid_info() and not page.split_narrow.grid_info()
+        assert int(page.grid_rowconfigure(2)["weight"]) == 0
     finally:
         page._narrow = was_narrow
+
+
+# --------------------------------------------------------------------------
+#  Dividers and the readiness card
+# --------------------------------------------------------------------------
+
+
+def test_a_drag_is_clamped_to_both_floors():
+    from rov_flight_ops.gui.widgets import split_after_drag
+
+    assert split_after_drag(600, 400, 100, 100, 100) == pytest.approx(0.7)
+    assert split_after_drag(600, 400, -900, 100, 100) == pytest.approx(0.1)
+    assert split_after_drag(600, 400, 900, 100, 100) == pytest.approx(0.9)
+    # Not room for both floors: split in proportion to them, so neither side
+    # is the one that loses everything.
+    assert split_after_drag(100, 50, 0, 200, 100) == pytest.approx(2 / 3)
+    assert split_after_drag(0, 0, 50, 10, 10) == 0.5
+
+
+def test_a_share_from_the_settings_file_is_checked():
+    """A hand-edited or damaged settings file must not be able to collapse a
+    card to nothing."""
+    from rov_flight_ops.gui.widgets import Splitter
+
+    assert Splitter._valid(0.4, 0.5) == 0.4
+    for bad in (None, "wide", 0.0, 1.0, -3, 7, float("nan")):
+        assert Splitter._valid(bad, 0.5) == 0.5
+
+
+def test_the_readiness_matrix_keeps_its_scroll_region(app):
+    """The matrix's own <Configure> handler once replaced CustomTkinter's, the
+    scroll region stayed empty, and the matrix could not be scrolled by bar
+    or wheel. It has to keep following the rows."""
+    page = _nav_page(app)
+    canvas = page.matrix._parent_canvas
+    canvas.configure(scrollregion="")
+    page.matrix.event_generate("<Configure>")
+    app.update_idletasks()
+    region = str(canvas.cget("scrollregion")).split()
+    assert len(region) == 4, "the scroll region was not set"
+    assert float(region[3]) > 0, "the scroll region has no height"
+
+
+def test_the_side_cards_let_their_bodies_shrink(app):
+    """Without a weight on the body row a card cuts off whatever does not
+    fit, which hid "Allow writes" and the plan inspector."""
+    page = _nav_page(app)
+    for card in (page.readiness_card, page.plan_card):
+        assert int(card.grid_rowconfigure(1)["weight"]) > 0
+
+
+def test_dragging_a_divider_moves_the_split_and_remembers_it(app, monkeypatch):
+    """Through the handle's own press, drag and release, with the track
+    sizes given rather than measured: a withdrawn window has none."""
+    from rov_flight_ops.gui import navpage as NP
+
+    page = _nav_page(app)
+    split = page.split_side
+    key = NP.SPLIT_KEYS["side"]
+    before_setting = app.settings.get(key)
+    monkeypatch.setattr(split, "_sizes", lambda: (400, 400))
+    monkeypatch.setattr(split, "_scaling", lambda: 1.0)
+    saved = []
+    monkeypatch.setattr(app, "save_settings", lambda: saved.append(True))
+
+    class E:
+        def __init__(self, y):
+            self.x_root, self.y_root = 0, y
+
+    try:
+        split._press(E(100))
+        split._drag(E(180))
+        split._release(E(180))
+        assert split.fraction == pytest.approx(0.6)
+        top = int(page.side_col.grid_rowconfigure(0)["weight"])
+        bottom = int(page.side_col.grid_rowconfigure(2)["weight"])
+        assert top / (top + bottom) == pytest.approx(0.6, abs=0.002)
+        assert app.settings[key] == pytest.approx(0.6) and saved
+
+        # Far past the floor stops at the floor.
+        split._press(E(100))
+        split._drag(E(2000))
+        split._release(E(2000))
+        assert split.fraction == pytest.approx(1 - NP.PLAN_MIN_PX / 800)
+
+        # Double-click puts the default back, and remembers that too.
+        split.reset()
+        assert split.fraction == pytest.approx(NP.READINESS_SHARE)
+        assert app.settings[key] == pytest.approx(NP.READINESS_SHARE)
+    finally:
+        split.fraction = NP.READINESS_SHARE
+        split.apply()
+        app.settings[key] = before_setting
+
+
+def test_the_map_is_never_dragged_narrower_than_its_tool_bar(app):
+    """Below the bar's own width "＋ Waypoint" is the first thing cut off."""
+    import customtkinter as ctk
+
+    from rov_flight_ops.gui import navpage as NP
+
+    page = _nav_page(app)
+    s = ctk.ScalingTracker.get_widget_scaling(page) or 1.0
+    floor = page.split_wide.floors()[0]
+    assert floor >= NP.MAP_MIN_PX
+    assert floor >= page.map_bar.winfo_reqwidth() / s - 1
+
+
+def test_the_readiness_buttons_wrap_rather_than_being_cut_off(app):
+    """In a column too narrow for the profile and three buttons on one line,
+    the buttons go onto a line of their own instead of losing "Apply"."""
+    page = _nav_page(app)
+    try:
+        page.head.winfo_width = lambda: 120
+        page._fit_head()
+        assert int(page.head_buttons.grid_info()["row"]) == 1
+        page.head.winfo_width = lambda: 5000
+        page._fit_head()
+        assert int(page.head_buttons.grid_info()["row"]) == 0
+    finally:
+        del page.head.winfo_width
+        page._head_wrapped = None
+        page._fit_head()
 
 
 def test_stopping_the_page_does_not_block_the_window(app):

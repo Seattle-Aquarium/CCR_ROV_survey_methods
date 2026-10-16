@@ -99,12 +99,14 @@ class LogsPage(ctk.CTkFrame):
         body.grid(row=0, column=0, sticky="nsew")
         body.grid_columnconfigure(0, weight=1)
         self._build_files(body)
-        left, right = app.pair(body, row=1, pady=(0, 4))
+        left, right = app.pair(body, row=1, pady=(0, 4),
+                               split_key="logs_pair_share")
         self.download = ActionPanel(
             left, self, "2.  Download files",
             "Copies into the flight folder chosen on Monitoring, each type "
             "into its own folder: logs/mcap, logs/BIN, photos/C3, "
-            "logs/mcap_video, logs/tlog. Files already there are skipped. "
+            "logs/mcap_video, logs/tlog, logs/ugps/pi. "
+            "Files already there are skipped. "
             "This flight is the usual one, straight after surfacing.",
             "Download files", danger=False, command=self._download,
             periods=DOWNLOAD_PERIODS)

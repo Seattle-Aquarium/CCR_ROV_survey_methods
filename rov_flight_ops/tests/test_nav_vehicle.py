@@ -111,7 +111,12 @@ def test_freshness_age_counts_from_the_last_new_message(fake_mav):
     for _ in range(5):
         mav.read("RANGEFINDER")               # successful, unchanged
     assert health.last_change_mono == moved_at
-    assert health.quality(max_age=0.0) is Quality.STALE
+    # A stated "now" rather than the clock: on Windows before Python 3.12
+    # time.monotonic() ticks every 15.6 ms, so a reading taken straight after
+    # the message is exactly 0.0 s old -- not stale by any max_age >= 0.
+    assert health.age(now_mono=moved_at + 5.0) == pytest.approx(5.0)
+    assert health.quality(max_age=1.0, now_mono=moved_at + 5.0) is Quality.STALE
+    assert health.quality(max_age=10.0, now_mono=moved_at + 5.0) is Quality.OK
 
 
 def test_a_counter_going_backwards_is_a_restart(fake_mav):
@@ -130,6 +135,42 @@ def test_a_404_means_the_vehicle_never_sends_it(monkeypatch):
     s = mav.read("ODOMETRY")
     assert not s.fresh
     assert "never sent" in mav.health["ODOMETRY"].error
+
+
+def test_an_empty_200_also_means_the_vehicle_never_sent_it(monkeypatch):
+    """BlueOS 1.4.6's mavlink2rest says it with HTTP 200 and no body.
+
+    On 15 October 2026 that was read as "unreadable reply: Expecting value",
+    and the DVL capture took it for a vehicle that was not answering -- see
+    test_dvl_capture. Once the message appears, it is an ordinary one.
+    """
+    svc = FakeService()
+    bodies = iter(["", " \n", None])
+
+    def fake_get(url, *, timeout=4.0):
+        body = next(bodies)
+        return mav2rest.Answer(True, 200, svc.reply() if body is None else body)
+
+    monkeypatch.setattr(mav2rest, "_get", fake_get)
+    mav = mav2rest.Mavlink2Rest("192.0.2.1")
+    for _ in range(2):
+        s = mav.read("VISION_POSITION_DELTA")
+        assert not s.fresh and s.http_status == 200
+        assert s.error == mav2rest.NEVER_SENT
+    s = mav.read("VISION_POSITION_DELTA")          # the extension starts sending
+    assert s.fresh and not s.error and s.counter == svc.counter
+    assert not mav.health["VISION_POSITION_DELTA"].error
+
+
+def test_a_garbled_reply_and_no_reply_are_told_apart(monkeypatch):
+    answers = iter([mav2rest.Answer(True, 200, "<html>proxy error</html>"),
+                    mav2rest.Answer(False, None, error="timed out")])
+    monkeypatch.setattr(mav2rest, "_get", lambda url, *, timeout=4.0: next(answers))
+    mav = mav2rest.Mavlink2Rest("192.0.2.1")
+    garbled = mav.read("RANGEFINDER")
+    assert garbled.error.startswith("unreadable reply") and garbled.http_status == 200
+    silent = mav.read("RANGEFINDER")
+    assert silent.error == "timed out" and silent.http_status is None
 
 
 # --------------------------------------------------------------------------

@@ -337,8 +337,90 @@ def _mean(values) -> float | None:
     return sum(values) / len(values)
 
 
+#: What the DVL witness says, in the words the report uses. Kept free of
+#: counts so that seventeen outages with one cause read as one sentence.
+PLACED = {
+    S.ALONE: ("the Pi stopped answering while the DVL on the same vehicle "
+              "switch kept answering — the Pi's own Ethernet leg (eth0, its "
+              "cable, its switch port) or the Pi itself, not the tether"),
+    S.BOTH: ("the DVL went silent with the Pi — the tether, the vehicle's "
+             "switch, or the topside, not the Pi alone"),
+}
+
+#: How far either side of an outage the Pi's carrier count is looked for. Read
+#: every few seconds through a service that caches for ten, so the reading
+#: that shows a flap can land well after the link came back.
+CARRIER_WINDOW_S = 30.0
+#: A reading at least this long after the outage is fresh past that cache, so
+#: an unchanged count there means the link really did not drop.
+CARRIER_FRESH_S = 15.0
+
+
+def _pi_carrier(day: S.FlightDay, span: S.Span) -> str:
+    """What the Pi's own count of carrier losses on eth0 says about `span`.
+
+    The count is cumulative, so it survives the outage it is read to explain:
+    a step across it is the Pi's link dropping, and no step on a reading taken
+    safely afterwards is the link staying up throughout -- which moves the
+    search off the cable and onto whatever sits above it.
+    """
+    session = day.monitor_at(span.start)
+    values = session.columns.get("pi_eth_carrier_drops") if session else None
+    if not values:
+        return ""
+    before = after = None
+    after_at = 0.0
+    for when, value in zip(session.times, values, strict=False):
+        # The reader turns "0" and "1" into booleans; a count is a count.
+        if not isinstance(value, (int, float)):
+            continue
+        value = float(value)
+        if span.start - CARRIER_WINDOW_S <= when <= span.start:
+            before = value
+        elif span.end <= when <= span.end + CARRIER_WINDOW_S:
+            after, after_at = value, when
+    if before is None or after is None:
+        return ""
+    if after > before:
+        return ("the Pi's eth0 lost carrier across it — the link itself "
+                "dropped: cable, connector, switch port or the Pi's port")
+    if after == before and after_at >= span.end + CARRIER_FRESH_S:
+        return ("the Pi's eth0 kept carrier throughout — the link stayed up, "
+                "so look above the cable: the Pi's driver or network stack, or "
+                "the switch's forwarding")
+    return ""
+
+
+def _dvl_witness(day: S.FlightDay, span: S.Span) -> str:
+    """`ALONE`, `BOTH`, `MIXED` or "" from the DVL's echoes over `span`."""
+    for log in day.pings:
+        if not log.dvl_times or not (log.start <= span.start <= log.end):
+            continue
+        return S.place_outage(*log.witness(span))
+    return ""
+
+
 def _locate(day: S.FlightDay, span: S.Span) -> str:
     """Where the break was, when the data can place it.
+
+    The vehicle's own evidence comes first. The DVL, echoed beside the Pi,
+    says whether the vehicle went silent as a whole or only the Pi did; the
+    Pi's carrier count says whether its link physically dropped. When the DVL
+    kept answering, the topside's adapters have nothing to add -- the laptop
+    was plainly reaching the vehicle -- so they are consulted only otherwise.
+    """
+    place = _dvl_witness(day, span)
+    found = [text for text in (PLACED.get(place, ""), _pi_carrier(day, span))
+             if text]
+    if place != S.ALONE:
+        topside = _topside(day, span)
+        if topside:
+            found.append(topside)
+    return "; ".join(found)
+
+
+def _topside(day: S.FlightDay, span: S.Span) -> str:
+    """The topside's half: which of its adapters went quiet, and how.
 
     The decisive comparison is the bridge against the adapter underneath it:
     a member still receiving while the bridge is not is a forwarding failure,

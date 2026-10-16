@@ -1632,6 +1632,193 @@ def newest_dataflash(host: str, token: str = "") -> str:
     return logs[0]["name"] if logs else ""
 
 
+# --------------------------------------------------------------------------
+#  following the newest log's parameters, a little at a time
+# --------------------------------------------------------------------------
+#
+# The Navigation page re-reads the parameters every two minutes, to notice the
+# navigation set being changed under it. It used to do that with
+# `read_parameters_now`, which downloads the newest log whole -- right for a
+# snapshot taken twice a flight, wrong every two minutes. On 15 October 2026
+# each refresh pulled the whole growing log, 9 to 13 MB, as a 60-80 Mbps burst
+# over the tether, from the moment the page opened.
+#
+# The head alone would not do: a parameter changed after the log opened is a
+# PARM record further in, and the 15 October logs had them (STAT_*, BARO*,
+# MOT_THST_HOVER). File Browser honours Range, so instead each log is read once
+# and afterwards only what has been appended since: a refresh moves what the
+# autopilot wrote in the last two minutes, and nothing when it wrote nothing.
+#
+# PARM records are found by their own header rather than by pymavlink, which
+# cannot start part-way through a file. Their layout comes from the FMT record
+# that defines them, at the head of the same log.
+
+#: A dataflash record's two sync bytes, and the FMT record's type and length.
+_DF_HEAD = b"\xa3\x95"
+_DF_FMT_TYPE = 0x80
+_DF_FMT_LEN = 89
+
+#: Dataflash format characters as struct codes, as pymavlink's DFReader has
+#: them. Only sizes and the two fields read here matter, so scaling is ignored.
+_DF_STRUCT = {
+    "a": "64s", "b": "b", "B": "B", "h": "h", "H": "H", "i": "i", "I": "I",
+    "f": "f", "d": "d", "n": "4s", "N": "16s", "Z": "64s", "c": "h",
+    "C": "H", "e": "i", "E": "I", "L": "i", "M": "B", "q": "q", "Q": "Q",
+}
+
+#: Bytes read again before where the last read stopped. A PARM record cut in
+#: two by that read's end is read whole by the next one; a record applied
+#: twice changes nothing, because the records after it still come after it.
+TAIL_OVERLAP = 256
+
+
+@dataclass
+class _ParmLayout:
+    """Where a PARM record's name and value sit, from the log's own FMT."""
+
+    type: int
+    length: int
+    unpack: struct.Struct
+    name: int
+    value: int
+
+
+def _parm_layout(data: bytes) -> _ParmLayout | None:
+    """The PARM layout from the FMT record that defines it, or None."""
+    marker = _DF_HEAD + bytes([_DF_FMT_TYPE])
+    pos = data.find(marker)
+    while 0 <= pos <= len(data) - _DF_FMT_LEN:
+        if data[pos + 5:pos + 9].rstrip(b"\0") == b"PARM":
+            fmt = data[pos + 9:pos + 25].rstrip(b"\0").decode("ascii", "replace")
+            cols = (data[pos + 25:pos + 89].rstrip(b"\0")
+                    .decode("ascii", "replace").split(","))
+            try:
+                unpack = struct.Struct("<" + "".join(_DF_STRUCT[c] for c in fmt))
+                layout = _ParmLayout(type=data[pos + 3], length=data[pos + 4],
+                                     unpack=unpack, name=cols.index("Name"),
+                                     value=cols.index("Value"))
+            except (KeyError, ValueError, struct.error):
+                return None
+            return layout if unpack.size + 3 == layout.length else None
+        pos = data.find(marker, pos + 1)
+    return None
+
+
+def _parm_name(raw) -> str:
+    """A parameter name out of its padded field, or "" if it is not one.
+
+    Strict on purpose: records are found by searching for their header, and
+    a header-shaped run of bytes inside some other record must not be taken
+    for a parameter.
+    """
+    if not isinstance(raw, bytes):
+        return ""
+    name = raw.rstrip(b"\0")
+    if not name or len(name) > 16 or not (65 <= name[0] <= 90):
+        return ""
+    if any(not (48 <= c <= 57 or 65 <= c <= 90 or c == 95) for c in name):
+        return ""
+    return name.decode("ascii")
+
+
+def _parm_records(data: bytes, layout: _ParmLayout):
+    """Every PARM record in `data`, in order, as (name, value)."""
+    marker = _DF_HEAD + bytes([layout.type])
+    last = len(data) - layout.length
+    pos = data.find(marker)
+    while 0 <= pos <= last:
+        fields = layout.unpack.unpack_from(data, pos + 3)
+        name, value = _parm_name(fields[layout.name]), fields[layout.value]
+        if name and isinstance(value, float) and value == value \
+                and abs(value) != float("inf"):
+            yield name, value
+            pos = data.find(marker, pos + layout.length)
+        else:
+            pos = data.find(marker, pos + 1)
+
+
+class ParameterFollower:
+    """The newest dataflash log's parameters, kept current a little at a time.
+
+    `read()` gives the same answer as `read_parameters_now` -- every
+    parameter at its last recorded value in the newest log -- but downloads
+    each byte of a log once (plus `TAIL_OVERLAP`), and nothing at all when the
+    log has not grown since the last read. The first read of a log is the
+    whole of it so far; every read after is its new tail.
+
+    {} means the set could not be confirmed this time (vehicle unreachable,
+    or a read that failed), so a caller timing how old its parameters are
+    keeps counting. One caller at a time.
+    """
+
+    def __init__(self, host: str) -> None:
+        self.host = host
+        self.log = ""
+        #: How far into `log` has been read and applied.
+        self.offset = 0
+        self.params: dict[str, float] = {}
+        #: Log bytes downloaded, and ranged GETs made, over this follower's life.
+        self.fetched = 0
+        self.reads = 0
+        self.problem = ""
+        self._token = ""
+        self._layout: _ParmLayout | None = None
+
+    def _newest(self) -> dict | None:
+        for _ in range(2):
+            token = self._token or file_token(self.host)
+            if not token:
+                return None
+            logs = list_dataflash(self.host, token)
+            if logs:
+                self._token = token
+                return logs[0]
+            if not self._token:
+                return None
+            self._token = ""          # perhaps expired: one fresh login, then give up
+        return None
+
+    def read(self) -> dict:
+        newest = self._newest()
+        if newest is None:
+            return {}
+        name, size = newest["name"], int(newest.get("size") or 0)
+        if name != self.log or size < self.offset:
+            # A new log, or this one replaced: start from its first byte.
+            self.log, self.offset, self.params = name, 0, {}
+            self._layout, self.problem = None, ""
+        if self.problem:
+            return {}
+        if size <= self.offset:
+            return dict(self.params) if self._layout else {}
+        start = max(0, self.offset - TAIL_OVERLAP) if self._layout else 0
+        url = (_base(self.host, FILE_BROWSER_PORT) + "/api/raw"
+               + urllib.parse.quote(DATAFLASH_FB_PATH) + "/"
+               + urllib.parse.quote(name)
+               + f"?auth={urllib.parse.quote(self._token)}")
+        a = _get(url, headers={"Range": f"bytes={start}-{size - 1}"},
+                 limit=size - start, binary=True, timeout=60)
+        self.reads += 1
+        if not a.ok:
+            return {}
+        self.fetched += len(a.raw)
+        if start > 0 and a.status != 206:
+            # The file came from its first byte instead. File Browser does not
+            # do this; if a vehicle ever does, stop rather than pull the log
+            # again on every refresh.
+            self.problem = (f"{self.host} ignored a Range request for {name}; "
+                            f"parameter refresh stopped for this log")
+            return {}
+        data = a.raw
+        if self._layout is None:
+            self._layout = _parm_layout(data)
+        if self._layout is not None:
+            for key, value in _parm_records(data, self._layout):
+                self.params[key] = value
+        self.offset = start + len(data)
+        return dict(self.params) if self._layout else {}
+
+
 def diff_versions(before: dict, after: dict) -> dict:
     """What moved between two `read_versions` readings.
 
@@ -1796,6 +1983,68 @@ def read_interfaces(host: str, timeout: float = 2.5) -> dict[str, dict]:
             out[name] = found
         if out:
             _NETWORK_PATH_FOUND[host] = path
+            return out
+    return {}
+
+
+#: BlueOS's network manager, cable-guy. Its interface list carries what
+#: linux2rest's counters do not: whether each port has carrier now, and how
+#: many times it has lost it -- the kernel's own `carrier_down_count`, read
+#: through netlink. A plain GET, as every other read in this module; the
+#: service is the one BlueOS already runs to manage the ports, so nothing new
+#: is installed and nothing is asked for that BlueOS does not already serve.
+#: Present with this shape in every release from 1.0 to the current one.
+CABLE_GUY_PORT = 9090
+#: Tried in order: the service's own port, then the same route through the
+#: BlueOS web server, for a vehicle that only exposes port 80.
+LINK_STATE_PATHS = (
+    (CABLE_GUY_PORT, "/v1.0/ethernet"),
+    (80, "/cable-guy/v1.0/ethernet"),
+)
+_LINK_STATE_FOUND: dict[str, tuple[int, str]] = {}
+
+
+def read_link_state(host: str, timeout: float = 3.0) -> dict[str, dict]:
+    """Each wired interface's carrier, as {name: {"carrier", "carrier_drops"}}.
+
+    `carrier_drops` is cumulative since the Pi booted, so it survives the
+    outage it is read to explain: a link that flapped while the vehicle could
+    not be reached shows as a higher count on the first read after. cable-guy
+    caches this list for ten seconds, so `carrier` can be that stale; the
+    count cannot miss a flap however late it is read.
+
+    {} when the service cannot be reached or does not report it.
+    """
+    known = _LINK_STATE_FOUND.get(host)
+    for port, path in ((known,) if known else LINK_STATE_PATHS):
+        a = _get(_base(host, port) + path, timeout=timeout, limit=400_000)
+        if not a.ok:
+            continue
+        try:
+            rows = json.loads(a.body)
+        except Exception:
+            continue
+        if not isinstance(rows, list):
+            continue
+        out: dict[str, dict] = {}
+        for entry in rows:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or "")
+            info = entry.get("info")
+            if not name or not isinstance(info, dict):
+                continue
+            connected = info.get("connected")
+            try:
+                drops = int(info.get("number_of_disconnections"))
+            except (TypeError, ValueError):
+                drops = None
+            out[name] = {
+                "carrier": connected if isinstance(connected, bool) else None,
+                "carrier_drops": drops,
+            }
+        if out:
+            _LINK_STATE_FOUND[host] = (port, path)
             return out
     return {}
 

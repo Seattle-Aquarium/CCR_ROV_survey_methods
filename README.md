@@ -120,7 +120,7 @@ Two open-source Windows desktop applications carry a survey day from pre-dive ch
 
 ### [ROV Flight Operations](rov_flight_ops/) (`rov_flight_ops/`)
 
-Runs on the topside laptop for the whole survey day, with tabs in the order the day uses them: automatic recording of laptop and tether health whenever the ROV is armed; a live navigation map with survey plans, line-following guidance and a navigation-sensor readiness check; transect times (and pauses) checked against the dive profile; verified download of BlueOS logs and imagery from the vehicle; an automated flight report that diagnoses disarms, tether dropouts and sensor faults; and per-transect telemetry CSVs and maps from the bundled transect extractor ([`mcap_to_csv/`](mcap_to_csv/)). See [`rov_flight_ops/README.md`](rov_flight_ops/README.md).
+Runs on the topside laptop for the whole survey day, with tabs in the order the day uses them: automatic recording of laptop and tether health whenever the ROV is armed; a live navigation map with survey plans, line-following guidance and a navigation-sensor readiness check; a byte-for-byte capture of everything the Water Linked DVL sends, beam by beam, with a check of whether it reaches the autopilot; transect times (and pauses) checked against the dive profile; verified download of BlueOS logs and imagery from the vehicle; an automated flight report that diagnoses disarms, tether dropouts and sensor faults; and per-transect telemetry CSVs and maps from the bundled transect extractor ([`mcap_to_csv/`](mcap_to_csv/)). See [`rov_flight_ops/README.md`](rov_flight_ops/README.md).
 
 <p align="center">
   <img src="images/rov_flight_ops.png" width="600" alt="ROV Flight Operations, Navigation tab" />

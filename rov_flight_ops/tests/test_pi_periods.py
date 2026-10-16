@@ -47,7 +47,8 @@ def test_the_video_type_is_called_video():
 
 
 def test_the_types_are_offered_in_the_order_a_survey_day_uses_them():
-    assert [c.key for c in PF.CATEGORIES] == ["mcap", "bin", "c3", "video", "tlog"]
+    assert [c.key for c in PF.CATEGORIES] == ["mcap", "bin", "c3", "video", "tlog",
+                                              "ugps"]
 
 
 # --------------------------------------------------------------------------
