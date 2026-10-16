@@ -446,9 +446,55 @@ def read_monitor(path: Path) -> MonitorSession:
 # --------------------------------------------------------------------------
 
 
+#: Where an outage on one target is placed by the other target's echoes over
+#: the same stretch. `ALONE`: the witness kept answering, so the silent target
+#: went by itself. `BOTH`: the witness went silent too. `MIXED`: it did some of
+#: each, which a short outage with echoes on its edges can produce.
+ALONE = "alone"
+BOTH = "both"
+MIXED = "mixed"
+
+#: Share of the witness's echoes that must agree before an outage is placed.
+#: The two targets are pinged on separate clocks, so either edge of an outage
+#: can catch one echo on the wrong side of it; four in five leaves room for
+#: that on anything over a second.
+PLACE_SHARE = 0.8
+
+#: How recently the witness must have answered when an outage began for its
+#: silence to mean anything. A DVL that was off, or that does not answer ICMP
+#: at all, says nothing about the vehicle's switch, and must not turn every Pi
+#: outage into a "whole vehicle" one.
+WITNESS_FRESH_S = 2.0
+
+
+def place_outage(answered: int, lost: int, witness_up: bool) -> str:
+    """`ALONE`, `BOTH` or `MIXED`, from the witness's echoes over an outage.
+
+    "" when they cannot say: the witness was not answering before the outage
+    began (a DVL that is off, or that never answers ICMP, must not make every
+    Pi outage look like the whole vehicle going), or none of its echoes fell
+    inside it. Used both live, by the network trace, and afterwards on the
+    ping file, so the events file and the report cannot disagree.
+    """
+    total = answered + lost
+    if not witness_up or total <= 0:
+        return ""
+    share = answered / total
+    if share >= PLACE_SHARE:
+        return ALONE
+    if share <= 1.0 - PLACE_SHARE:
+        return BOTH
+    return MIXED
+
+
 @dataclass
 class PingLog:
-    """One `network_pings_*.csv`: every echo, and what became of it."""
+    """One `network_pings_*.csv`: every echo, and what became of it.
+
+    The vehicle's echoes fill the fields every reader has always used. Files
+    written since the DVL was echoed as a witness carry its rows too, marked
+    by the `target` column; those go to the `dvl_` fields and nowhere else.
+    """
 
     path: Path | None = None
     flight_id: str = ""
@@ -465,10 +511,40 @@ class PingLog:
     #: out` is a packet that went and never came back; `destination host
     #: unreachable` is one that never left.
     statuses: dict[str, int] = field(default_factory=dict)
+    #: The DVL's echoes, when the file has them: the witness that says
+    #: whether a vehicle outage was the Pi alone or the whole vehicle.
+    dvl_host: str = ""
+    dvl_times: list[float] = field(default_factory=list)
+    dvl_ok: list[bool] = field(default_factory=list)
+    dvl_outages: list[Span] = field(default_factory=list)
 
     @property
     def loss_pct(self) -> float:
         return 100.0 * self.lost / self.sent if self.sent else 0.0
+
+    def witness(self, span: Span,
+                fresh_s: float = WITNESS_FRESH_S) -> tuple[int, int, bool]:
+        """(answered, lost, was answering) for the DVL's echoes over `span`.
+
+        "Was answering" means a reply in the `fresh_s` before the span began
+        or anywhere inside it -- the same bar the live trace sets.
+        """
+        lo = bisect_left(self.dvl_times, span.start - fresh_s)
+        answered = lost = 0
+        up = False
+        for i in range(lo, len(self.dvl_times)):
+            when = self.dvl_times[i]
+            if when > span.end:
+                break
+            if when < span.start:
+                up = up or self.dvl_ok[i]
+                continue
+            if self.dvl_ok[i]:
+                answered += 1
+                up = True
+            else:
+                lost += 1
+        return answered, lost, up
 
 
 def read_pings(path: Path) -> PingLog:
@@ -486,6 +562,14 @@ def read_pings(path: Path) -> PingLog:
         if when is None:
             continue
         rtt = _num(row.get("rtt_ms"))
+        target = (row.get("target") or "vehicle").strip().lower()
+        if target == "dvl":
+            out.dvl_times.append(when)
+            out.dvl_ok.append(rtt is not None)
+            out.dvl_host = row.get("host") or out.dvl_host
+            continue
+        if target != "vehicle":
+            continue                      # a target this reader does not know
         out.times.append(when)
         out.rtt.append(rtt)
         flags.append(rtt is None)
@@ -497,6 +581,14 @@ def read_pings(path: Path) -> PingLog:
     if out.times:
         out.start, out.end = out.times[0], out.times[-1]
         out.outages = _runs(out.times, flags, True, MIN_OUTAGE_S)
+    if out.dvl_times:
+        # Two threads append to one file, so its rows are only nearly in
+        # order. Sorted here, once, so `witness` can bisect.
+        pairs = sorted(zip(out.dvl_times, out.dvl_ok, strict=True))
+        out.dvl_times = [t for t, _ in pairs]
+        out.dvl_ok = [ok for _, ok in pairs]
+        out.dvl_outages = _runs(out.dvl_times, [not ok for ok in out.dvl_ok],
+                                True, MIN_OUTAGE_S)
     return out
 
 

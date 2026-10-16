@@ -216,6 +216,54 @@ def test_only_read_only_commands_are_sent_one_at_a_time(sim, tmp_path):
     assert cap.config_first.get("speed_of_sound") == 1475.0
 
 
+def test_the_dvls_clock_is_read_over_tcp_when_the_web_api_has_none(tmp_path, monkeypatch):
+    """Software 2.7.2 answers /api/v1/time with a 404, so on 15 October 2026
+    every clock column was blank -- while the TCP get_time_status answer,
+    in _commands.csv all along, said the DVL was 871 days behind."""
+    monkeypatch.setattr(CAP, "STATUS_PERIOD_S", 0.25)
+    behind_s = -871 * 86400.0
+    dvl = SimulatedDvl(rate_hz=20, clock_offset_s=behind_s).start()
+    try:
+        cap = start(dvl, tmp_path)
+        assert wait_for(lambda: cap.live.snapshot(history=False).status
+                        .get("dvl_clock_utc")), "no status row ever had the DVL's clock"
+        cap.stop()
+    finally:
+        dvl.stop()
+    status = rows(files(cap)["status"])
+    timed = [r for r in status if r["dvl_clock_utc"]]
+    r = timed[-1]
+    assert r["clock_source"] == "TCP get_time_status" and r["clock_read_utc"]
+    # Whole seconds: within the round trip and the second it was cut to.
+    assert float(r["dvl_clock_minus_laptop_ms"]) == pytest.approx(behind_s * 1000, abs=2000)
+    assert 1000 <= float(r["clock_uncertainty_ms"]) < 2000
+    assert r["ntp_synchronized"] == "0" and r["ntp_server"] == "auto"
+    assert any("/api/v1/time: HTTP 404" in row["errors"] for row in status)
+    record = json.loads((cap.folder / f"{cap.stem}.json").read_text(encoding="utf-8"))
+    first = record["time_at_start"]
+    assert first["source"] == "TCP get_time_status"
+    assert first["answer"]["ntp_synced"] is False
+    assert first["dvl_clock_minus_laptop_ms"] == pytest.approx(behind_s * 1000, abs=2000)
+    assert "871.0 days behind this laptop" in files(cap)["events"].read_text(encoding="utf-8")
+
+
+def test_the_web_apis_clock_is_used_when_there_is_one(tmp_path, monkeypatch):
+    monkeypatch.setattr(CAP, "STATUS_PERIOD_S", 0.25)
+    dvl = SimulatedDvl(rate_hz=20, web_time=True).start()
+    try:
+        cap = start(dvl, tmp_path)
+        assert wait_for(lambda: cap.live.snapshot(history=False).status
+                        .get("clock_source") == "web API /api/v1/time")
+        cap.stop()
+    finally:
+        dvl.stop()
+    r = [r for r in rows(files(cap)["status"]) if r["dvl_clock_utc"]][-1]
+    assert r["clock_source"] == "web API /api/v1/time"
+    # Nanoseconds, so the round trip is the whole uncertainty.
+    assert abs(float(r["dvl_clock_minus_laptop_ms"])) < 1000
+    assert float(r["clock_uncertainty_ms"]) < 1000
+
+
 def test_an_older_dvl_that_does_not_know_a_command_is_logged_not_fatal(tmp_path):
     old = SimulatedDvl(rate_hz=20, version="2.6.4", json_format="json_v3.1").start()
     try:
@@ -324,6 +372,37 @@ def test_an_invalid_stretch_is_counted_and_is_not_a_gap(sim, tmp_path):
     during = [g for g in cap.live.snapshot(history=False).gaps if lo <= g.ended_unix <= hi]
     assert during == []
     assert "the stock extension drops these" in files(cap)["events"].read_text(encoding="utf-8")
+
+
+def test_a_silence_with_the_acoustics_off_is_not_a_fault(sim, tmp_path, monkeypatch):
+    """15 October 2026: the acoustics were switched off for 76 s, and capture
+    2026-10-15_092531 logged a 76 s delivery stall and then "~291 report(s)
+    made but not received". None were made. The simulator reproduces the
+    A50's stale time of validity on the first report after."""
+    monkeypatch.setattr(CAP, "STATUS_PERIOD_S", 0.25)
+    cap = start(sim, tmp_path)
+    assert wait_for(lambda: cap.cadence.median_ms is not None)
+    off_at = time.time()
+    sim.acoustics_off(1.5)
+    st = cap.cadence.stats
+    assert wait_for(lambda: st.gaps["acoustics_off"] >= 1), \
+        "the silence was never put down to the acoustics"
+    after = st.reports
+    # The report after the stale one, whose time of validity jumps the gap.
+    assert wait_for(lambda: st.reports >= after + 3)
+    # And a status poll that saw them back on: a busy machine can lag it.
+    assert wait_for(lambda: st.acoustics_off and st.acoustics_off[-1]["on_utc"])
+    cap.stop()
+    # Nothing else in that stretch. (A busy test machine can still make an
+    # unrelated gap elsewhere in the run, which is not what this tests.)
+    during = [g.kind for g in cap.live.snapshot(history=False).gaps
+              if off_at <= g.ended_unix <= off_at + 3.0]
+    assert during == ["acoustics_off"]
+    record = json.loads((cap.folder / f"{cap.stem}.json").read_text(encoding="utf-8"))
+    (period,) = record["cadence"]["acoustics_off_periods"]
+    assert period["off_utc"] and period["on_utc"]
+    events = files(cap)["events"].read_text(encoding="utf-8")
+    assert "gap: acoustics_off" in events and "acoustics were switched off" in events
 
 
 def test_periodic_cycling_being_on_is_called_out(tmp_path):
@@ -498,6 +577,105 @@ def test_the_dvls_address_comes_from_the_extension_when_none_is_typed(
     vehicle = files(cap)["vehicle_raw"].read_text(encoding="utf-8").splitlines()
     assert json.loads(json.loads(vehicle[0])["body"])["should_send"] == "POSITION_ESTIMATE"
     assert cap.extension["should_send"] == "POSITION_ESTIMATE"
+
+
+class FakeMavlink2Rest:
+    """mavlink2rest's message reads, each answered as told.
+
+    ``count`` a message flowing; ``empty`` HTTP 200 with no body, which is how
+    BlueOS 1.4.6 says it has never seen one; ``garbled`` a body that is not
+    JSON; ``silent`` no answer at all.
+    """
+
+    def __init__(self, how: dict[str, str]):
+        self.how = how
+        self.asked: list[str] = []
+        self.counter = 100
+
+    def __call__(self, url, *, timeout=4.0):
+        from rov_flight_ops.nav import mav2rest
+        parts = url.split("/")
+        key = f"{parts[-5]}/{parts[-3]}/{parts[-1]}"
+        self.asked.append(key)
+        how = self.how.get(key, "count")
+        if how == "empty":
+            return mav2rest.Answer(True, 200, "")
+        if how == "garbled":
+            return mav2rest.Answer(True, 200, "<html>Bad Gateway</html>")
+        if how == "silent":
+            return mav2rest.Answer(False, None, error="timed out")
+        self.counter += 1
+        return mav2rest.Answer(True, 200, json.dumps({
+            "message": {"type": parts[-1]},
+            "status": {"time": {"counter": self.counter, "frequency": 5.0,
+                                "last_update": "2026-10-15T16:30:00Z"}}}))
+
+
+def one_vehicle_cycle(tmp_path, monkeypatch, how: dict[str, str]):
+    """A capture's first round of vehicle reads, against a fake mavlink2rest."""
+    from rov_flight_ops.nav import mav2rest
+    fake = FakeMavlink2Rest(how)
+    monkeypatch.setattr(mav2rest, "_get", fake)
+    monkeypatch.setattr(CAP.DvlCapture, "_read_extension",
+                        lambda self, session, host: (session, None,
+                                                     {"ext_reachable": False}))
+    cap = CAP.DvlCapture(folder=tmp_path, vehicle_host="192.0.2.1",
+                         vehicle=True, snapshot_hz=0)
+    cap.start()
+    try:
+        assert wait_for(lambda: "_down" in cap.live.snapshot(history=False).mavlink), \
+            "the vehicle thread never finished a round of reads"
+    finally:
+        cap.stop()
+    return cap, fake
+
+
+def test_a_message_never_sent_does_not_stop_the_rest_being_read(tmp_path, monkeypatch):
+    """15 October 2026: GLOBAL_VISION_POSITION_ESTIMATE, second in the list,
+    was never sent; mavlink2rest answered 200 and an empty body; the capture
+    called that a vehicle not answering, and nothing after it in the list
+    was read all day."""
+    from rov_flight_ops.nav import mav2rest
+    cap, fake = one_vehicle_cycle(tmp_path, monkeypatch, {
+        "255/0/VISION_POSITION_DELTA": "empty",
+        "255/0/GLOBAL_VISION_POSITION_ESTIMATE": "empty",
+        "255/0/VISION_SPEED_ESTIMATE": "garbled",
+    })
+    every = {f"255/0/{m}" for m in CAP.EXTENSION_MESSAGES} | {
+        f"1/1/{m}" for m in CAP.AUTOPILOT_MESSAGES}
+    assert set(fake.asked) == every
+    mav = cap.live.snapshot(history=False).mavlink
+    assert mav["_down"] == ""
+    assert mav["255/0/GLOBAL_VISION_POSITION_ESTIMATE"]["error"] == mav2rest.NEVER_SENT
+    assert mav["255/0/VISION_SPEED_ESTIMATE"]["error"].startswith("unreadable reply")
+    assert mav["1/1/RANGEFINDER"]["counter"] is not None
+    logged = {(r["system"], r["component"], r["message"]): r
+              for r in rows(files(cap)["mavlink"])}
+    assert logged[("255", "0", "VISION_POSITION_ESTIMATE")]["counter"]
+    assert logged[("1", "1", "DISTANCE_SENSOR")]["counter"]
+
+
+def test_a_vehicle_that_does_not_answer_costs_one_timeout(tmp_path, monkeypatch):
+    cap, fake = one_vehicle_cycle(tmp_path, monkeypatch, {
+        f"{s}/{c}/{m}": "silent"
+        for (s, c), names in (((255, 0), CAP.EXTENSION_MESSAGES),
+                              ((1, 1), CAP.AUTOPILOT_MESSAGES))
+        for m in names})
+    assert fake.asked[0] == "255/0/VISION_POSITION_DELTA"
+    assert set(fake.asked) == {"255/0/VISION_POSITION_DELTA"}
+    assert cap.live.snapshot(history=False).mavlink["_down"] == "timed out"
+
+
+def test_one_unanswered_read_after_answered_ones_is_not_a_vehicle_down(
+        tmp_path, monkeypatch):
+    cap, fake = one_vehicle_cycle(tmp_path, monkeypatch, {
+        "255/0/VISION_POSITION_ESTIMATE": "silent"})
+    # The round stops at the timeout, so a Pi that has gone costs one...
+    assert fake.asked[:3] == ["255/0/VISION_POSITION_DELTA",
+                              "255/0/GLOBAL_VISION_POSITION_ESTIMATE",
+                              "255/0/VISION_POSITION_ESTIMATE"]
+    # ...but the reads before it were answered, so it is not called down.
+    assert cap.live.snapshot(history=False).mavlink["_down"] == ""
 
 
 # --------------------------------------------------------------------------

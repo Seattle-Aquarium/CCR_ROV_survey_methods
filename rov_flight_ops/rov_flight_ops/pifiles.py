@@ -92,6 +92,16 @@ TLOG_FB_PATHS = ("/ardupilot_logs/logs",)
 LIGHTS_FB_PATH = "/system_root/usr/blueos/userdata/light_monitor"
 LIGHTS_NAME = re.compile(r"^lights_\d{8}_\d{6}(?:_1hz)?\.(?:jsonl|csv)$")
 
+#: The WL UGPS External extension's own logs (clydemcqueen/
+#: wl_ugps_external_extension): its Dockerfile binds
+#: /usr/blueos/extensions/wl_ugps_external to /data, and it writes
+#: /data/logs/<date>/<date>_<time>_<what>.csv -- g2_acoustic (each receiver's
+#: distance, noise, signal and validity, about five times a second),
+#: g2_position, g2_orientation, and the compass's GGA, HDT and PASHR.
+UGPS_EXT_FB_PATH = "/system_root/usr/blueos/extensions/wl_ugps_external/logs"
+UGPS_EXT_NAME = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})_[A-Za-z0-9_]+\.csv$")
+
 #: Where Madrona's folder is looked for when none has been set. Its docs say
 #: images go "underneath the folder they select", so there is no fixed path;
 #: a folder holding left/, right/ and center/ is what gives it away.
@@ -144,6 +154,8 @@ CATEGORIES: tuple[Category, ...] = (
     Category("tlog", "tlog", "logs/tlog"),
     # Beside the topside copy rov_flight_ops keeps in logs/lights itself.
     Category("lights", "light logs", "logs/lights/pi"),
+    # Beside the topside copy of the same receivers in logs/ugps.
+    Category("ugps", "UGPS logs", "logs/ugps/pi"),
 )
 BY_KEY = {c.key: c for c in CATEGORIES}
 _ORDER = [c.key for c in CATEGORIES]
@@ -520,6 +532,19 @@ def stamp_time(text: str) -> float | None:
         return None
 
 
+def ugps_stamp_time(name: str) -> float | None:
+    """`2026-10-15_15-46-10_g2_acoustic.csv` -> epoch seconds. The stamp is UTC:
+    the extension's container keeps UTC."""
+    from datetime import timezone
+    m = UGPS_EXT_NAME.match(name or "")
+    if not m:
+        return None
+    try:
+        return datetime(*map(int, m.groups()), tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
 def fill_spans(inv: Inventory, *, progress: ProgressCB | None = None,
                cancel=None) -> None:
     """Work out when each listed file was recorded."""
@@ -555,6 +580,10 @@ def fill_spans(inv: Inventory, *, progress: ProgressCB | None = None,
     for f in inv.files.get("lights", []):
         # Named for when the extension opened it (UTC); written until modified.
         f.start = stamp_time(f.name) or f.modified
+        f.end = f.modified if f.modified is not None else f.start
+    for f in inv.files.get("ugps", []):
+        # The same: opened when the extension started, written until modified.
+        f.start = ugps_stamp_time(f.name) or f.modified
         f.end = f.modified if f.modified is not None else f.start
 
 
@@ -745,6 +774,18 @@ def search(host: str | None, kinds: Iterable[str], *, c3_folder: str = "",
                 if why:
                     notes.append(f"{roots[0]}: {why}")
                 files = [_pifile(kind, r) for r in raw if LIGHTS_NAME.match(r["name"])]
+        elif kind == "ugps":
+            roots = [UGPS_EXT_FB_PATH]
+            raw, why = walk(found, token, roots[0], depth=1, cancel=cancel)
+            if why and not raw:
+                notes.append(f"{roots[0]}: not on this vehicle ({why}) -- the WL UGPS "
+                             f"External extension writes here once it is installed")
+                roots = []
+            else:
+                if why:
+                    notes.append(f"{roots[0]}: {why}")
+                files = [_pifile(kind, r) for r in raw
+                         if r["rel"].count("/") == 1 and UGPS_EXT_NAME.match(r["name"])]
         elif kind == "c3":
             if progress and not c3_folder:
                 progress(n / max(1, len(kinds)) * 0.5,

@@ -16,6 +16,7 @@ and used wherever navigation needs it.
     +-----------------------------------+  tools, features,    |
     |  guidance / site / origin strip    |  inspector          |
     |  lights: 1 4 2 3 · vehicle supply  |                     |
+    |  UGPS receivers: Rx 0-3 SNR        |                     |
     +-----------------------------------+----------------------+
 
 Two thirds of the width is the map, because the map is the problem -- until
@@ -27,8 +28,11 @@ beneath it carries what must never need looking for: which line is being
 followed and how far off it the vehicle is, the site, and whether the origin
 is confirmed. Under that, one row for the four lights -- each one's level and
 expected draw, and the vehicle's supply -- from the Light Monitor extension
-(the Lights tab has the rest). Details expand into a drawer over the page; the map stays
-visible behind them.
+(the Lights tab has the rest). Under that, one row for the UGPS antenna's
+four receivers -- each one's signal-to-noise, noise floor and the last minute
+of it -- read straight from the G2 topside, with a line saying whether any
+receiver stands out from the others. Details expand into a drawer over the
+page; the map stays visible behind them.
 
 **It works with no vehicle.** The map opens on Pier 59 from a basemap that
 ships with the program, and a plan can be drawn, measured, saved and reopened
@@ -270,6 +274,11 @@ class NavigationPage(ctk.CTkFrame):
         self.lights_strip = LightsStrip(col, self.app)
         self.lights_strip.grid(row=4, column=0, sticky="ew", pady=(6, 0))
         self._lights_ticks = 0
+
+        from .ugpsstrip import ReceiversStrip
+        self.ugps_strip = ReceiversStrip(col, self.app)
+        self.ugps_strip.grid(row=5, column=0, sticky="ew", pady=(6, 0))
+        self._ugps_ticks = 0
 
     def _build_strip(self, parent, row: int) -> None:
         """The three things that must never need looking for."""
@@ -846,8 +855,10 @@ class NavigationPage(ctk.CTkFrame):
         self._sync_profile_to_collector()
         try:
             from .. import blueos
+            # Follows the newest log rather than downloading it whole on every
+            # refresh: each refresh moves only what the log has gained.
             self.collector.set_parameter_reader(
-                lambda: blueos.read_parameters_now(host)[0])
+                blueos.ParameterFollower(host).read)
         except Exception as ex:
             log.warning("navigation could not wire the parameter reader: %s", ex)
         self.collector.start(self.session.session_id if self.session else "")
@@ -899,6 +910,11 @@ class NavigationPage(ctk.CTkFrame):
             diagnostics.log_exception("navigation lights row", *sys.exc_info(),
                                       level=logging.WARNING)
         try:
+            self._render_ugps()
+        except Exception:
+            diagnostics.log_exception("navigation UGPS row", *sys.exc_info(),
+                                      level=logging.WARNING)
+        try:
             self._render()
         except Exception as ex:
             diagnostics.log_exception("navigation redraw", *sys.exc_info(),
@@ -921,6 +937,18 @@ class NavigationPage(ctk.CTkFrame):
             return
         state, status = get().snapshot()
         self.lights_strip.update_from(state, status)
+
+    def _render_ugps(self) -> None:
+        """The UGPS receivers row, twice a second, while it is on screen. The
+        reader is started on first sight and then keeps going, because it is
+        also what logs the receivers into the flight folder."""
+        self._ugps_ticks += 1
+        if self._ugps_ticks % 2 or not self.ugps_strip.winfo_ismapped():
+            return
+        get = getattr(self.app, "ugps_capture", None)
+        if get is None:
+            return
+        self.ugps_strip.update_from(get().snapshot())
 
     def _render(self) -> None:
         if self.collector is None:

@@ -74,6 +74,10 @@ class App(Shell):
         #: Lights tab and the Navigation row share one, and its copy of the
         #: recording goes on whichever tab is open; made on first use.
         self.lights = None
+        #: The UGPS G2 reader. Read directly from the laptop -- the G2 topside
+        #: is on this side of the tether -- and held here, like the DVL
+        #: capture, so it records whichever tab is open; made on first use.
+        self.ugps = None
         self._dvl_closing: threading.Event | None = None
         self._dvl_close_began = 0.0
         self.discovery: discovery.Discovery | None = None
@@ -180,6 +184,24 @@ class App(Shell):
                                    flight_id=self._flight_for_dvl)
         return self.dvl
 
+    def dvl_address(self) -> str:
+        """The DVL's host, for the network trace's witness echo. Read off-thread.
+
+        The running capture's address wins -- it is the one the BlueOS
+        extension reported, or the one typed on the DVL tab -- then whatever
+        was typed there, then "" for the trace's own default.
+        """
+        cap = self.dvl.capture if self.dvl is not None else None
+        addr = getattr(cap, "address", None)
+        if addr is not None and getattr(addr, "host", ""):
+            return addr.host
+        try:
+            from ..dvl.webapi import Address
+            typed = Address.parse(self.settings.get("dvl_host", ""))
+        except Exception:
+            typed = None
+        return typed.host if typed is not None else ""
+
     def _flight_for_dvl(self) -> str:
         """The flight being recorded now, for each DVL row. Read off-thread."""
         rec = self.recorder
@@ -231,6 +253,38 @@ class App(Shell):
             self.lights_client().use_folder(lights_folder(self.flight_dir))
         except Exception:
             diagnostics.log_exception("starting the lights copy", *sys.exc_info())
+
+    # ------------------------------------------------------------------
+    #  the UGPS G2
+    # ------------------------------------------------------------------
+
+    def ugps_capture(self):
+        """The application's G2 reader, started on first use.
+
+        Polled whether or not a flight folder is chosen, so the Navigation
+        tab's receiver row works on the bench; written to disk only once a
+        folder is. The address is the settings file's `ugps_host`.
+        """
+        if self.ugps is None:
+            from ..ugps import DEFAULT_HOST, UgpsCapture
+            self.ugps = UgpsCapture(self.settings.get("ugps_host") or DEFAULT_HOST,
+                                    flight_id=self._flight_for_dvl)
+        self.ugps.ensure_running()
+        return self.ugps
+
+    def _arm_ugps(self) -> None:
+        """Log the G2's acoustic solution, receiver by receiver, into the folder."""
+        if not self.flight_dir:
+            return
+        try:
+            from ..ugps import ugps_folder
+            cap = self.ugps_capture()
+            cap.use_folder(ugps_folder(self.flight_dir))
+            self._log(f"UGPS: logging each receiver's signal and noise from the G2 "
+                      f"at {cap.host} into {ugps_folder(self.flight_dir)}.")
+        except Exception as ex:
+            diagnostics.log_exception("starting the UGPS capture", *sys.exc_info())
+            self._log(f"The UGPS capture could not start: {ex}")
 
     # ------------------------------------------------------------------
     #  tabs
@@ -510,6 +564,7 @@ class App(Shell):
             if self.recorder is None:
                 self.recorder = FlightRecorder(host=host, flight_dir=self.flight_dir)
             self.recorder.flight_dir = self.flight_dir
+            self.recorder.dvl_host = self.dvl_address
             if not self.recorder.watching:
                 self.recorder.retarget(host)
                 # Queued, not done here: opening the performance counters and
@@ -523,6 +578,7 @@ class App(Shell):
             self._log(f"Monitoring could not start: {ex}")
         self._arm_dvl()
         self._arm_lights()
+        self._arm_ugps()
 
     # ------------------------------------------------------------------
     #  the survey plan -- edited on Transects, read everywhere
@@ -618,6 +674,12 @@ class App(Shell):
             lights = self.lights
             threading.Thread(target=lambda: lights.shutdown(wait=3.0), daemon=True,
                              name="lights-close").start()
+        # The UGPS reader: one thread, five files, closed the same way.
+        if self.ugps is not None and not getattr(self, "_ugps_stopped", False):
+            self._ugps_stopped = True
+            ugps = self.ugps
+            threading.Thread(target=lambda: ugps.shutdown(wait=4.0), daemon=True,
+                             name="ugps-close").start()
 
         rec = self.recorder
         waiting = self._close_request

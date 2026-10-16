@@ -27,25 +27,31 @@ a filter, not by finding the right file.
 
 | File | Format | One row / line per | Size, roughly |
 |---|---|---|---|
-| `_tcp.jsonl` | the TCP stream, **verbatim** | every byte, in order | 15 KB/s |
-| `_tcp_index.csv` | CSV | line of the TCP stream | 3 KB/s |
-| `_velocity.csv` | CSV | velocity-and-transducer report | 7 KB/s |
+| `_tcp.jsonl` | the TCP stream, **verbatim** | every byte, in order | 3–7 KB/s |
+| `_tcp_index.csv` | CSV | line of the TCP stream | 1 KB/s |
+| `_velocity.csv` | CSV | velocity-and-transducer report | 2–5 KB/s |
 | `_deadreckoning.csv` | CSV | dead-reckoning report | 1 KB/s |
 | `_commands.csv` | CSV | read-only command sent | tiny |
-| `_ws.jsonl` | JSON lines | WebSocket message | 9 KB/s |
-| `_ws_velocity.csv` | CSV | WebSocket velocity message | 6 KB/s |
-| `_ws_motion.csv` | CSV | other WebSocket message | 4 KB/s |
-| `_http.jsonl` | JSON lines | web-API read | 1 KB/s |
+| `_ws.jsonl` | JSON lines | WebSocket message | 7–12 KB/s |
+| `_ws_velocity.csv` | CSV | WebSocket velocity message | 1.5–4 KB/s |
+| `_ws_motion.csv` | CSV | other WebSocket message | 3 KB/s |
+| `_http.jsonl` | JSON lines | web-API read | 1.5 KB/s |
 | `_status.csv` | CSV | status poll (every 2 s) | <1 KB/s |
-| `_echo.jsonl` | JSON lines | echo-profile snapshot | 90 KB/s at 5 /s |
-| `_spectrum.jsonl` | JSON lines | spectrum snapshot | 15 KB/s at 5 /s |
-| `_vehicle.jsonl` | JSON lines | extension / mavlink2rest read | 1 KB/s |
-| `_mavlink.csv` | CSV | MAVLink counter read | 1 KB/s |
+| `_echo.jsonl` | JSON lines | echo-profile snapshot | **32–37 KB each: 155–185 KB/s at 5 /s** |
+| `_spectrum.jsonl` | JSON lines | spectrum snapshot | 12–23 KB/s at 5 /s |
+| `_vehicle.jsonl` | JSON lines | extension / mavlink2rest read | <1 KB/s |
+| `_mavlink.csv` | CSV | MAVLink counter read | <1 KB/s |
 | `_events.txt` | text | event | tiny |
 | `.json` | JSON | the capture (its record) | tiny |
 
-About 150 MB an hour with snapshots at 5 /s, 40 MB without. Sizes are
-estimates from the simulator and Water Linked's demo, not yet from a dive.
+**600–670 MB an hour with snapshots at 5 /s**, measured over the two
+captures of the first dive (15 October 2026, captures
+`2026-10-15_092531` and `2026-10-15_103917`: 404 MB in 36 min and 252 MB in
+25 min) — up to 870 MB an hour while the DVL is answering throughout, since
+the snapshots stop when it does not. The echo profiles are about eight bytes
+in ten. Without snapshots, 70–125 MB an hour. The rates above are from the
+same captures, per second of the DVL answering; a faster report rate (the
+A50 runs at 2–15 Hz with altitude) moves the TCP and velocity files.
 
 ## Conventions, in every file
 
@@ -261,10 +267,24 @@ for line in open(stem + "_echo.jsonl"):
 | `json_port`, `json_format`, `json_clients` | the TCP JSON output: its port, format and **connected clients — this capture is one** |
 | `pd6_clients`, `pd4_clients`, `serial_format` | the other outputs |
 | `cfg_speed_of_sound` … `cfg_periodic_cycling_enabled` | the configuration |
-| `dvl_clock_utc` | the DVL's clock, as it wrote it (nanoseconds) |
-| `dvl_clock_minus_laptop_ms` | DVL clock minus the laptop's, at the request's midpoint |
-| `clock_uncertainty_ms` | half the request's round trip — the offset is known to within this |
-| `ntp_enabled`, `ntp_server`, `ntp_synchronized` | the DVL's NTP state |
+| `dvl_clock_utc` | the DVL's clock, as it wrote it |
+| `clock_read_utc` | when it was read: the laptop's clock at the request's midpoint |
+| `dvl_clock_minus_laptop_ms` | DVL clock minus the laptop's, at that moment |
+| `clock_uncertainty_ms` | the offset is known to within this: half the round trip, plus 1000 when the DVL gave whole seconds |
+| `clock_source` | `web API /api/v1/time` (read in this poll, nanoseconds) or `TCP get_time_status` (the last answer, whole seconds — see below) |
+| `ntp_enabled`, `ntp_server`, `ntp_synchronized`, `ntp_seconds_since_sync` | the DVL's NTP state |
+
+**The DVL's clock.** Software 2.7.2 answers `/api/v1/time` with a 404 (every
+poll's `errors` says so), so on it these columns come from the TCP
+`get_time_status` answer, asked every 30 s: `system_time` →
+`dvl_clock_utc`, `ntp_synced` → `ntp_synchronized`,
+`ntp_seconds_since_last_sync` → `ntp_seconds_since_sync`; and
+`get_time_ntp`'s `ntp_address` → `ntp_server`. Every row then repeats the
+latest answer, which `clock_read_utc` dates; `ntp_enabled` stays blank, as
+the TCP answers do not say. The web API's reading is used whenever there is
+one. On 15 October 2026 the A50's clock read 2024-05-27, about 871 days
+behind, with NTP not synchronized — so its `time_of_validity_us` and
+`time_of_transmission_us` are not UTC.
 | `ext_reachable`, `ext_status`, `ext_enabled`, `ext_should_send`, `ext_rangefinder`, `ext_orientation`, `ext_hostname` | the BlueOS DVL extension's `/get_status`, as last read |
 | `ext_age_s` | how old that read is |
 | `errors` | what failed this poll |
@@ -276,12 +296,19 @@ One row per read of one message's counter in mavlink2rest, every 2 s:
 `counter` (cumulative count mavlink2rest has seen), `frequency_hz`
 (mavlink2rest's own estimate), `fresh` (the counter moved since the last
 read), `vehicle_last_update_unix` (the Pi's clock), `error` (`never sent by
-this vehicle` = mavlink2rest has never seen it).
+this vehicle` = mavlink2rest has never seen it: a 404, or, from the
+mavlink2rest in BlueOS 1.4.6, HTTP 200 with an empty body).
 
 Read: 255/0 `VISION_POSITION_DELTA`, `GLOBAL_VISION_POSITION_ESTIMATE`,
 `VISION_POSITION_ESTIMATE`, `VISION_SPEED_ESTIMATE`, `DISTANCE_SENSOR` (what
 the extension sends); 1/1 `RANGEFINDER`, `DISTANCE_SENSOR` (the autopilot's
 own). A message never seen is asked about every 30 s instead of every 2 s.
+A message read that nothing answers (a timeout) ends that round of reads,
+and the DVL tab says mavlink2rest is not answering only if nothing else in
+the round answered; a message the service answered badly is that message's
+`error`, and the rest are still read. (Until the fix of 15 October 2026 an empty body
+was taken for a vehicle not answering, and on the 15 October dive nothing
+after `GLOBAL_VISION_POSITION_ESTIMATE` in the list was ever read.)
 The difference between two rows' counters is exactly how many arrived
 between them; whether mavlink2rest sees messages the extension *sends*, as
 opposed to ones it relays, is one of the bench checks.
@@ -296,7 +323,8 @@ Plain text, one event per line, UTC:
 
 Connections and disconnections (with reasons, bytes and lines), the DVL's
 identity, address and port changes, configuration changes, warnings, NTP
-changes, extension status changes, client-count changes, **every gap with
+changes, the DVL's clock at its first reading (how far off, and whether NTP is
+synchronized), extension status changes, client-count changes, **every gap with
 its classification**, the start and end of every invalid stretch, flights
 beginning and ending, snapshot-rate changes, disk state, problems and
 diagnostic logs.
@@ -318,18 +346,53 @@ a capture whose record still says `recording` ended without closing.
 | `dvl_address`, `dvl_address_source`, `tcp_port` | |
 | `extension` | its port, how it was found, its last status and message type |
 | `about` | the DVL's identity and software version |
-| `config_at_start`, `config_at_end`, `time_at_start` | |
+| `config_at_start`, `config_at_end` | |
+| `time_at_start` | the first reading of the DVL's clock: `source` (as `clock_source`), `answer` (the DVL's, whole), `dvl_clock_utc`, `clock_read_utc`, `dvl_clock_minus_laptop_ms`, `clock_uncertainty_ms` |
 | `snapshot_rates` | every rate set, with when |
 | `disk_free_bytes` | at the last check |
 | `files` | per file: name, what it holds, records, bytes written, write failures, rows dropped for a full disk |
 | `lines_by_kind`, `tcp_bytes` | |
 | `tcp_connections`, `ws_connections` | each: opened, closed, bytes or messages, why it closed |
 | `commands` | each command's last outcome |
-| `cadence` | report count, invalid count, spans and time, gaps by kind, their total time, the longest, the estimate of reports made and not received, and the thresholds used |
+| `cadence` | report count, invalid count, spans and time, gaps by kind, their total time, the longest, the estimate of reports made and not received, the acoustics-off periods, and the thresholds used — below |
 | `flights_seen` | flight ids, and when each was first seen |
 | `diagnostic_logs` | each collected: file, SHA-256, bytes, request, timing |
 | `problem`, `notes`, `stuck_threads` | |
 | `read_only_commands` | the commands this capture was able to send |
+
+### `cadence`
+
+| Key | Meaning |
+|---|---|
+| `reports` | velocity reports |
+| `invalid_reports`, `invalid_spans` | reports with `velocity_valid` false, and the stretches of them |
+| `invalid_ms`, `longest_invalid_ms` | their total and longest duration, **an open stretch included** |
+| `invalid_open_ms` | the stretch still open when the record was written, to its latest report; 0 if none |
+| `gaps`, `gap_ms` | count and total time by kind: `dvl_quiet`, `missing_reports`, `delivery_stall`, `clock_step`, `acoustics_off` |
+| `longest_gap_ms` | the longest gap that was a fault — `acoustics_off` is not one |
+| `missing_reports_estimate` | reports made and never received, summed over `missing_reports` gaps |
+| `acoustics_off_periods` | each period a configuration read found `acoustic_enabled` false: `off_utc`, `on_utc` (null while it lasts) — when the reads saw it, so to within a status poll |
+| `thresholds` | what the gaps were judged against |
+
+An invalid stretch runs from its first invalid report to the first valid
+one, on the DVL's clock — unless that disagrees with this laptop's by more
+than a stall's slack, when it is this laptop's measure, which cannot start
+before the capture did. One that the acoustics being switched off interrupts
+ends at its last invalid report. (Until the fix of 15 October 2026 a stretch could be
+backdated by a stale time of validity — capture `2026-10-15_092531` says
+`longest_invalid_ms` 3,574,309 in a 2,176 s capture — and an open stretch
+was left out of the totals: capture `2026-10-15_103917` says 2,587 invalid
+reports in 760 ms.)
+
+**`acoustics_off`.** With the acoustics off the DVL makes no velocity
+reports. A gap is `acoustics_off` instead of any other kind when an
+acoustics-off period overlaps the time this laptop waited for its report.
+Software 2.7.2's first report after the acoustics come back has a stale
+`time_of_validity_us` (one interval after the last ping before they went
+off, while its `time_ms` is the whole silence), so the interval to the next
+report is not judged on the DVL's clock. Capture `2026-10-15_092531`, from
+before this was handled, shows the 76 s off at 16:52:25 UTC as a
+`delivery_stall` and then ~291 `missing_reports`.
 
 ## Diagnostic logs
 

@@ -68,9 +68,11 @@ DURATION_CHOICES = {"15 s": 15, "30 s": 30, "1 min": 60, "5 min": 300}
 
 #: The colours of the gap classes on the charts.
 GAP_COLORS = {"dvl_quiet": "#9FB4C7", "missing_reports": brand.CORAL,
-              "delivery_stall": "#FFC24D", "clock_step": brand.PURPLE_STAR}
+              "delivery_stall": "#FFC24D", "clock_step": brand.PURPLE_STAR,
+              "acoustics_off": brand.STONE}
 GAP_WORDS = {"dvl_quiet": "DVL quiet", "missing_reports": "missing reports",
-             "delivery_stall": "delivery stalls", "clock_step": "clock steps"}
+             "delivery_stall": "delivery stalls", "clock_step": "clock steps",
+             "acoustics_off": "acoustics off"}
 
 #: Sizes on the canvases, in unscaled units; multiplied by the display scale.
 STRIP_H = 64
@@ -391,7 +393,8 @@ class DvlPage(ctk.CTkFrame):
                  "milliseconds since its previous report, so each can be put on "
                  "one side of the link: the DVL made nothing (quiet), the DVL "
                  "made reports that never arrived (missing), or they arrived "
-                 "late (stall).")
+                 "late (stall). A silence while the acoustics were switched off "
+                 "is none of these, and is counted apart.")
         c.grid(row=row, column=0, sticky="ew", pady=(0, 12))
         c.body.grid_columnconfigure((1, 3), weight=1)
         names = [("cadence", "report interval"), ("last", "last report"),
@@ -873,7 +876,8 @@ class DvlPage(ctk.CTkFrame):
         h["gaps"].configure(text=("  ·  ".join(
             f"{GAP_WORDS[k]} {gaps.get(k, 0)}"
             + (f" ({gap_ms.get(k, 0) / 1000:.1f} s)" if gaps.get(k) else "")
-            for k in ("dvl_quiet", "missing_reports", "delivery_stall"))
+            for k in ("dvl_quiet", "missing_reports", "delivery_stall")
+            + (("acoustics_off",) if gaps.get("acoustics_off") else ()))
             + (f"\n~{cad.get('missing_reports_estimate', 0)} report(s) made and never "
                f"received" if cad.get("missing_reports_estimate") else ""))
             if cad else "—")

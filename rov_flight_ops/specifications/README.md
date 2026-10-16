@@ -24,6 +24,12 @@ in a form that can be checked against the code and the files it writes.
 | [../../lighting/code/TELEMETRY.md](../../lighting/code/TELEMETRY.md) | The light controller's telemetry format (`ccr.lights/1`), the second USB port, and the bench checklist |
 | [../../blueos_extensions/light_monitor/README.md](../../blueos_extensions/light_monitor/README.md) | The BlueOS Light Monitor extension: installing it, its recording, its MAVLink names, its API, and its assumptions |
 
+## The UGPS capture (`rov_flight_ops/ugps/`, the Navigation tab's receiver row)
+
+| Document | What it answers |
+|---|---|
+| [ugps_log_schema.md](ugps_log_schema.md) | What is read from the G2 topside and how often, every file and column the capture writes, how the receiver row judges the four receivers, and the extension's own logs on the Pi |
+
 ## Keeping these true
 
 A change to the capture's files or behaviour changes these documents in the

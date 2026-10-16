@@ -13,6 +13,10 @@ It can also misbehave on request, which is what it is for:
 ``drop(n)``        the next `n` reports are made but never sent
 ``stall(s)``       reports are made on time but held back, then sent together
 ``invalid(s)``     reports keep coming with velocity_valid false
+``acoustics_off(s)``  the acoustics are switched off for `s` seconds: the
+                   configuration says so and no velocity reports are made;
+                   the first one after carries a stale time of validity, as
+                   software 2.7.2 was seen to on 15 October 2026
 ``split_writes``   each line is sent in pieces, so lines straddle reads
 
 and it keeps a list of every request and command it was sent, so a test can
@@ -59,8 +63,15 @@ class SimulatedDvl:
                  rate_hz: float = 10.0, position_hz: float = 5.0,
                  ws_hz: float = 10.0, version: str = "2.7.2",
                  json_format: str = "json_v3.3", altitude: float = 1.0,
-                 periodic_cycling: bool = False, seed: int = 7) -> None:
+                 periodic_cycling: bool = False, seed: int = 7,
+                 web_time: bool = False, clock_offset_s: float = 0.0) -> None:
         self.rate_hz = rate_hz
+        #: Whether `/api/v1/time` is served. Software 2.7.2 answers it 404 --
+        #: its clock is read only over TCP, with `get_time_status`.
+        self.web_time = web_time
+        #: The DVL's clock minus the real time, in its clock answers. The A50
+        #: flown on 15 October 2026 was 871 days behind.
+        self.clock_offset_s = clock_offset_s
         self.position_hz = position_hz
         self.ws_hz = ws_hz
         self.version = version
@@ -91,6 +102,8 @@ class SimulatedDvl:
         self._pause_until = 0.0
         self._stall_until = 0.0
         self._invalid_until = 0.0
+        self._acoustics_off_until = 0.0
+        self._acoustics_were_off = False
         self._drop = 0
         self._held: list[bytes] = []
         self._last_made_us: int | None = None
@@ -155,6 +168,17 @@ class SimulatedDvl:
 
     def drop(self, n: int) -> None:
         self._drop = n
+
+    def acoustics_off(self, seconds: float) -> None:
+        self._acoustics_off_until = time.monotonic() + seconds
+
+    def current_config(self) -> dict:
+        return {**self.config, "acoustic_enabled": bool(
+            self.config["acoustic_enabled"]
+            and time.monotonic() >= self._acoustics_off_until)}
+
+    def clock_ns(self) -> int:
+        return time.time_ns() + int(self.clock_offset_s * 1e9)
 
     def disconnect_clients(self) -> None:
         with self._lock:
@@ -222,7 +246,7 @@ class SimulatedDvl:
     def _answer(self, name: str) -> bytes:
         modern = tuple(int(x) for x in self.version.split(".")[:3]) >= (2, 7, 2)
         if name == "get_config":
-            return self._response(name, True, "", dict(self.config))
+            return self._response(name, True, "", self.current_config())
         if name == "get_version_info" and modern:
             return self._response(name, True, "", {
                 "chipid": "0xsimulated", "hardware_revision": 4,
@@ -231,7 +255,8 @@ class SimulatedDvl:
                 "version": f"{self.version} (simulator)", "is_ready": True})
         if name == "get_time_status" and modern:
             return self._response(name, True, "", {
-                "system_time": rfc3339_ns()[:19] + "Z", "ntp_synced": False,
+                "system_time": rfc3339_ns(self.clock_ns())[:19] + "Z",
+                "ntp_synced": False,
                 "ntp_synced_to": "", "ntp_seconds_since_last_sync": None})
         if name == "get_time_ntp" and modern:
             return self._response(name, True, "", {"ntp_address": "auto"})
@@ -304,12 +329,23 @@ class SimulatedDvl:
             due += period
             if now < self._pause_until:
                 continue                       # the DVL makes nothing
-            tov = _now_us()
+            if now < self._acoustics_off_until:
+                self._acoustics_were_off = True
+                continue                       # nor with its acoustics off
+            sent_us = _now_us()
             time_ms = (period * 1000.0 if self._last_made_us is None
-                       else (tov - self._last_made_us) / 1000.0)
-            self._last_made_us = tov
+                       else (sent_us - self._last_made_us) / 1000.0)
+            tov = sent_us
+            if self._acoustics_were_off and self._last_made_us is not None:
+                # The first report after the acoustics come back: its own
+                # `time` is the whole silence, but its time of validity is
+                # one interval after the last ping before they went off.
+                tov = self._last_made_us + int(period * 1e6)
+            self._acoustics_were_off = False
+            self._last_made_us = sent_us
             valid = now >= self._invalid_until
             report = self.velocity_report(tov, round(time_ms, 3), valid)
+            report["time_of_transmission"] = sent_us + 2500
             self.reports_made += 1
             line = (json.dumps(report) + "\r\n").encode()
             if self._drop > 0:
@@ -415,10 +451,10 @@ class SimulatedDvl:
                      "format": "Disabled", "id": "serial", "name": "Serial protocol",
                      "port": "n/a", "speed": 0, "type": "Serial"}]
         if path == "/api/v1/config":
-            return dict(self.config)
-        if path == "/api/v1/time":
+            return self.current_config()
+        if path == "/api/v1/time" and self.web_time:
             return {"ntp_enabled": False, "ntp_server": "", "ntp_synchronized": False,
-                    "time": rfc3339_ns()}
+                    "time": rfc3339_ns(self.clock_ns())}
         if path == "/api/v1/ip":
             return {"address": "", "dhcp": True, "dns": "", "gateway": "", "prefix": 24}
         if path == "/api/v1/ip/current":
