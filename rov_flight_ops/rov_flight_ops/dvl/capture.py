@@ -159,8 +159,9 @@ STATUS_COLUMNS = (
     "serial_format",
     "cfg_speed_of_sound", "cfg_mounting_rotation_offset", "cfg_acoustic_enabled",
     "cfg_dark_mode_enabled", "cfg_range_mode", "cfg_periodic_cycling_enabled",
-    "dvl_clock_utc", "dvl_clock_minus_laptop_ms", "clock_uncertainty_ms",
-    "ntp_enabled", "ntp_server", "ntp_synchronized",
+    "dvl_clock_utc", "clock_read_utc", "dvl_clock_minus_laptop_ms",
+    "clock_uncertainty_ms", "clock_source",
+    "ntp_enabled", "ntp_server", "ntp_synchronized", "ntp_seconds_since_sync",
     "ext_reachable", "ext_status", "ext_enabled", "ext_should_send",
     "ext_rangefinder", "ext_orientation", "ext_hostname", "ext_age_s",
     "errors",
@@ -202,6 +203,17 @@ def unique_capture_id(folder: Path | None, when: float | None = None) -> str:
 
 def _utc(ns: int) -> str:
     return webapi.utc(ns / 1e9)
+
+
+def _offset_words(ms: float) -> str:
+    """A clock offset as a person would say it: "871.1 days behind", "+42 ms from"."""
+    s = abs(ms) / 1000.0
+    way = "behind" if ms < 0 else "ahead of"
+    if s >= 86400:
+        return f"{s / 86400:.1f} days {way}"
+    if s >= 60:
+        return f"{s / 60:.1f} min {way}"
+    return f"{ms:+.0f} ms from"
 
 
 def os_path(path) -> str:
@@ -436,6 +448,12 @@ class DvlCapture:
         self.config_first: dict = {}
         self.config_last: dict = {}
         self.time_first: dict = {}
+        #: The DVL's clock as the TCP `get_time_status` answer last gave it,
+        #: in status-row columns. Software 2.7.2 answers `/api/v1/time` with a
+        #: 404, so this is the only reading of its clock. Replaced whole.
+        self.clock_tcp: dict = {}
+        #: `get_time_ntp`'s answer: the NTP server the DVL is set to use.
+        self.ntp_tcp: dict = {}
         self.snapshot_rates: list[dict] = []
         self.diagnostic_logs: list[dict] = []
         self.flights_seen: list[dict] = []
@@ -1015,11 +1033,57 @@ class DvlCapture:
             self._command_row(sinks, {"asked": to or "", "conn": st.conn}, reply,
                               "unsolicited")
             name = to or ""
+            sent = None
         result = obj.get("result")
-        if name == "get_config" and obj.get("success") and isinstance(result, dict):
+        ok = bool(obj.get("success")) and isinstance(result, dict)
+        if name == "get_config" and ok:
             self._config_seen(result, "TCP get_config")
-        elif name == "get_version_info" and obj.get("success") and isinstance(result, dict):
+        elif name == "get_version_info" and ok:
             self.about = {**self.about, **result}
+        elif name == "get_time_status" and ok and sent is not None:
+            # Only an answer to our own question: the offset needs the time
+            # it was asked.
+            self._clock_seen(result, sent, reply)
+        elif name == "get_time_ntp" and ok:
+            self.ntp_tcp = dict(result)
+
+    def _clock_seen(self, result: dict, sent: dict, reply: dict) -> None:
+        """The DVL's clock, from a `get_time_status` answer.
+
+        Its `system_time` is whole seconds, so the offset is known to within
+        half the round trip plus the second it was cut to.
+        """
+        text = str(result.get("system_time") or "")
+        clock = {"clock_source": "TCP get_time_status",
+                 "ntp_synchronized": result.get("ntp_synced"),
+                 "ntp_seconds_since_sync": result.get("ntp_seconds_since_last_sync")}
+        ns = webapi.parse_iso_ns(text)
+        if ns is not None:
+            t0, t1 = sent["sent_ns"], reply["rx_ns"]
+            mid = (t0 + t1) / 2
+            whole = "." not in text.partition("T")[2]
+            clock.update({
+                "dvl_clock_utc": text, "clock_read_utc": _utc(mid),
+                "dvl_clock_minus_laptop_ms": (ns - mid) / 1e6,
+                "clock_uncertainty_ms": (t1 - t0) / 2e6 + (1000.0 if whole else 0.0)})
+        self.clock_tcp = clock
+        self._first_clock(result, clock)
+
+    def _first_clock(self, answer: dict, clock: dict) -> None:
+        """The record's `time_at_start`, and a line saying how far off it is."""
+        if self.time_first or not clock.get("dvl_clock_utc"):
+            return
+        self.time_first = {"source": clock.get("clock_source"), "answer": dict(answer),
+                           **{k: clock.get(k) for k in (
+                               "dvl_clock_utc", "clock_read_utc",
+                               "dvl_clock_minus_laptop_ms", "clock_uncertainty_ms")}}
+        off = clock.get("dvl_clock_minus_laptop_ms")
+        unc = clock.get("clock_uncertainty_ms") or 0.0
+        if isinstance(off, (int, float)):
+            self.event("DVL clock",
+                       f"{clock['dvl_clock_utc']} — {_offset_words(off)} this laptop "
+                       f"(±{unc:.0f} ms, {clock.get('clock_source')}); NTP "
+                       f"{'synchronized' if clock.get('ntp_synchronized') else 'not synchronized'}")
 
     # ------------------------------------------------------------------
     #  the web GUI's stream
@@ -1213,6 +1277,16 @@ class DvlCapture:
                     values["reachable"] = False
                     values["errors"].append("DVL address unknown")
 
+                # Software 2.7.2 does not serve /api/v1/time. Its clock is
+                # then the last TCP get_time_status answer, which
+                # clock_read_utc dates, and its NTP server get_time_ntp's.
+                if not values.get("dvl_clock_utc"):
+                    for k, v in self.clock_tcp.items():
+                        if values.get(k) is None:
+                            values[k] = v
+                if values.get("ntp_server") is None:
+                    values["ntp_server"] = self.ntp_tcp.get("ntp_address")
+
                 ext = self._ext_values
                 if ext:
                     values.update(ext)
@@ -1290,12 +1364,14 @@ class DvlCapture:
             values["ntp_synchronized"] = data.get("ntp_synchronized")
             ns = webapi.parse_iso_ns(str(data.get("time") or ""))
             if ns is not None:
-                values["dvl_clock_utc"] = data.get("time")
-                mid_ms = (reply.t0_unix + reply.t1_unix) / 2 * 1000.0
-                values["dvl_clock_minus_laptop_ms"] = ns / 1e6 - mid_ms
-                values["clock_uncertainty_ms"] = reply.elapsed_ms / 2
-            if not self.time_first:
-                self.time_first = dict(data)
+                mid = (reply.t0_unix + reply.t1_unix) / 2
+                values.update({
+                    "dvl_clock_utc": data.get("time"),
+                    "clock_read_utc": webapi.utc(mid),
+                    "dvl_clock_minus_laptop_ms": ns / 1e6 - mid * 1000.0,
+                    "clock_uncertainty_ms": reply.elapsed_ms / 2,
+                    "clock_source": "web API /api/v1/time"})
+                self._first_clock(data, values)
         elif path == "/api/v1/about" and isinstance(data, dict):
             if not self.about:
                 self.event("DVL", " · ".join(str(data.get(k)) for k in
@@ -1305,6 +1381,10 @@ class DvlCapture:
                                      if k not in data}}
 
     def _config_seen(self, cfg: dict, via: str) -> None:
+        # With the acoustics off the DVL makes no velocity reports, and the
+        # gap that leaves is not a fault: the cadence has to know.
+        self.cadence.acoustics(cfg.get("acoustic_enabled"),
+                               mono_ns=time.monotonic_ns(), unix=time.time())
         if not self.config_first:
             self.config_first = dict(cfg)
         if self.config_last:
@@ -1397,7 +1477,7 @@ class DvlCapture:
     # ------------------------------------------------------------------
 
     def _vehicle_loop(self) -> None:
-        from ..nav.mav2rest import Mavlink2Rest
+        from ..nav.mav2rest import NEVER_SENT, Mavlink2Rest
         sinks = {"raw": _Sink(self, "vehicle_raw"),
                  "mavlink": _Sink(self, "mavlink", header=MAVLINK_COLUMNS)}
         ext_session: webapi.Session | None = None
@@ -1436,10 +1516,12 @@ class DvlCapture:
                     self._extension_seen(values)
 
                 vehicle_down = False
+                cut_short = False
+                answered = False
                 fid = self.flight_id()
                 for (sysid, comp), names in (((255, 0), EXTENSION_MESSAGES),
                                              ((1, 1), AUTOPILOT_MESSAGES)):
-                    if vehicle_down:
+                    if cut_short:
                         break
                     reader = readers[(sysid, comp)]
                     for name in names:
@@ -1450,7 +1532,7 @@ class DvlCapture:
                         if misses >= 3 and time.monotonic() < next_at:
                             continue
                         s = reader.read(name)
-                        if s.error == "never sent by this vehicle":
+                        if s.error == NEVER_SENT:
                             absent[key] = (misses + 1, time.monotonic() + 30.0)
                         else:
                             absent.pop(key, None)
@@ -1479,10 +1561,18 @@ class DvlCapture:
                             "counter": s.counter, "frequency": s.frequency,
                             "rate": rate, "error": s.error}})
                         # A vehicle that is not answering at all would cost a
-                        # timeout per message; one is enough to know.
-                        if (s.error and s.error != "never sent by this vehicle"
-                                and s.counter is None):
-                            vehicle_down = s.error
+                        # timeout per message; one is enough to end the
+                        # cycle. Only a read that nothing answered counts --
+                        # a message the service answered badly is that
+                        # message's problem, and the rest are still read --
+                        # and it is "down" only if nothing else answered in
+                        # this cycle either.
+                        if s.http_status is not None:
+                            answered = True
+                        elif s.error:
+                            cut_short = True
+                            if not answered:
+                                vehicle_down = s.error
                             break
                 self.live.merge("mavlink", {"_down": vehicle_down or ""})
                 for sink in sinks.values():
