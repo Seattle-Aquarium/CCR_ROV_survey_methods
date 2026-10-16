@@ -1,0 +1,7 @@
+Montserrat, by Julieta Ulanovsky et al.
+Licensed under the SIL Open Font License, Version 1.1.
+https://openfontlicense.org/  |  https://fonts.google.com/specimen/Montserrat
+
+Bundled so the packaged application renders in the Seattle Aquarium brand
+typeface on machines where Montserrat is not installed. The OFL permits this
+redistribution; the fonts are not modified.

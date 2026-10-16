@@ -15,6 +15,7 @@ and used wherever navigation needs it.
     |                                   |  survey plan:        |
     +-----------------------------------+  tools, features,    |
     |  guidance / site / origin strip    |  inspector          |
+    |  lights: 1 4 2 3 · vehicle supply  |                     |
     |  UGPS receivers: Rx 0-3 SNR        |                     |
     +-----------------------------------+----------------------+
 
@@ -25,11 +26,13 @@ any of them puts it back, and the settings file remembers where each was
 left. The strip
 beneath it carries what must never need looking for: which line is being
 followed and how far off it the vehicle is, the site, and whether the origin
-is confirmed. Under that, one row for the UGPS antenna's four receivers --
-each one's signal-to-noise, noise floor and the last minute of it -- read
-straight from the G2 topside, with a line saying whether any receiver
-stands out from the others. Details expand into a drawer over the page;
-the map stays visible behind them.
+is confirmed. Under that, one row for the four lights -- each one's level and
+expected draw, and the vehicle's supply -- from the Light Monitor extension
+(the Lights tab has the rest). Under that, one row for the UGPS antenna's
+four receivers -- each one's signal-to-noise, noise floor and the last minute
+of it -- read straight from the G2 topside, with a line saying whether any
+receiver stands out from the others. Details expand into a drawer over the
+page; the map stays visible behind them.
 
 **It works with no vehicle.** The map opens on Pier 59 from a basemap that
 ships with the program, and a plan can be drawn, measured, saved and reopened
@@ -267,9 +270,14 @@ class NavigationPage(ctk.CTkFrame):
 
         self._build_strip(col, row=3)
 
+        from .lightspage import LightsStrip
+        self.lights_strip = LightsStrip(col, self.app)
+        self.lights_strip.grid(row=4, column=0, sticky="ew", pady=(6, 0))
+        self._lights_ticks = 0
+
         from .ugpsstrip import ReceiversStrip
         self.ugps_strip = ReceiversStrip(col, self.app)
-        self.ugps_strip.grid(row=4, column=0, sticky="ew", pady=(6, 0))
+        self.ugps_strip.grid(row=5, column=0, sticky="ew", pady=(6, 0))
         self._ugps_ticks = 0
 
     def _build_strip(self, parent, row: int) -> None:
@@ -897,6 +905,11 @@ class NavigationPage(ctk.CTkFrame):
 
     def _tick(self) -> None:
         try:
+            self._render_lights()
+        except Exception:
+            diagnostics.log_exception("navigation lights row", *sys.exc_info(),
+                                      level=logging.WARNING)
+        try:
             self._render_ugps()
         except Exception:
             diagnostics.log_exception("navigation UGPS row", *sys.exc_info(),
@@ -912,6 +925,18 @@ class NavigationPage(ctk.CTkFrame):
             except Exception:
                 pass
         self.after(REFRESH_MS, self._tick)
+
+    def _render_lights(self) -> None:
+        """The lights row, twice a second, and only while it is on screen --
+        so the Light Monitor is not polled for a tab nobody is looking at."""
+        self._lights_ticks += 1
+        if self._lights_ticks % 2 or not self.lights_strip.winfo_ismapped():
+            return
+        get = getattr(self.app, "lights_client", None)
+        if get is None:
+            return
+        state, status = get().snapshot()
+        self.lights_strip.update_from(state, status)
 
     def _render_ugps(self) -> None:
         """The UGPS receivers row, twice a second, while it is on screen. The

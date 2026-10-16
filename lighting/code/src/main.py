@@ -1,14 +1,26 @@
 """
 Main application for the Lutris Lighting System.
-Controls 4 SeaLite LED lights via PWM input from BlueROV servo output.
-Monitors power via INA238.
+Controls 4 SeaLite LED lights via PWM input from BlueROV servo output,
+and reports what the lights say about themselves.
+
+Telemetry (ccr.lights/1, see ../TELEMETRY.md) goes out on a second USB serial
+port when one could be set up (datalink.py), otherwise on the console with an
+"@L " prefix. The BlueOS Light Monitor extension reads it, records it, and
+forwards a summary into MAVLink -- so it lands in the tlog on BlueOS 1.4 and
+the mcap on 1.5.
+
+Steering is unchanged from the PWM-only firmware: the pilot's servo output is
+measured, filtered and turned into a LOUT command. What is new is that on the
+control loop's quiet turns the controller asks one light one question (see
+poller.py), and reads a power monitor if there is one.
 """
 
-import time
-from machine import Pin, I2C
-
+import gc
 import sys
+import time
 import os
+
+from machine import Pin, I2C
 
 # Add lib to path - works for both mpremote mount (/remote) and deployed (/)
 if '/remote' in os.getcwd():
@@ -16,9 +28,15 @@ if '/remote' in os.getcwd():
 else:
     sys.path.insert(0, '/lib')
 
+import board
+import telemetry
+from lightbus import LightBus
+from poller import Poller
 from uart_wrapper import UARTWrapper
-from ina238 import INA238
+from ina2xx import find as find_power_monitors
 from pydspl_seasense.sealite import Sealite
+
+FIRMWARE = "lutris-lights 2.0.0-telemetry"
 
 
 class PWMReader:
@@ -36,6 +54,7 @@ class PWMReader:
         self._rise_us = 0
         self._pulse_width_us = 0
         self._last_edge_us = 0
+        self.rejected = 0
 
         self._pin = Pin(pin_num, Pin.IN, Pin.PULL_DOWN)
         self._pin.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING,
@@ -54,6 +73,8 @@ class PWMReader:
                 # Reject EMI glitches outside the valid PWM range.
                 if self._valid_min_us <= width <= self._valid_max_us:
                     self._pulse_width_us = width
+                else:
+                    self.rejected += 1
 
     @property
     def pulse_width_us(self):
@@ -76,17 +97,13 @@ class LightingController:
     """
     Main controller for the Lutris lighting system.
 
-    Manages 4 SeaLite LED lights on a shared UART0 bus,
-    addressed individually (1-4) via the SeaSense protocol.
-    Light brightness is controlled by a PWM input from the BlueROV.
+    Manages 4 SeaLite LED lights on a shared RS-485 bus, addressed
+    individually (1-4) via the SeaSense protocol. Light brightness is
+    controlled by a PWM input from the BlueROV.
+
+    Pins come from board.py: the Pico (original wiring, Keenan's PCB) and the
+    QT Py RP2040 now on Lutris are both recognised at start-up.
     """
-
-    # Hardware UART pin assignments
-    UART_TX_PIN = 0   # GP0
-    UART_RX_PIN = 1   # GP1
-
-    # PWM input from BlueROV servo output
-    PWM_INPUT_PIN = 16  # GP16
 
     # ArduSub servo PWM range (microseconds)
     PWM_MIN_US = 1100
@@ -110,18 +127,41 @@ class LightingController:
     # Control loop interval
     LOOP_INTERVAL_MS = 50
 
-    # Status print interval
+    # Pause after each LOUT command so a light's ACK does not collide with
+    # the next command on the half-duplex bus (CCR_ROV_survey_methods#43:
+    # 100 ms was clean, 50 ms was clean, 10 ms corrupted).
+    INTER_LIGHT_MS = 50
+
+    # Status print interval (the human-readable console line)
     STATUS_INTERVAL_MS = 2000
 
-    # I2C for INA238
-    I2C_ID = 1
-    I2C_SDA_PIN = 14  # GP14
-    I2C_SCL_PIN = 15  # GP15
+    # Telemetry intervals
+    CTL_INTERVAL_MS = 500        # PWM and commanded level
+    POWER_INTERVAL_MS = 250      # power monitor(s), when fitted
+    HELLO_INTERVAL_MS = 60000    # who and what this is, for late readers
+    STATS_INTERVAL_MS = 10000    # the controller's own health
 
-    # INA238 configuration
-    INA238_ADDRESS = 0x40
-    SHUNT_RESISTANCE = 0.1  # Ohms
-    MAX_CURRENT = 10.0      # Amps
+    # Ask the lights how they are on quiet turns of the loop. Off = PWM-only
+    # behaviour, exactly as before telemetry.
+    POLL_LIGHTS = True
+
+    # Re-send a light's level when it reports something other than what it
+    # was last told. Keenan Johnson's suggestion (CCR_development#34, 22 May
+    # 2026) for lights that miss a command or restart at a stale level.
+    # **Off** until the team decides it wants the controller correcting the
+    # lights on its own: telemetry should first show how often it happens.
+    RESYNC_LEVELS = False
+    RESYNC_AFTER_MISMATCHES = 3
+
+    # Power monitor (INA226 / INA238). None = shunt unknown: report voltage
+    # only. Set to the fitted shunt's resistance to get current and power.
+    INA_SHUNT_OHMS = None
+    INA_MAX_CURRENT = 20.0
+    # Latch a bus under-voltage between reads. Chosen from the first reading:
+    # a monitor reading > 18 V is on the 24 V light rail, otherwise on the
+    # vehicle's ~13 V side.
+    INA_UV_24V_SIDE = 20.0
+    INA_UV_13V_SIDE = 10.0
 
     # Serial configuration
     BAUDRATE = 9600
@@ -131,27 +171,93 @@ class LightingController:
 
     def __init__(self):
         """Initialize the lighting controller."""
+        self.board = board.detect()
         self._uart = None
         self._lights = []
-        self._power_monitor = None
+        self._monitors = []
+        self._monitor_notes = []
         self._pwm_reader = None
         self._current_level = 0
+        self._mismatch = {}
 
+        self._init_telemetry()
         self._init_uart()
         self._init_lights()
         self._init_power_monitor()
         self._init_pwm_reader()
+        self._bus = LightBus(self._uart._uart)
+        self._poller = Poller(self._bus, self.LIGHT_ADDRESSES, self._on_poll)
+        self._poller.enabled = self.POLL_LIGHTS
+        self.hello()
+
+    # ------------------------------------------------------------------
+    #  telemetry
+    # ------------------------------------------------------------------
+
+    def _init_telemetry(self):
+        port, why = None, ""
+        try:
+            import datalink
+            port, why = datalink.port, datalink.error
+        except ImportError:
+            why = "datalink.py missing"
+        self.tel = telemetry.Sink(port=port)
+        self._datalink_note = why
+        print("Telemetry:", "second USB port" if port is not None
+              else "console (@L lines); " + why)
+
+    def emit(self, kind, **fields):
+        return self.tel.emit(kind, **fields)
+
+    def hello(self):
+        try:
+            import machine
+            reset = machine.reset_cause()
+        except Exception:
+            reset = None
+        self.emit("hello", proto=telemetry.PROTOCOL, fw=FIRMWARE,
+                  board=self.board["name"], machine=board.machine_name(),
+                  mpy=".".join(str(x) for x in sys.implementation.version[:3]),
+                  reset=reset, port=self.tel.mode, datalink=self._datalink_note,
+                  lights=self.LIGHT_ADDRESSES,
+                  power=[m.describe() for _l, m in self._monitors],
+                  power_notes=self._monitor_notes,
+                  poll=self._poller.enabled if hasattr(self, "_poller") else self.POLL_LIGHTS,
+                  resync=self.RESYNC_LEVELS, deadband=self.LEVEL_DEADBAND)
+
+    def _on_poll(self, kind, **fields):
+        """A light's answer: pass it on, and check it against what it was told."""
+        self.emit(kind, **fields)
+        if fields.get("c") != "lout" or not fields.get("ok"):
+            return
+        addr = fields.get("id")
+        try:
+            said = int(str(fields.get("raw", "")).strip().split()[0])
+        except (ValueError, IndexError):
+            return
+        if said == self._current_level:
+            self._mismatch[addr] = 0
+            return
+        n = self._mismatch.get(addr, 0) + 1
+        self._mismatch[addr] = n
+        if self.RESYNC_LEVELS and n >= self.RESYNC_AFTER_MISMATCHES:
+            idx = self.LIGHT_ADDRESSES.index(addr)
+            self.set_light_level(idx, self._current_level, why="resync")
+            self._mismatch[addr] = 0
+
+    # ------------------------------------------------------------------
+    #  hardware
+    # ------------------------------------------------------------------
 
     def _init_uart(self):
-        """Initialize shared UART0 connection."""
-        self._uart = UARTWrapper(
-            uart_id=0,
-            baudrate=self.BAUDRATE,
-            tx=Pin(self.UART_TX_PIN),
-            rx=Pin(self.UART_RX_PIN),
-            timeout=2000
-        )
-        print(f"UART0 initialized: TX=GP{self.UART_TX_PIN}, RX=GP{self.UART_RX_PIN}")
+        """Initialize the shared RS-485 UART."""
+        b = self.board
+        kw = {}
+        if b["uart_tx"] is not None and b["uart_rx"] is not None:
+            kw = {"tx": Pin(b["uart_tx"]), "rx": Pin(b["uart_rx"])}
+        self._uart = UARTWrapper(uart_id=b["uart_id"], baudrate=self.BAUDRATE,
+                                 timeout=2000, **kw)
+        print(f"UART{b['uart_id']} initialized ({b['name']} pins)")
 
     def _init_lights(self):
         """Initialize SeaLite objects for each light."""
@@ -161,39 +267,39 @@ class LightingController:
         print(f"Initialized {len(self._lights)} SeaLite lights (addresses {self.LIGHT_ADDRESSES})")
 
     def _init_power_monitor(self):
-        """Initialize I2C and INA238 power monitor."""
-        i2c = I2C(
-            self.I2C_ID,
-            sda=Pin(self.I2C_SDA_PIN),
-            scl=Pin(self.I2C_SCL_PIN),
-            freq=400000
-        )
-
-        devices = i2c.scan()
-        print(f"I2C devices found: {[hex(d) for d in devices]}")
-
+        """Find any INA226/INA238 on I2C. None fitted is normal (Lutris, Oct 2026)."""
+        b = self.board
         try:
-            self._power_monitor = INA238(
-                i2c,
-                address=self.INA238_ADDRESS,
-                shunt_ohms=self.SHUNT_RESISTANCE,
-                max_current=self.MAX_CURRENT
-            )
-            print("INA238 power monitor initialized")
-        except RuntimeError as e:
-            print(f"Warning: INA238 not found: {e}")
-            self._power_monitor = None
+            i2c = I2C(b["i2c_id"], sda=Pin(b["i2c_sda"]), scl=Pin(b["i2c_scl"]),
+                      freq=400000)
+            self._monitors, self._monitor_notes = find_power_monitors(
+                i2c, shunt_ohms=self.INA_SHUNT_OHMS, max_current=self.INA_MAX_CURRENT)
+        except Exception as e:
+            self._monitors, self._monitor_notes = [], ["I2C: " + repr(e)]
+        for label, mon in self._monitors:
+            try:
+                v = mon.read()["v"]
+                mon.uv_volts = self.INA_UV_24V_SIDE if v > 18.0 else self.INA_UV_13V_SIDE
+                mon.configure()
+            except Exception as e:
+                self._monitor_notes.append(f"{label}: first read failed: {repr(e)}")
+        print("Power monitors:", [(l, m.chip, hex(m.addr)) for l, m in self._monitors]
+              or "none", self._monitor_notes)
 
     def _init_pwm_reader(self):
         """Initialize PWM input reader."""
         self._pwm_reader = PWMReader(
-            self.PWM_INPUT_PIN,
+            self.board["pwm_pin"],
             valid_min_us=self.PWM_VALID_MIN_US,
             valid_max_us=self.PWM_VALID_MAX_US,
         )
-        print(f"PWM input initialized: GP{self.PWM_INPUT_PIN}")
+        print(f"PWM input initialized: GPIO{self.board['pwm_pin']}")
         print(f"  PWM range: {self.PWM_MIN_US}-{self.PWM_MAX_US} us -> 0-100% brightness")
         print(f"  Accept range: {self.PWM_VALID_MIN_US}-{self.PWM_VALID_MAX_US} us, median window: {self.MEDIAN_WINDOW}")
+
+    # ------------------------------------------------------------------
+    #  commands
+    # ------------------------------------------------------------------
 
     def pwm_to_level(self, pulse_width_us):
         """Map PWM pulse width (us) to light level (0-100)."""
@@ -204,7 +310,7 @@ class LightingController:
         return int((pulse_width_us - self.PWM_MIN_US) * 100
                     / (self.PWM_MAX_US - self.PWM_MIN_US))
 
-    def set_light_level(self, light_index, level):
+    def set_light_level(self, light_index, level, why="manual"):
         """
         Set brightness level for a specific light.
 
@@ -220,17 +326,25 @@ class LightingController:
             return False
 
         try:
-            return self._lights[light_index].set_level(self._uart, level)
+            ok = self._lights[light_index].set_level(self._uart, level)
+            self.emit("set", id=self.LIGHT_ADDRESSES[light_index], lvl=level, why=why)
+            return ok
         except Exception as e:
             print(f"Error setting light {light_index}: {e}")
+            self.emit("log", lvl="error", msg=f"set light {light_index + 1}: {repr(e)}")
             return False
 
-    def set_all_lights(self, level):
+    def set_all_lights(self, level, why="manual"):
         """Set brightness level for all lights."""
         success = 0
         for i in range(len(self._lights)):
-            if self.set_light_level(i, level):
+            if self.set_light_level(i, level, why=why):
                 success += 1
+            # Let each light ACK before the next command (PR #43).
+            time.sleep_ms(self.INTER_LIGHT_MS)
+        # Ask each light what it now thinks, ahead of the rotation.
+        for addr in reversed(self.LIGHT_ADDRESSES):
+            self._poller.ask_now(addr, "lout")
         return success
 
     def get_light_level(self, light_index):
@@ -256,19 +370,18 @@ class LightingController:
             return None
 
     def read_power(self):
-        """Read power consumption from INA238."""
-        if self._power_monitor is None:
-            return None
-
-        try:
-            return self._power_monitor.read_all()
-        except Exception as e:
-            print(f"Error reading power: {e}")
-            return None
+        """Read every power monitor: {label: {v, shunt_mv, [a, w, t, uv]}}."""
+        out = {}
+        for label, mon in self._monitors:
+            try:
+                out[label] = mon.read()
+            except Exception as e:
+                out[label] = {"error": repr(e)}
+        return out or None
 
     def all_off(self):
         """Turn off all lights."""
-        return self.set_all_lights(0)
+        return self.set_all_lights(0, why="off")
 
     def status(self):
         """Get status of all lights and power consumption."""
@@ -277,8 +390,22 @@ class LightingController:
                 {'index': i, 'level': self._lights[i].level}
                 for i in range(len(self._lights))
             ],
-            'power': self.read_power()
+            'power': self.read_power(),
+            'telemetry': {'port': self.tel.mode, 'sent': self.tel.sent,
+                          'dropped': self.tel.dropped},
         }
+
+    # ------------------------------------------------------------------
+    #  the loop
+    # ------------------------------------------------------------------
+
+    def _emit_power(self):
+        for label, mon in self._monitors:
+            try:
+                r = mon.read()
+                self.emit("pwr", ch=label, chip=mon.chip, addr=mon.addr, **r)
+            except Exception as e:
+                self.emit("pwr", ch=label, chip=mon.chip, addr=mon.addr, err=repr(e))
 
     def run(self):
         """Main control loop. Reads PWM input and updates light brightness.
@@ -287,11 +414,16 @@ class LightingController:
         """
         print("PWM control loop running (Ctrl-C to stop)")
 
-        last_status_ms = time.ticks_ms()
+        now = time.ticks_ms()
+        last_status_ms = last_ctl_ms = last_power_ms = now
+        last_hello_ms = last_stats_ms = now
         pw_samples = []
+        pw_filtered = 0
+        loop_max_ms = 0
 
         try:
             while True:
+                t_loop = time.ticks_ms()
                 signal_age = self._pwm_reader.signal_age_ms
                 signal_lost = (signal_age < 0 or
                                signal_age > self.SIGNAL_TIMEOUT_MS)
@@ -308,12 +440,40 @@ class LightingController:
                     target_level = self.pwm_to_level(pw_filtered)
 
                 # Only update lights if level changed beyond deadband
-                if abs(target_level - self._current_level) >= self.LEVEL_DEADBAND:
-                    self.set_all_lights(target_level)
+                changed = abs(target_level - self._current_level) >= self.LEVEL_DEADBAND
+                if changed:
                     self._current_level = target_level
+                    self.set_all_lights(target_level, why="pwm")
 
-                # Periodic status output
                 now_ms = time.ticks_ms()
+                if changed or time.ticks_diff(now_ms, last_ctl_ms) >= self.CTL_INTERVAL_MS:
+                    self.emit("ctl", pwm=pw_filtered, age=signal_age,
+                              sig=0 if signal_lost else 1, cmd=self._current_level,
+                              tgt=target_level, rej=self._pwm_reader.rejected)
+                    last_ctl_ms = now_ms
+
+                if self._monitors and time.ticks_diff(now_ms, last_power_ms) >= self.POWER_INTERVAL_MS:
+                    self._emit_power()
+                    last_power_ms = now_ms
+
+                # A quiet turn: ask one light one question.
+                if not changed:
+                    self._poller.step()
+
+                if time.ticks_diff(now_ms, last_hello_ms) >= self.HELLO_INTERVAL_MS:
+                    self.hello()
+                    last_hello_ms = now_ms
+
+                if time.ticks_diff(now_ms, last_stats_ms) >= self.STATS_INTERVAL_MS:
+                    self.emit("stats", sent=self.tel.sent, drop=self.tel.dropped,
+                              unread=self.tel.unread, asked=self._bus.asked,
+                              answered=self._bus.answered, failed=self._bus.failed,
+                              loop_max=loop_max_ms, mem=gc.mem_free(),
+                              passes=self._poller.passes)
+                    loop_max_ms = 0
+                    last_stats_ms = now_ms
+
+                # Periodic status output (human-readable, on the console)
                 if time.ticks_diff(now_ms, last_status_ms) >= self.STATUS_INTERVAL_MS:
                     if signal_lost:
                         print(f"PWM: NO SIGNAL | Level: {self._current_level}%")
@@ -321,13 +481,17 @@ class LightingController:
                         print(f"PWM: {pw_filtered} us | Level: {self._current_level}%")
                     last_status_ms = now_ms
 
-                time.sleep_ms(self.LOOP_INTERVAL_MS)
+                spent = time.ticks_diff(time.ticks_ms(), t_loop)
+                loop_max_ms = max(loop_max_ms, spent)
+                if spent < self.LOOP_INTERVAL_MS:
+                    time.sleep_ms(self.LOOP_INTERVAL_MS - spent)
 
         except KeyboardInterrupt:
             print("\nStopping...")
         finally:
             self.all_off()
             self._pwm_reader.deinit()
+            self.emit("log", lvl="warn", msg="control loop stopped; lights turned off")
             print("Lights off. PWM reader disabled.")
 
 
