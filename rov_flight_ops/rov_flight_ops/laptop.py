@@ -1010,6 +1010,12 @@ class History:
         with self._lock:
             return dict(self._rows[-1]) if self._rows else {}
 
+    def rows(self) -> list[dict]:
+        """Every row held, oldest first. The list is a copy; the rows are
+        never changed once added, so they are shared rather than copied."""
+        with self._lock:
+            return list(self._rows)
+
     def clear(self) -> None:
         with self._lock:
             self._rows.clear()

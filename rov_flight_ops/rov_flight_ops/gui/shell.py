@@ -579,6 +579,11 @@ class Shell(ctk.CTk):
             text_color=T.TEXT, border_width=1, border_color=T.BORDER,
             bg_color=T.HEADER_BG, command=self.toggle_banner)
         self._fold_tip = "Hide the title banner"
+        #: Controls a program adds to the banner, left of Diagnostics, as
+        #: (top, under) pairs. Open, `under` sits beneath `top`, in the row the
+        #: lamps are in; folded, the two sit side by side in the one row. They
+        #: are there either way, which is the point of putting them here.
+        self.banner_extras: list[tuple] = list(self.build_banner_extras(self.controls))
         self._lay_out_controls()
 
         self._rule_photo = None
@@ -611,24 +616,46 @@ class Shell(ctk.CTk):
         fold button is in the same place either way, which is the one thing
         about this banner that has always been deliberate.
         """
+        extras = getattr(self, "banner_extras", [])
         for w in (self.versions_row, *self.lamps.values(), self.diag_btn,
-                  self.theme_switch, self.fold_btn):
+                  self.theme_switch, self.fold_btn,
+                  *(x for pair in extras for x in pair if x is not None)):
             w.grid_forget()
+        n = len(extras)
         if self.banner_open:
-            self.diag_btn.grid(row=0, column=0, padx=(0, 10), sticky="w")
-            self.theme_switch.grid(row=0, column=1, padx=(0, 10), sticky="w")
-            self.fold_btn.grid(row=0, column=2, rowspan=2)
-            self.lamps["vehicle"].grid(row=1, column=0, padx=(0, 10),
+            for i, (top, under) in enumerate(extras):
+                top.grid(row=0, column=i, padx=(0, 14), sticky="w")
+                if under is not None:
+                    under.grid(row=1, column=i, padx=(0, 14), pady=(6, 0),
+                               sticky="w")
+            self.diag_btn.grid(row=0, column=n, padx=(0, 10), sticky="w")
+            self.theme_switch.grid(row=0, column=n + 1, padx=(0, 10), sticky="w")
+            self.fold_btn.grid(row=0, column=n + 2, rowspan=2)
+            self.lamps["vehicle"].grid(row=1, column=n, padx=(0, 10),
                                        pady=(6, 0), sticky="w")
-            self.lamps["logging"].grid(row=1, column=1, padx=(0, 10),
+            self.lamps["logging"].grid(row=1, column=n + 1, padx=(0, 10),
                                        pady=(6, 0), sticky="w")
         else:
             self.versions_row.grid(row=0, column=0, padx=(0, 16), sticky="w")
             self.lamps["vehicle"].grid(row=0, column=1, padx=(0, 12))
             self.lamps["logging"].grid(row=0, column=2, padx=(0, 16))
-            self.diag_btn.grid(row=0, column=3, padx=(0, 10))
-            self.theme_switch.grid(row=0, column=4, padx=(0, 10))
-            self.fold_btn.grid(row=0, column=5)
+            col = 3
+            for top, under in extras:
+                top.grid(row=0, column=col, padx=(0, 8))
+                col += 1
+                if under is not None:
+                    under.grid(row=0, column=col, padx=(0, 14))
+                    col += 1
+            self.diag_btn.grid(row=0, column=col, padx=(0, 10))
+            self.theme_switch.grid(row=0, column=col + 1, padx=(0, 10))
+            self.fold_btn.grid(row=0, column=col + 2)
+
+    def build_banner_extras(self, parent) -> list[tuple]:
+        """A subclass's controls for the banner, as (top, under) pairs."""
+        return []
+
+    def banner_tick(self, connected: bool) -> None:
+        """Called once a second with the vehicle lamp's state."""
 
     def _font(self, font: tuple, scale: float):
         """A Tk font for a theme tuple at this display's scale, made once."""
@@ -709,6 +736,7 @@ class Shell(ctk.CTk):
                 {"on": Lamp.ON, "waiting": Lamp.WAITING}.get(
                     logging_state, Lamp.OFF))
             self._maybe_read_versions(connected)
+            self.banner_tick(connected)
         except Exception:
             diagnostics.log_exception("banner status", *sys.exc_info(),
                                       level=logging.WARNING)
@@ -928,6 +956,7 @@ class Shell(ctk.CTk):
                                     else "Light mode")
         for lamp in self.lamps.values():
             lamp.refresh_theme()
+        self.banner_tick(self.vehicle_status()[0])
         for lab in self.version_labels.values():
             lab.configure(text_color=T.TEXT_MUTED)
         self._load_logo()

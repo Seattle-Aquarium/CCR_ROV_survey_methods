@@ -78,10 +78,44 @@ class App(Shell):
         self._close_request = None
         self._close_began = 0.0
         self._close_asked_at = 0.0
+        #: The ROV flight simulator. Off until its switch in the banner is
+        #: turned on, and only ever on with no vehicle connected.
+        from ..sim.controller import Simulator
+        self.simulator = Simulator(self)
+        self.sim_controls = None
         super().__init__()
 
     def save_settings(self) -> None:
         settings.save(self.settings)
+
+    # ------------------------------------------------------------------
+    #  the ROV flight simulator's switch, in the banner
+    # ------------------------------------------------------------------
+
+    def build_banner_extras(self, parent) -> list[tuple]:
+        from .simbanner import SimControls
+        self.sim_controls = SimControls(self, parent)
+        return self.sim_controls.pairs()
+
+    def banner_tick(self, connected: bool) -> None:
+        if self.sim_controls is not None:
+            self.sim_controls.tick(connected)
+
+    @property
+    def simulating(self) -> bool:
+        sim = getattr(self, "simulator", None)
+        return bool(sim is not None and sim.active)
+
+    def _tab_shown(self, name: str) -> None:
+        super()._tab_shown(name)
+        if self.sim_controls is not None and self.simulating:
+            self.sim_controls.tick(False)
+
+    def _maybe_read_versions(self, connected: bool) -> None:
+        # The simulated vehicle's versions are the simulator's; the real one
+        # is not asked while it runs.
+        if not self.simulating:
+            super()._maybe_read_versions(connected)
 
     # ------------------------------------------------------------------
     #  what the banner's lamps and versions read
@@ -160,7 +194,13 @@ class App(Shell):
     # ------------------------------------------------------------------
 
     def dvl_recorder(self):
-        """The application's DVL capture, made on first use."""
+        """The application's DVL capture, made on first use.
+
+        The simulated one while the simulator runs; the real one keeps running
+        underneath it, unseen, and is shown again when it stops.
+        """
+        if self.simulating and self.simulator.dvl is not None:
+            return self.simulator.dvl
         if self.dvl is None:
             from ..dvl.capture import DEFAULT_SNAPSHOT_HZ
             from ..dvl.recorder import DvlRecorder
@@ -229,6 +269,8 @@ class App(Shell):
         tab's receiver row works on the bench; written to disk only once a
         folder is. The address is the settings file's `ugps_host`.
         """
+        if self.simulating and self.simulator.ugps is not None:
+            return self.simulator.ugps
         if self.ugps is None:
             from ..ugps import DEFAULT_HOST, UgpsCapture
             self.ugps = UgpsCapture(self.settings.get("ugps_host") or DEFAULT_HOST,
@@ -352,7 +394,8 @@ class App(Shell):
                 text, color = f"{text}  ·  ⚠ a recorder worker is stuck", T.WARN
             # The DVL capture fails separately from the flight recorder, and
             # a failure in it must be seen from every tab just the same.
-            dvl_problem = self.dvl.problem if self.dvl is not None else ""
+            shown_dvl = self.dvl_recorder() if self.simulating else self.dvl
+            dvl_problem = shown_dvl.problem if shown_dvl is not None else ""
             if dvl_problem:
                 short = dvl_problem if len(dvl_problem) < 70 else dvl_problem[:67] + "…"
                 text, color = f"{text}  ·  ⚠ DVL: {short}", T.WARN
@@ -388,6 +431,11 @@ class App(Shell):
         say(self.found, "Nothing selected yet.")
 
     def _pick_folder(self) -> None:
+        if self.simulating:
+            messagebox.showinfo(APP_NAME, "The ROV flight simulator is running "
+                                          "in its own flight folder. Switch it "
+                                          "off in the banner to choose one.")
+            return
         d = filedialog.askdirectory(title="Select the flight folder")
         if d:
             self.use_flight(Path(d))
@@ -405,6 +453,8 @@ class App(Shell):
         operator is told so and asked first. Transects typed for the previous
         flight are not silently carried over when the new folder has none.
         """
+        if self.simulating:
+            self.simulator.disengage("a flight folder was chosen")
         new = Path(path)
         old = self.flight_dir
         rec = self.recorder
@@ -606,6 +656,13 @@ class App(Shell):
         the recorder closes on its own thread, the window shows how it is
         going, and it closes when the recorder is finished.
         """
+        # The simulator first: what is closed below is the real program.
+        if self.simulating:
+            try:
+                self.simulator.disengage("the program is closing")
+            except Exception:
+                diagnostics.log_exception("stopping the simulator", *sys.exc_info(),
+                                          level=logging.WARNING)
         # The Navigation collector, the tile fetcher and the navigation log
         # first, and unconditionally: they are cheap to stop, none of them can
         # block, and doing it here means they are stopped even on the paths

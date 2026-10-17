@@ -172,6 +172,44 @@ From a terminal: `python -m rov_flight_ops` (in the environment above).
   *Watching 192.168.2.2 for arming*, *● Recording … · rows · host*, or a warning
   in words if recording has failed — so a failure is not waiting to be noticed
   on the Monitoring tab while someone is downloading logs.
+* **The ROV flight simulator** is the switch left of *Diagnostics*, open or
+  folded. See [below](#the-rov-flight-simulator).
+
+### The ROV flight simulator
+
+Turns the whole program into a simulated flight, for learning it without a
+vehicle and for seeing what failures look like before they happen. It **only
+starts with no vehicle connected** — it asks the vehicle's address first — and
+**switches itself off if one answers** while it runs. Engaged, the switch is lit
+in purple; everything else, lamps included, looks as it would on a real flight.
+
+* **Monitoring**: a flight recording, ten minutes already charted, every Live
+  monitoring reading simulated from L342-D's own logs (readings L342-D cannot
+  publish are simulated too, and marked *◇ simulated*).
+* **Navigation**: the vehicle flying four lanes in the slip between Piers 59
+  and 60, read through the program's own collector, guidance following the
+  lane it is on, the UGPS receiver row live.
+* **DVL**: a simulated A50, calibrated from the 15 October 2026 dive, read
+  through the program's own capture as a live view.
+* **Transects** has the lanes flown as transects and draws their dive
+  profile; **BlueOS logs** lists a simulated Pi (downloads are described, not
+  made; deleting is refused because the simulated ROV is armed).
+* **Flight summary** and **Analyze transects** read recordings already on disk
+  and are not simulated; each says so.
+
+**Faults.** Every 45 s: 30 s with one thing wrong on each live tab — and one
+reading in every Monitoring group — then 15 s all green, then the next. The
+banner counts down; **Show what's wrong** names the fault for the tab (and
+group) on screen and writes what it is, how it shows and what to do about it
+to the log. Forty-six faults in all, from a thermally throttled laptop to a
+dead DVL beam to the Pi Ethernet outages of 15 October 2026:
+[specifications/simulator.md](specifications/simulator.md).
+
+**Nothing is written anywhere real.** While it runs, the flight folder is the
+simulator's own (`%LOCALAPPDATA%\CCR_ROV\rov_flight_ops\simulator\flights\…`,
+emptied each time it starts) and *Browse…* is refused; nothing reaches a
+vehicle. Switching it off puts back the flight folder, the recorder (which kept
+watching underneath), the transects, the survey plan and the banner's versions.
 
 ---
 
@@ -261,6 +299,20 @@ afterwards — the Network and Tether groups say so — and are not drawn live.
 
 The chart windows are 2, 10 and 30 minutes; the history kept for drawing now
 covers the full 30.
+
+**Each reading is coloured by how it compares with a healthy flight:**
+● green *normal*, ▲ amber *unusual*, ✖ red *bad*. The line takes the colour
+sample by sample, a stripe down the strip's left edge and the word under the
+current value say where it is now, and dashed lines mark the thresholds when
+the data comes near them. The thresholds are printed under each reading's
+name; point at the name for the reason. *Normal* was measured from the 27
+laptop-monitor logs of September–October 2026; *unusual* and *bad* come from
+the hardware's documented limits. Every band, how it is judged and how often
+real flights were normal: [specifications/monitoring_bands.md](specifications/monitoring_bands.md).
+
+The strips are drawn at the display's scale, with a value axis on each and one
+time axis along the foot. (They used to be drawn unscaled, which on a 250 %
+screen made them two-fifths of their size and the axis text unreadable.)
 
 ---
 

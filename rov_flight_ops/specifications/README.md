@@ -22,6 +22,18 @@ in a form that can be checked against the code and the files it writes.
 |---|---|
 | [ugps_log_schema.md](ugps_log_schema.md) | What is read from the G2 topside and how often, every file and column the capture writes, how the receiver row judges the four receivers, and the extension's own logs on the Pi |
 
+## Live monitoring (tab 1, `rov_flight_ops/bands.py`)
+
+| Document | What it answers |
+|---|---|
+| [monitoring_bands.md](monitoring_bands.md) | What normal, unusual and bad are for every Live monitoring reading, how each is judged, where the numbers came from, and how often real flights were normal |
+
+## The ROV flight simulator (`rov_flight_ops/sim/`, the banner's switch)
+
+| Document | What it answers |
+|---|---|
+| [simulator.md](simulator.md) | What the simulator is, what each tab shows in it, every fault it rotates through and how each is calibrated, and the guarantees that keep it away from a real vehicle and a real flight folder |
+
 ## Keeping these true
 
 A change to the capture's files or behaviour changes these documents in the

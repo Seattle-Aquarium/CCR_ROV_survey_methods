@@ -230,6 +230,13 @@ class Mavlink2Rest:
         return (f"{self.base}/v1/mavlink/vehicles/{self.system}"
                 f"/components/{self.component}/messages/{name}")
 
+    def _fetch(self, url: str, timeout: float | None = None) -> Answer:
+        """One GET against the vehicle. Every read in this class goes through
+        here, so the ROV flight simulator can answer in the vehicle's place and
+        everything above -- freshness, counters, health -- is the code a real
+        vehicle gets."""
+        return _get(url, timeout=self.timeout if timeout is None else timeout)
+
     # -- reading ---------------------------------------------------------
 
     def read(self, name: str) -> Sample:
@@ -241,7 +248,7 @@ class Mavlink2Rest:
         """
         now_mono, now_wall = time.monotonic(), time.time()
         h = self.health.setdefault(name, MessageHealth(name=name))
-        a = _get(self.message_url(name), timeout=self.timeout)
+        a = self._fetch(self.message_url(name))
         h.last_read_mono = now_mono
 
         # A 404 from mavlink2rest means this vehicle has never sent this
@@ -330,7 +337,7 @@ class Mavlink2Rest:
         """
         out: dict = {"host": self.host, "port": self.port,
                      "system": self.system, "component": self.component}
-        a = _get(f"{self.base}/v1/mavlink", timeout=self.timeout)
+        a = self._fetch(f"{self.base}/v1/mavlink")
         out["root_ok"] = a.ok
         if not a.ok:
             out["error"] = a.error
@@ -342,7 +349,7 @@ class Mavlink2Rest:
         vehicles = data.get("vehicles", data)
         if isinstance(vehicles, dict):
             out["vehicles"] = sorted(vehicles)
-        b = _get(f"{self.base}/info", timeout=self.timeout)
+        b = self._fetch(f"{self.base}/info")
         if b.ok:
             try:
                 out["service"] = json.loads(b.body)
@@ -360,7 +367,7 @@ class Mavlink2Rest:
         all. The autopilot is the component whose HEARTBEAT declares an
         autopilot type that is not INVALID; 1/1 is preferred when several do.
         """
-        a = _get(f"{self.base}/v1/mavlink/vehicles", timeout=self.timeout)
+        a = self._fetch(f"{self.base}/v1/mavlink/vehicles")
         if not a.ok:
             return None
         try:
@@ -429,8 +436,7 @@ class Mavlink2Rest:
         in cannot drift from the dialect the way a hand-written JSON literal
         can -- which is how the DVL extension does it, and it is the right way.
         """
-        a = _get(f"{self.base}/helper/mavlink?name={urllib.parse.quote(name)}",
-                 timeout=self.timeout)
+        a = self._fetch(f"{self.base}/helper/mavlink?name={urllib.parse.quote(name)}")
         if not a.ok:
             return None
         try:

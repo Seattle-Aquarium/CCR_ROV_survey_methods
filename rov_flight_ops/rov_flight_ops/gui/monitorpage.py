@@ -13,6 +13,13 @@ Each reading gets its own strip and its own scale here, with its current value
 beside it. Comparing shapes is what this is for -- *did the frequency drop when
 the temperature rose* -- and shapes survive separate scales.
 
+**Coloured by level, not by series.** Each strip used to take the next colour
+in a cycle, which said nothing. Now every sample is coloured by how the reading
+compares with a healthy flight -- green normal, amber unusual, red bad, from
+`bands` -- with a stripe and a word beside the current value and the
+thresholds dashed across the strip, so a group can be scanned for trouble in
+one look and the reason is under each name.
+
 **Drawn on a Tk canvas, not with a plotting library.** The whole point is that
 this stays light enough to leave running for a survey day on a field laptop.
 Seven polylines and a few labels, redrawn once a second, cost well under a
@@ -36,7 +43,8 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from .. import brand, flightlog, laptop, netdiag, nettrace
+from .. import bands, flightlog, laptop, netdiag, nettrace
+from ..sim.laptop import NOT_ON_FIELD_LAPTOP
 from . import theme as T
 from .widgets import (
     Card,
@@ -54,14 +62,49 @@ from .widgets import (
 WINDOWS = {"2 min": 120, "10 min": 600, "30 min": 1800}
 DEFAULT_WINDOW = "10 min"
 
-#: One strip per reading. Tall enough for a label, a value and a line that can
-#: be read at arm's length on a laptop in daylight.
-ROW_H = 58
-#: Room at the left for the reading's name, and for its current value.
-NAME_W = 210
-VALUE_W = 110
-#: Kept clear on the right for the range the strip is scaled to.
-RANGE_W = 96
+#: One strip per reading, in logical pixels -- everything drawn on this
+#: canvas is multiplied by the display's scaling, because a raw Tk canvas is
+#: not scaled by CustomTkinter and Tk reports 96 DPI regardless. Unscaled, on
+#: the 250 % screen this was redrawn on, the strips came out at two-fifths of
+#: their size and the axis text was too small to read.
+#:
+#: Tall enough for a name, its unit and rate, its thresholds, a value and a
+#: line that can be read at arm's length on a laptop in daylight.
+ROW_H = 86
+#: Room at the left for the reading's name and thresholds, and for its value.
+NAME_W = 236
+VALUE_W = 136
+#: Kept clear on the right for the strip's own axis labels.
+AXIS_W = 84
+#: The shared time axis along the foot.
+TIME_H = 30
+#: Space above and below the line inside each strip.
+PAD_Y = 11
+
+FONT_NAME = (T.MONO, 11)
+FONT_VALUE = (T.MONO, 15, "bold")
+FONT_LEVEL = (T.FAMILY_SEMIBOLD, 10)
+FONT_AXIS = (T.FAMILY, 10)
+FONT_NOTE = (T.FAMILY, 9)
+FONT_TIP = (T.FAMILY, 10)
+
+#: Colours that are not a reading's level, as (light, dark).
+GRID_FAINT = ("#E4E8EE", "#16304F")
+#: A line for a reading with no thresholds -- not a status colour.
+PLAIN_LINE = ("#4F6D8F", "#9FB4C7")
+#: The simulator's own colour, for the strips it fills that L342-D cannot.
+SIM_MARK = ("#5B3F8C", "#B9A2E6")
+
+#: Readings that are TRUE or FALSE, drawn on a fixed two-value axis.
+BOOL_COLUMNS = frozenset({"nic_carrier", "phy_carrier", "nic_low_power",
+                          "rov_arp_ok", "tether_remote_seen"})
+
+#: The least a strip's scale may span, as a share of the reading's size.
+MIN_SPAN_SHARE = 0.06
+
+#: How much history before the window a band can need: the longest smoothing
+#: or counting window in `bands`.
+BAND_MEMORY_S = 70.0
 
 #: How much coarser the lines are drawn while the window is being resized.
 #: The shape is what these charts are for and the shape survives it; the
@@ -128,13 +171,6 @@ FAST_TRACE_NOTE = (
     f"(logs/network_pings_*.csv). Those are for afterwards and are not drawn "
     f"here.")
 
-#: Series colors, in order, from the brand palette. Seven, so a group never
-#: has to reuse one.
-SERIES_COLORS = (
-    brand.SEAFOAM, brand.ALGAE, brand.CORAL, brand.MEDITERRANEAN,
-    brand.PURPLE_STAR, "#FFC24D", "#9FB4C7",
-)
-
 
 class MonitorPage(ctk.CTkFrame):
     """The recorder, the path to the vehicle, and the live charts.
@@ -157,8 +193,19 @@ class MonitorPage(ctk.CTkFrame):
         #: once a second; the width changes as fast as a window edge moves,
         #: and rebuilding seven series of nine hundred samples for a width
         #: change is the same answer at a real cost.
-        self._series_cache: dict[str, tuple[int, list]] = {}
+        self._series_cache: dict[str, tuple] = {}
         self._series_from = None
+        self._rows: list[dict] = []
+        self._times: list[float] = []
+        self._rows_at = None
+        #: Readings already brought up to date with the current rows.
+        self._fresh: set[str] = set()
+        #: Tk fonts for measuring, by (font, scale).
+        self._fonts: dict = {}
+        #: Where the last redraw put things, for the hover tip.
+        self._geom: dict = {}
+        #: (reading, x, y) under the pointer, or None.
+        self._hover = None
 
         if parents is None:
             body = ctk.CTkScrollableFrame(self, fg_color=T.BG)
@@ -274,8 +321,12 @@ class MonitorPage(ctk.CTkFrame):
     def _check_network(self) -> None:
         host = self._host()
         self._say(self.net_box, "Reading the adapters…")
+        simulating = getattr(self.app, "simulating", False)
 
         def work(progress, cancel):
+            if simulating:
+                from ..sim.controller import network_report
+                return network_report(host)
             return netdiag.report(host)
 
         self.app.submit(work, "Reading the topside network…",
@@ -287,7 +338,15 @@ class MonitorPage(ctk.CTkFrame):
                   "Watching the counters for four seconds — leave the video "
                   "running while this runs.")
 
+        simulating = getattr(self.app, "simulating", False)
+
         def work(progress, cancel):
+            if simulating:
+                return ("SIMULATED — the ROV flight simulator has no tether to "
+                        "measure. On a real station this watches the adapter "
+                        "counters for four seconds with the video running and "
+                        "says whether they move fast enough for the fast trace "
+                        "to mean anything on this laptop.")
             return nettrace.calibration_text(nettrace.calibrate(host))
 
         self.app.submit(work, "Measuring the link…",
@@ -336,11 +395,14 @@ class MonitorPage(ctk.CTkFrame):
 
     def _build_chart_card(self, body, row: int) -> None:
         c = Card(body, "4.  Live monitoring",
-                 "One group at a time, each reading on its own scale, with the "
-                 "rate it is meant to refresh at under its name (targets -- the "
-                 "achieved row rate is shown in section 3). Charts fill while a "
-                 "flight records. A blank strip is a sensor this laptop does "
-                 "not publish — the list beside the CSV says which, and why.")
+                 "One group at a time, each reading on its own scale. Colour "
+                 "says how it compares with a healthy flight: ● normal (green), "
+                 "▲ unusual (amber), ✖ bad (red); dashed lines are the "
+                 "thresholds, listed under each name — point at a name for "
+                 "why. Normal is measured from the September–October 2026 "
+                 "flights; unusual and bad are from the hardware's limits. "
+                 "Charts fill while a flight records. A blank strip is a "
+                 "sensor this laptop does not publish.")
         c.grid(row=row, column=0, sticky="ew")
         c.body.grid_columnconfigure(0, weight=1)
 
@@ -374,7 +436,7 @@ class MonitorPage(ctk.CTkFrame):
 
         self.canvas = tkinter.Canvas(
             c.body, highlightthickness=1, borderwidth=0,
-            height=ROW_H * 7,
+            height=int(ROW_H * 7 * (T.scale_of(c.body) or 1.0)),
             background=self._apply_appearance_mode(T.FIELD_BG),
             highlightbackground=self._apply_appearance_mode(T.BORDER))
         self.canvas.grid(row=2, column=0, sticky="ew")
@@ -384,6 +446,8 @@ class MonitorPage(ctk.CTkFrame):
         self._repaint = Repaint(self, self._redraw)
         self._canvas_at: tuple[int, int] | None = None
         self.canvas.bind("<Configure>", self._canvas_configured)
+        self.canvas.bind("<Motion>", self._hovered)
+        self.canvas.bind("<Leave>", self._unhovered)
 
     # ------------------------------------------------------------------
     #  wiring
@@ -557,6 +621,9 @@ class MonitorPage(ctk.CTkFrame):
         self.state_label.configure(text=st.line(), text_color=color)
 
         bits = [f"vehicle {rec.host}" + ("" if rec.watching else " (not watching)")]
+        if getattr(self.app, "simulating", False):
+            bits.append("ROV flight simulator: a simulated flight — nothing is "
+                        "written to disk")
         if st.degraded:
             bits.append(f"⚠ {st.degraded}")
         if st.pending_host:
@@ -599,45 +666,119 @@ class MonitorPage(ctk.CTkFrame):
         self._canvas_at = size
         self._repaint.ask()
 
-    def _series(self, rec, column: str) -> list[tuple[float, float]]:
-        """One reading's samples, rebuilt only when the recorder has written.
+    def _judged(self, rec, column: str) -> tuple[list, list, list]:
+        """(times, values, levels) for one reading, kept up to date a row at a
+        time.
 
-        `History.series` walks every row and converts every value. Seven of
-        those is most of a redraw, and a redraw happens for every pixel a
-        window edge moves -- where the rows have not changed at all.
+        Rows are only ever appended, and a sample's level depends only on the
+        samples before it -- at most `BAND_MEMORY_S` of them -- so each new
+        row is judged once, with that much of the past for context, and the
+        answer kept. Judging the whole half hour afresh every second cost
+        20-30 ms a second on the Tk thread; this costs well under one.
+        A redraw for a window edge moving, where nothing new has been
+        written, costs nothing at all.
         """
         history = rec.history
         if self._series_from is not history:
             self._series_from = history
             self._series_cache.clear()
+            self._rows_at = None
         version = getattr(history, "version", None)
+        if version is None or version != self._rows_at:
+            self._rows_at = version
+            self._rows = history.rows() if hasattr(history, "rows") else []
+            self._times = [r.get("elapsed_time_s") or 0.0 for r in self._rows]
+            self._fresh = set()
         hit = self._series_cache.get(column)
-        if hit is not None and version is not None and hit[0] == version:
-            return hit[1]
-        series = history.series(column)
-        if version is not None:
-            self._series_cache[column] = (version, series)
-        return series
+        if hit is not None and column in self._fresh:
+            return hit[:3]
+        rows, times_all = self._rows, self._times
+        if not rows:
+            out = ([], [], [], None)
+        else:
+            newest = times_all[-1]
+            last = hit[3] if hit is not None else None
+            if last is None or last > newest:
+                # First time, or the history was cleared: everything that can
+                # be drawn, plus the context its first sample needs.
+                first = bisect.bisect_left(
+                    times_all, newest - max(WINDOWS.values()) - BAND_MEMORY_S)
+                times, values, levels = [], [], []
+                new_from = first
+            else:
+                times, values, levels = (list(hit[0]), list(hit[1]), list(hit[2]))
+                new_from = bisect.bisect_right(times_all, last)
+            if new_from < len(rows):
+                ctx = bisect.bisect_left(times_all,
+                                         times_all[new_from] - BAND_MEMORY_S)
+                lv = bands.levels(column, rows[ctx:])[new_from - ctx:]
+                for r, level in zip(rows[new_from:], lv, strict=False):
+                    t, v = r.get("elapsed_time_s"), bands._num(r.get(column))
+                    if t is None or v is None:
+                        continue
+                    times.append(float(t))
+                    values.append(v)
+                    levels.append(level)
+            # What has fallen out of the longest window is let go.
+            cut = bisect.bisect_left(times, newest - max(WINDOWS.values()) - 5.0)
+            if cut:
+                del times[:cut], values[:cut], levels[:cut]
+            out = (times, values, levels, newest)
+        self._series_cache[column] = out
+        self._fresh.add(column)
+        return out[:3]
+
+    def _font(self, font: tuple, s: float):
+        from tkinter import font as tkfont
+        key = (font, round(s, 3))
+        got = self._fonts.get(key)
+        if got is None:
+            spec = T.scale_font(font, s)
+            got = tkfont.Font(family=spec[0], size=spec[1],
+                              weight="bold" if "bold" in spec[2:] else "normal")
+            self._fonts[key] = got
+        return got
+
+    def _fit(self, text: str, font: tuple, s: float, room: float) -> str:
+        """`text` cut to `room` pixels in `font`, with an ellipsis if it was."""
+        f = self._font(font, s)
+        if f.measure(text) <= room:
+            return text
+        while text and f.measure(text + "…") > room:
+            text = text[:-1]
+        return text + "…"
+
+    def _colors(self) -> dict:
+        m = self._apply_appearance_mode
+        out = {"text": m(T.TEXT), "muted": m(T.TEXT_MUTED), "grid": m(T.BORDER),
+               "faint": m(GRID_FAINT), "plain": m(PLAIN_LINE),
+               "tip_bg": m(T.SURFACE), "tip_edge": m(T.BORDER), "sim": m(SIM_MARK)}
+        for level, pair in bands.LEVEL_COLORS.items():
+            out[level] = m(pair)
+        return out
 
     def _redraw(self) -> None:
         # Not `_draw`: CTkFrame has one of its own, with a different signature,
         # and overriding it stops the frame being constructed at all.
         cv = self.canvas
         cv.delete("all")
+        s = T.scale_of(self) or 1.0
         width = cv.winfo_width()
-        if width < 50:
+        if width < 50 * s:
             return
         rec = getattr(self.app, "recorder", None)
         columns = laptop.GROUPS.get(self._group, ())
-        cv.configure(height=ROW_H * max(1, len(columns)))
+        total = int((ROW_H * max(1, len(columns)) + TIME_H) * s)
+        if int(cv.cget("height")) != total:
+            cv.configure(height=total)
 
         if rec is None:
-            self._placeholder(cv, width, "Press Start monitoring to begin.")
+            self._placeholder(cv, width, s, "Press Start monitoring to begin.")
             return
         latest = rec.history.latest()
         if not latest:
             self._placeholder(
-                cv, width,
+                cv, width, s,
                 "Waiting for the first sample — nothing is recorded until the "
                 "ROV arms." if rec.watching else
                 "Press Start monitoring to begin.")
@@ -645,88 +786,268 @@ class MonitorPage(ctk.CTkFrame):
 
         span = WINDOWS[self._window]
         now = latest.get("elapsed_time_s") or 0.0
-        muted = self._apply_appearance_mode(T.TEXT_MUTED)
-        text = self._apply_appearance_mode(T.TEXT)
-        grid = self._apply_appearance_mode(T.BORDER)
+        c = self._colors()
+        x0 = (NAME_W + VALUE_W) * s
+        x1 = width - (AXIS_W + 8) * s
+        plot_bottom = ROW_H * len(columns) * s
+        self._geom = {"s": s, "width": width, "columns": columns,
+                      "x0": x0, "x1": x1}
 
+        # The time grid first, so every strip draws over it.
+        ticks = _time_ticks(span)
+        if x1 - x0 > 40 * s:
+            for ago in ticks:
+                x = x1 - ago / span * (x1 - x0)
+                cv.create_line(x, 0, x, plot_bottom, fill=c["faint"], dash=(2, 4))
+
+        simulated = bool(getattr(self.app, "simulating", False))
         for i, column in enumerate(columns):
-            top = i * ROW_H
-            color = SERIES_COLORS[i % len(SERIES_COLORS)]
-            if i:
-                cv.create_line(8, top, width - 8, top, fill=grid)
-            cv.create_text(12, top + ROW_H / 2 - 8, anchor="w", text=column,
-                           fill=text, font=T.FONT_MONO)
-            unit = laptop.UNITS.get(column, "")
-            rate = hz_text(refresh_hz(column))
-            cv.create_text(12, top + ROW_H / 2 + 10, anchor="w",
-                           text=f"{unit}  ·  {rate}" if unit else rate,
-                           fill=muted, font=T.FONT_SMALL)
+            self._strip(cv, rec, i, column, latest, now, span, c, s, width,
+                        x0, x1, simulated)
 
-            # Sliced rather than filtered: the samples are in time order, so
-            # the window's first index is a bisection rather than a walk.
-            whole = self._series(rec, column)
-            cut = bisect.bisect_left(whole, (now - span,))
-            series = whole[cut:]
-            value = latest.get(column)
-            cv.create_text(NAME_W + VALUE_W - 14, top + ROW_H / 2, anchor="e",
-                           text=_pretty(value), fill=color,
-                           font=(T.MONO, 15, "bold"))
-            self._strip(cv, series, top, width, color, muted, now, span)
+        # The time axis, once, along the foot.
+        cv.create_line(x0, plot_bottom, x1, plot_bottom, fill=c["grid"])
+        f_axis = T.scale_font(FONT_AXIS, s)
+        if x1 - x0 > 40 * s:
+            for ago in ticks:
+                x = x1 - ago / span * (x1 - x0)
+                cv.create_line(x, plot_bottom, x, plot_bottom + 5 * s, fill=c["grid"])
+                # The two ends sit inside the plot, so neither runs into the
+                # axis's name on the left or the strip labels on the right.
+                anchor = "ne" if ago < 0.5 else "nw" if ago >= span - 0.5 else "n"
+                cv.create_text(x, plot_bottom + 7 * s, anchor=anchor, fill=c["text"],
+                               font=f_axis, text=_ago_text(ago, span))
+        cv.create_text(x0 - 14 * s, plot_bottom + 7 * s, anchor="ne", fill=c["muted"],
+                       font=f_axis, text=f"time · last {self._window}")
+        self._draw_tip()
 
-    def _strip(self, cv, series, top, width, color, muted, now, span) -> None:
-        """One reading's line, scaled to its own range over the window."""
-        x0 = NAME_W + VALUE_W
-        x1 = width - RANGE_W - 10
-        pad = 9
-        y0, y1 = top + pad, top + ROW_H - pad
-        if x1 - x0 < 30:
+    def _strip(self, cv, rec, i, column, latest, now, span, c, s, width,
+               x0, x1, simulated) -> None:
+        """One reading: its name and thresholds, its value and level, its line."""
+        top = i * ROW_H * s
+        bottom = top + ROW_H * s
+        if i:
+            cv.create_line(6 * s, top, width - 6 * s, top, fill=c["grid"])
+
+        times, values, levels = self._judged(rec, column)
+        cut = bisect.bisect_left(times, now - span)
+        level = next((lv for lv in reversed(levels[cut:]) if lv is not None), None)
+        if not times or times[-1] < now - 30:
+            level = None                               # nothing current to judge
+
+        # A stripe down the left edge in the level's colour: the one thing to
+        # see when scanning a group for trouble.
+        cv.create_rectangle(0, top + 6 * s, 5 * s, bottom - 6 * s,
+                            fill=c[level] if level is not None else c["grid"],
+                            outline="")
+
+        name_room = (NAME_W - 22) * s
+        f_name = T.scale_font(FONT_NAME, s)
+        f_note = T.scale_font(FONT_NOTE, s)
+        cv.create_text(14 * s, top + 17 * s, anchor="w", fill=c["text"], font=f_name,
+                       text=self._fit(column, FONT_NAME, s, name_room))
+        unit = laptop.UNITS.get(column, "")
+        rate = hz_text(refresh_hz(column))
+        cv.create_text(14 * s, top + 36 * s, anchor="w", fill=c["muted"],
+                       font=f_note, text=f"{unit}  ·  {rate}" if unit else rate)
+        limits = bands.threshold_text(column, unit)
+        if limits:
+            cv.create_text(14 * s, top + 53 * s, anchor="w", fill=c["muted"],
+                           font=f_note, text=self._fit(limits, FONT_NOTE, s, name_room))
+        if simulated and column in NOT_ON_FIELD_LAPTOP:
+            cv.create_text(14 * s, top + 70 * s, anchor="w", fill=c["sim"],
+                           font=f_note,
+                           text=self._fit("◇ simulated (blank on L342-D)",
+                                          FONT_NOTE, s, name_room))
+
+        value = latest.get(column)
+        cv.create_text(x0 - 14 * s, top + ROW_H * s / 2 - 9 * s, anchor="e",
+                       text=_pretty(value, column), fill=c["text"],
+                       font=T.scale_font(FONT_VALUE, s))
+        if level is not None:
+            cv.create_text(x0 - 14 * s, top + ROW_H * s / 2 + 15 * s, anchor="e",
+                           fill=c[level], font=T.scale_font(FONT_LEVEL, s),
+                           text=f"{bands.LEVEL_GLYPHS[level]} {bands.LEVEL_WORDS[level]}")
+
+        self._plot(cv, times[cut:], values[cut:], levels[cut:], column, top, c, s,
+                   x0, x1, now, span)
+
+    def _plot(self, cv, times, values, levels, column, top, c, s,
+              x0, x1, now, span) -> None:
+        """The line, coloured by level, on its own scale with its own axis."""
+        y0, y1 = top + PAD_Y * s, top + (ROW_H - PAD_Y) * s
+        if x1 - x0 < 30 * s:
             return
-        if len(series) < 2:
-            cv.create_text((x0 + x1) / 2, top + ROW_H / 2, text="—",
-                           fill=muted, font=T.FONT_SMALL)
+        f_axis = T.scale_font(FONT_AXIS, s)
+        if len(values) < 2:
+            cv.create_text((x0 + x1) / 2, (y0 + y1) / 2, text="—",
+                           fill=c["muted"], font=f_axis)
             return
 
-        lo = min(v for _t, v in series)
-        hi = max(v for _t, v in series)
-        # A flat line belongs in the middle of its strip, not pinned to an
-        # edge by a zero-height range.
-        if hi - lo < 1e-9:
-            lo, hi = lo - 0.5, hi + 0.5
-        t_lo = now - span
+        flag = column in BOOL_COLUMNS
+        if flag:
+            lo, hi = 0.0, 1.0
+        else:
+            lo, hi = min(values), max(values)
+            # Thresholds near the data are drawn, and the scale stretched to
+            # show them: how close a reading is to trouble is the point.
+            room = (hi - lo) or abs(hi) * 0.1 or 1.0
+            for val, _lv in bands.threshold_lines(column):
+                if lo - room <= val <= hi + room:
+                    lo, hi = min(lo, val), max(hi, val)
+            if hi - lo < 1e-9:
+                lo, hi = lo - 0.5, hi + 0.5
+            # Never stretch a wobble of a few parts in a hundred across the
+            # whole strip: 127 to 128 Mbps is a steady link, and drawn
+            # floor-to-ceiling it looked like one in trouble.
+            least = MIN_SPAN_SHARE * max(abs(lo), abs(hi))
+            if hi - lo < least:
+                mid = (hi + lo) / 2
+                lo, hi = mid - least / 2, mid + least / 2
+        pad = (hi - lo) * 0.08
+        lo_d, hi_d = lo - pad, hi + pad
 
-        # Decimate to the pixel width. An hour of samples through a 600-pixel
-        # strip is 3,600 points for 600 columns; drawing them all costs six
-        # times as much and looks identical.
-        #
-        # Coarser still while the window is being dragged: a line at a third
-        # of the resolution is indistinguishable at a size that is about to
-        # change again, and the accurate one is drawn the moment the edge is
-        # let go -- which is the pass that has to be right.
+        def y_of(v: float) -> float:
+            return y1 - (v - lo_d) / (hi_d - lo_d) * (y1 - y0)
+
+        def x_of(t: float) -> float:
+            fx = (t - (now - span)) / span if span else 1.0
+            return x0 + max(0.0, min(1.0, fx)) * (x1 - x0)
+
+        # The axis: three labelled ticks and faint lines across the strip.
+        if flag:
+            marks = ((1.0, "TRUE"), (0.0, "FALSE"))
+        else:
+            mid = (hi + lo) / 2
+            marks = ((hi, _pretty(hi, column)), (mid, _pretty(mid, column)),
+                     (lo, _pretty(lo, column)))
+        for v, text in marks:
+            y = y_of(v)
+            cv.create_line(x0, y, x1, y, fill=c["faint"])
+            cv.create_line(x1, y, x1 + 4 * s, y, fill=c["grid"])
+            cv.create_text(x1 + 7 * s, y, anchor="w", fill=c["text"], font=f_axis,
+                           text=text)
+        cv.create_line(x1, y0, x1, y1, fill=c["grid"])
+        if not flag:
+            for val, lv in bands.threshold_lines(column):
+                if lo <= val <= hi:
+                    y = y_of(val)
+                    cv.create_line(x0, y, x1, y, fill=c[lv], dash=(5, 4))
+
+        # Decimated to the pixel width -- coarser still while a window edge is
+        # being dragged -- with each bucket coloured by the worst level in it,
+        # so a one-second spike into red is never decimated away.
         pixels = max(1, int(x1 - x0))
         if self._repaint.busy:
             pixels = max(1, pixels // DRAG_DECIMATION)
-        step = max(1, len(series) // pixels)
-        points: list[float] = []
-        for t, v in series[::step]:
-            fx = (t - t_lo) / span if span else 1.0
-            points.append(x0 + max(0.0, min(1.0, fx)) * (x1 - x0))
-            points.append(y1 - (v - lo) / (hi - lo) * (y1 - y0))
-        if len(points) >= 4:
-            cv.create_line(*points, fill=color, width=2, smooth=False)
+        n = len(values)
+        step = max(1, n // pixels)
+        gap = max(3.0, 2.5 * SLOWER_THAN_ROW.get(column, laptop.DEFAULT_PERIOD_S))
+        lw = max(1, int(round(2 * s)))
+        runs: list[tuple[str, list]] = []
+        color, coords, last = None, [], None
+        for k in range(0, n, step):
+            bucket = [lv for lv in levels[k:k + step] if lv is not None]
+            lv = max(bucket) if bucket else None
+            pt_color = c[lv] if lv is not None else c["plain"]
+            x, y = x_of(times[k]), y_of(values[k])
+            if last is not None and times[k] - last[2] > gap * step:
+                runs.append((color, coords))           # a blank stretch: no line
+                color, coords = pt_color, [x, y]
+            elif color is None:
+                color, coords = pt_color, [x, y]
+            elif pt_color == color:
+                coords += [x, y]
+            else:
+                runs.append((color, coords))
+                color, coords = pt_color, [last[0], last[1], x, y]
+            last = (x, y, times[k])
+        runs.append((color, coords))
+        for col, pts in runs:
+            if len(pts) >= 4:
+                cv.create_line(*pts, fill=col, width=lw)
+            elif len(pts) == 2:
+                cv.create_oval(pts[0] - lw, pts[1] - lw, pts[0] + lw, pts[1] + lw,
+                               fill=col, outline="")
 
-        cv.create_text(width - 12, top + pad + 2, anchor="ne",
-                       text=_pretty(hi), fill=muted, font=T.FONT_SMALL)
-        cv.create_text(width - 12, top + ROW_H - pad - 2, anchor="se",
-                       text=_pretty(lo), fill=muted, font=T.FONT_SMALL)
-
-    def _placeholder(self, cv, width, message: str) -> None:
-        cv.configure(height=ROW_H * 3)
-        cv.create_text(width / 2, ROW_H * 1.5, text=message,
+    def _placeholder(self, cv, width, s, message: str) -> None:
+        cv.configure(height=int(ROW_H * 3 * s))
+        cv.create_text(width / 2, ROW_H * 1.5 * s, text=message,
                        fill=self._apply_appearance_mode(T.TEXT_MUTED),
-                       font=T.FONT_BODY)
+                       font=T.scale_font(T.FONT_BODY, s))
+
+    # ------------------------------------------------------------------
+    #  why each reading is judged as it is, under the pointer
+    # ------------------------------------------------------------------
+
+    def _hovered(self, event) -> None:
+        geom = self._geom
+        if not geom:
+            return
+        s = geom["s"]
+        i = int(event.y // (ROW_H * s))
+        over = event.x < geom["x0"] and 0 <= i < len(geom["columns"])
+        want = (geom["columns"][i], event.x, event.y) if over else None
+        if (want and self._hover and want[0] == self._hover[0]
+                and abs(want[1] - self._hover[1]) < 30 * s
+                and abs(want[2] - self._hover[2]) < 30 * s):
+            return
+        self._hover = want
+        self._draw_tip()
+
+    def _unhovered(self, _event=None) -> None:
+        self._hover = None
+        self._draw_tip()
+
+    def _draw_tip(self) -> None:
+        cv = self.canvas
+        cv.delete("tip")
+        if not self._hover or not self._geom:
+            return
+        column, x, y = self._hover
+        s = self._geom["s"]
+        lines = [column] + bands.why(column)
+        if getattr(self.app, "simulating", False) and column in NOT_ON_FIELD_LAPTOP:
+            lines.append("Simulated here: L342-D does not publish this reading, "
+                         "and leaves the strip blank.")
+        if len(lines) == 1:
+            lines.append("No thresholds: this reading is not judged.")
+        f_tip = T.scale_font(FONT_TIP, s)
+        c = self._colors()
+        tx, ty = x + 16 * s, y + 12 * s
+        text_id = cv.create_text(tx + 10 * s, ty + 8 * s, anchor="nw",
+                                 width=int(360 * s), fill=c["text"], font=f_tip,
+                                 tags="tip", text="\n\n".join(lines))
+        x_a, y_a, x_b, y_b = cv.bbox(text_id)
+        dx = min(0.0, self._geom["width"] - 6 * s - (x_b + 10 * s))
+        dy = min(0.0, int(cv.cget("height")) - 6 * s - (y_b + 8 * s))
+        cv.move(text_id, dx, dy)
+        rect = cv.create_rectangle(x_a - 10 * s + dx, y_a - 8 * s + dy,
+                                   x_b + 10 * s + dx, y_b + 8 * s + dy,
+                                   fill=c["tip_bg"], outline=c["tip_edge"], tags="tip")
+        cv.tag_raise(text_id, rect)
 
 
-def _pretty(value) -> str:
+def _time_ticks(span: float) -> list[float]:
+    """Seconds-ago for each labelled tick on the time axis, newest first."""
+    step = {120: 30.0, 600: 120.0, 1800: 300.0}.get(int(span), span / 4)
+    out, k = [], 0.0
+    while k <= span + 1e-6:
+        out.append(k)
+        k += step
+    return out
+
+
+def _ago_text(ago: float, span: float) -> str:
+    """A time-axis label: seconds on the two-minute window, minutes otherwise."""
+    if ago < 0.5:
+        return "now"
+    if span <= 120:
+        return f"−{ago:.0f} s"
+    return f"−{ago / 60:g} min"
+
+
+def _pretty(value, column: str = "") -> str:
     """A reading, short enough to sit beside its own line."""
     if value is None or value == "":
         return "—"
@@ -736,6 +1057,18 @@ def _pretty(value) -> str:
         v = float(value)
     except (TypeError, ValueError):
         return str(value)
+    unit = laptop.UNITS.get(column, "")
+    if unit == "bytes":
+        for size, suffix in ((2 ** 30, "GiB"), (2 ** 20, "MiB"), (2 ** 10, "KiB")):
+            if abs(v) >= size:
+                return f"{v / size:,.2f} {suffix}"
+        return f"{v:,.0f} B"
+    if column == "system_uptime_s":
+        if v >= 86_400:
+            return f"{v / 86_400:.1f} d"
+        if v >= 3600:
+            return f"{v / 3600:.1f} h"
+        return f"{v / 60:.0f} min"
     if v == int(v) and abs(v) < 1e6:
         return f"{int(v):,}"
     if abs(v) >= 1000:

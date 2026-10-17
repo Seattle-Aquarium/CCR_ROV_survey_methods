@@ -518,10 +518,19 @@ class NavCollector:
         self._position(fast, prev, s, now)
 
         # -- the navigation suite ----------------------------------------------
+        # A cycle that did not read the slow group has not looked at the
+        # estimator or the acoustic fix, so it carries forward what the last
+        # one that did found -- as `_position` does for the fast group. It
+        # used to replace them with nothing, and since the slow group is read
+        # one cycle in eight, the readiness matrix and the trust line said
+        # "no EKF_STATUS_REPORT" seven-eighths of the time on a healthy
+        # vehicle. Found by the ROV flight simulator, October 2026.
         s.dvl = self._dvl_readings(fast, slow, now)
-        s.ekf = self._ekf_readings(slow, now)
+        if not fast and "bottom_lock" in prev.dvl:
+            s.dvl["bottom_lock"] = prev.dvl["bottom_lock"]
+        s.ekf = self._ekf_readings(slow, now) if slow else dict(prev.ekf)
         s.vessel = E.vessel_readings(self._vessel)
-        s.ugps = self._ugps_readings(slow, now)
+        s.ugps = self._ugps_readings(slow, now) if slow else dict(prev.ugps)
         s.params = dict(self.params)
         s.params_age = (None if self.params_mono is None
                         else now - self.params_mono)

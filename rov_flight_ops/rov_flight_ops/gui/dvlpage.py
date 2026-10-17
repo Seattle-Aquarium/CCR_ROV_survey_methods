@@ -77,7 +77,10 @@ GAP_WORDS = {"dvl_quiet": "DVL quiet", "missing_reports": "missing reports",
 #: Sizes on the canvases, in unscaled units; multiplied by the display scale.
 STRIP_H = 64
 NAME_W = 132
-BEAMS_H = 280
+BEAMS_H = 300
+#: Kept clear under the beam tiles for the line about the mounting offset,
+#: which used to run into the aft tiles.
+BEAMS_FOOT_H = 26
 ACOUSTIC_H = 210
 
 #: The page refreshes its text this often while it is on screen...
@@ -105,6 +108,21 @@ def _f(value, nd: int = 2, unit: str = "") -> str:
             text = text[1:]                  # "-0" is a rounding, not a sign
         return f"{text} {unit}".rstrip()
     return str(value)
+
+
+def _axis(value: float) -> str:
+    """An axis label with the digits its size needs: a figure of merit of
+    0.0002 is not "0.0"."""
+    a = abs(value)
+    if a == 0:
+        return "0"
+    if a < 0.1:
+        return f"{value:.2g}"
+    if a < 10:
+        return f"{value:.2f}"
+    if a < 1000:
+        return f"{value:.1f}"
+    return f"{value:,.0f}"
 
 
 def _rate(snap, kind: str) -> str:
@@ -310,7 +328,10 @@ class DvlPage(ctk.CTkFrame):
         snap = self.recorder.live.snapshot(history=False)
         c = self._colors()
         F = lambda font: T.scale_font(font, s)        # noqa: E731
-        cx, cy = w / 2, h / 2
+        # The tiles and the vehicle are laid out above a footer band, so the
+        # note along the foot can never run into the aft tiles.
+        area_h = h - BEAMS_FOOT_H * s
+        cx, cy = w / 2, area_h / 2
         bw, bh = 66 * s, 104 * s
         cv.create_rectangle(cx - bw, cy - bh, cx + bw, cy + bh, outline=c["border"],
                             width=max(1, int(2 * s)))
@@ -342,11 +363,12 @@ class DvlPage(ctk.CTkFrame):
                 cv.create_text(cx, cy + 70 * s, text="DVL HOT", fill=c["warn"],
                                font=F(FONT_FLAG))
         tile_w, tile_h = min(250 * s, w * 0.3), 92 * s
+        reach = max(0.0, area_h / 2 - tile_h / 2 - 6 * s)
         for beam in P.BEAMS:
             az = math.radians(P.beam_azimuth_on_vehicle(beam, off))
             sx, sy = math.sin(az), -math.cos(az)
             bx = cx + w * 0.32 * (1 if sx > 1e-6 else -1 if sx < -1e-6 else 0)
-            by = cy + h * 0.27 * (1 if sy > 1e-6 else -1 if sy < -1e-6 else 0)
+            by = cy + reach * (1 if sy > 1e-6 else -1 if sy < -1e-6 else 0)
             color = BEAM_COLORS[beam.id]
             tid = beam.id
             bvalid = v.get(f"t{tid}_valid")
@@ -530,9 +552,9 @@ class DvlPage(ctk.CTkFrame):
                     coords += [x_of(t), y1 - (v - lo) / (hi - lo) * (y1 - y0)]
                 if len(coords) >= 4:
                     cv.create_line(*coords, fill=color, width=lw)
-            cv.create_text(w - 6 * s, y0, anchor="ne", text=_f(hi, 1),
+            cv.create_text(w - 6 * s, y0, anchor="ne", text=_axis(hi),
                            fill=c["muted"], font=F(FONT_CANVAS_SMALL))
-            cv.create_text(w - 6 * s, y1, anchor="se", text=_f(lo, 1),
+            cv.create_text(w - 6 * s, y1, anchor="se", text=_axis(lo),
                            fill=c["muted"], font=F(FONT_CANVAS_SMALL))
         for gap in snap.gaps:
             if gap.ended_unix < now - span:
@@ -819,6 +841,10 @@ class DvlPage(ctk.CTkFrame):
                         f"{len(s.files)} files")
         elif rec.transition:
             cap_text = f"{rec.transition}…"
+        elif getattr(self.app, "simulating", False):
+            cap_text = (f"ROV flight simulator: a simulated DVL on this laptop "
+                        f"({s.address}), shown live. The simulator writes "
+                        f"nothing to disk.")
         else:
             cap_text = ("Live view only — nothing is written. Choose a flight "
                         "folder on Monitoring to record the DVL.")

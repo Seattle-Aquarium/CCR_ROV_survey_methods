@@ -239,15 +239,23 @@ class LogsPage(ctk.CTkFrame):
         """Drop a listing taken from a vehicle the address no longer points at."""
         if self.inv is None:
             return
+        self.reset_listing("The vehicle address changed — search again to list "
+                           "this vehicle.")
+
+    def reset_listing(self, note: str) -> None:
+        """Drop whatever was listed, and say why."""
         self.inv = None
         self._tree_gen += 1
         self.tree.delete(*self.tree.get_children())
         self._nodes.clear()
         self._by_path = {}
-        self.found_note.configure(
-            text="The vehicle address changed — search again to list this vehicle.",
-            text_color=T.WARN)
+        self.found_note.configure(text=note, text_color=T.WARN)
         self._update_previews()
+
+    @property
+    def _sim(self):
+        sim = getattr(self.app, "simulator", None)
+        return sim if sim is not None and sim.active else None
 
     def _tick_all(self) -> None:
         for v in self.v_kind.values():
@@ -303,8 +311,12 @@ class LogsPage(ctk.CTkFrame):
             return
         host, c3 = self.app.vehicle_host(), self._c3_folder()
         self.found_note.configure(text="Asking the vehicle…", text_color=T.TEXT_MUTED)
+        sim = self._sim
 
         def work(progress, cancel):
+            if sim is not None:
+                from ..sim import pi as SP
+                return _Search(SP.inventory(sim.world, kinds))
             return _Search(PF.search(host, kinds, c3_folder=c3,
                                      progress=progress, cancel=cancel))
 
@@ -644,6 +656,17 @@ class LogsPage(ctk.CTkFrame):
                                 f"the flight folder.")
             return
         need = sum(f.size for f in todo)
+        if self._sim is not None:
+            # Described, never made: the simulated vehicle has nothing to copy.
+            from ..sim import pi as SP
+            if messagebox.askyesno(
+                    self.app.APP_NAME,
+                    f"Download {len(todo)} file(s), {_gib(need)}, from the "
+                    f"simulated vehicle?\n\n{choice.breakdown()}\n\nThis is the "
+                    f"ROV flight simulator: nothing will be copied, and the "
+                    f"download is only described."):
+                self.app._log(SP.download_summary(todo, flight))
+            return
         dest = rovfetch.inspect_destination(
             Path(flight), need_bytes=need,
             largest_file=max((f.size for f in todo), default=0))
@@ -679,6 +702,11 @@ class LogsPage(ctk.CTkFrame):
     def _delete(self, retried: bool = False) -> None:
         choice = self._resolve(self.clean, lambda: self._delete(True), retried)
         if choice is None:
+            return
+        if self._sim is not None:
+            # What the real vehicle would say, mid-flight: it is armed.
+            from ..sim import pi as SP
+            messagebox.showerror(self.app.APP_NAME, SP.REFUSED_ARMED)
             return
         inv = self.inv
         flight = self.app.flight_dir

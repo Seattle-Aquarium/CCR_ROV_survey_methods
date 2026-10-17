@@ -126,11 +126,17 @@ class TransectSetup(ctk.CTkFrame):
         source = SOURCES[self.source.get()]
         host = self.app.vehicle_host()
         self.preview_note.configure(text="Reading…", text_color=T.TEXT_MUTED)
+        sim = getattr(self.app, "simulator", None)
+        trace = (sim.recorder.depth_trace()
+                 if sim is not None and sim.active and sim.recorder else None)
 
         def work(progress, cancel):
-            store, notes, where = P.preview_store(
-                flight, windows, cfg=cfg, host=host, source=source,
-                progress=progress, cancel=cancel)
+            if trace is not None:
+                store, notes, where = _simulated_store(trace)
+            else:
+                store, notes, where = P.preview_store(
+                    flight, windows, cfg=cfg, host=host, source=source,
+                    progress=progress, cancel=cancel)
             style = (depthplot.PlotStyle() if mode == "dark"
                      else depthplot.PlotStyle.light())
             img = depthplot.render_profile(store, windows, width=980, height=300,
@@ -160,6 +166,29 @@ class TransectSetup(ctk.CTkFrame):
         lines += [f"note: {n}" for n in res.notes]
         self.preview_note.configure(text="\n".join(lines), text_color=T.TEXT)
         self.app.status.configure(text="Preview drawn — check the transects.")
+
+
+def _simulated_store(trace):
+    """The ROV flight simulator's dive so far, as the preview reads telemetry.
+
+    `trace` is (wall time, depth m, altitude m) once a second, from the
+    simulated recorder; depth goes in as the autopilot's relative altitude, in
+    millimetres and negative below the surface, which is what the preview
+    draws from a real recording.
+    """
+    import numpy as np
+
+    from ..depthplot import DEPTH_FIELD
+    from ..telemetry import Series, TelemetryStore
+
+    store = TelemetryStore()
+    t = np.asarray([x[0] for x in trace], dtype=float)
+    store.series[DEPTH_FIELD] = Series(
+        t=t, v=np.asarray([-x[1] * 1000.0 for x in trace], dtype=float))
+    if len(t):
+        store.t_start, store.t_end = float(t[0]), float(t[-1])
+    return store, ["simulated — the ROV flight simulator's dive so far"], \
+        "the ROV flight simulator"
 
 
 class _Preview:
