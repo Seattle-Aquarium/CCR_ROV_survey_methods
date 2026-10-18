@@ -87,6 +87,13 @@ ARDUSUB_MODES = {
     20: "Motor Detect", 21: "Surftrak",
 }
 
+#: How long a "Leak Detected" text counts as a current leak. ArduSub repeats
+#: it every 20 s while the sensor is wet.
+LEAK_HOLD_S = 45.0
+#: How long a named value (PilotGain, Lights1...) is held between the reads
+#: that happen to land on it: nine names share one message.
+NAMED_HOLD_S = 10.0
+
 #: The named float ArduSub publishes the Surftrak target in, in meters.
 #: `ModeSurftrak` uses -1 cm as its invalid marker, so the value arrives as
 #: -0.01 whenever there is no target -- which is most of the time, including
@@ -195,6 +202,11 @@ class NavCollector:
         self._origin_confirmed = False
 
         self._next = {"fast": 0.0, "slow": 0.0, "ext": 0.0, "param": 0.0}
+        #: name -> (value, monotonic) for each NAMED_VALUE_FLOAT seen.
+        self._named: dict[str, tuple[float, float]] = {}
+        #: When a leak text was last seen, and the newest text of any kind.
+        self._leak_mono: float | None = None
+        self._text: tuple[str, float] | None = None
         self._backoff = 0.0
         self._dvl = E.DvlStatus()
         self._vessel = E.VesselStatus()
@@ -510,6 +522,9 @@ class NavCollector:
         s.altitude = self._altitude(fast, slow, prev)
         s.surftrak_target = self._surftrak_target(fast, prev)
         s.speed = self._speed(fast, prev)
+        s.forward = self._forward(fast, prev, s)
+        self._named_values(fast, s, now)
+        self._status_text(slow, prev, s, now)
 
         # -- power ----------------------------------------------------------
         self._power(fast, prev, s, now)
@@ -678,6 +693,70 @@ class NavCollector:
                               note="VFR_HUD groundspeed — the EKF has no "
                                    "horizontal velocity solution yet")
         return prev.speed
+
+    def _forward(self, fast: dict, prev: NavSnapshot, s: NavSnapshot) -> Reading:
+        """Speed along the vehicle's own heading: the EKF's north/east velocity
+        turned through its yaw. Negative is backwards."""
+        if not fast:
+            return prev.forward
+        lp = fast.get("LOCAL_POSITION_NED")
+        yaw = s.yaw.number()
+        if lp is None or not lp.fresh or yaw is None:
+            return prev.forward
+        vx, vy = lp.num("vx"), lp.num("vy")
+        if vx is None or vy is None:
+            return prev.forward
+        h = math.radians(yaw)
+        src = Source("mav:LOCAL_POSITION_NED.v", "LOCAL_POSITION_NED",
+                     self.mav.system, self.mav.component,
+                     device="EKF velocity, turned through ATTITUDE.yaw")
+        return M.good(vx * math.cos(h) + vy * math.sin(h), unit="m/s",
+                      frame="body", source=src, recv_mono=lp.mono)
+
+    def _named_values(self, fast: dict, s: NavSnapshot, now: float) -> None:
+        """Every NAMED_VALUE_FLOAT ArduSub cycles through, held between the
+        reads that land on it. PilotGain becomes `pilot_gain`."""
+        nv = fast.get("NAMED_VALUE_FLOAT") if fast else None
+        if nv is not None and nv.fresh:
+            name, value = nv.get("name"), nv.num("value")
+            if isinstance(name, list):
+                name = "".join(c for c in name if isinstance(c, str) and c != chr(0))
+            if isinstance(name, str) and value is not None:
+                self._named[name.strip()] = (value, nv.mono or now)
+        src = Source("mav:NAMED_VALUE_FLOAT", "NAMED_VALUE_FLOAT",
+                     self.mav.system, self.mav.component)
+        for name, (value, mono) in self._named.items():
+            if now - mono <= NAMED_HOLD_S:
+                s.named[name] = M.good(value, source=src, recv_mono=mono)
+        s.pilot_gain = s.named.get("PilotGain", M.unknown)
+
+    def _status_text(self, slow: dict, prev: NavSnapshot, s: NavSnapshot,
+                     now: float) -> None:
+        """The newest STATUSTEXT, and whether it says there is a leak."""
+        src = Source("mav:STATUSTEXT", "STATUSTEXT", self.mav.system,
+                     self.mav.component)
+        st = slow.get("STATUSTEXT") if slow else None
+        if st is not None and st.fresh:
+            text = st.get("text")
+            if isinstance(text, list):
+                text = "".join(c for c in text if isinstance(c, str) and c != chr(0))
+            text = str(text or "").strip()
+            if text:
+                self._text = (text, st.mono or now)
+                if "leak" in text.lower():
+                    self._leak_mono = st.mono or now
+                    self._emit("leak_text", {"text": text})
+        if self._text is not None:
+            s.statustext = M.good(self._text[0], source=src, recv_mono=self._text[1])
+        leaking = self._leak_mono is not None and now - self._leak_mono <= LEAK_HOLD_S
+        if leaking:
+            s.leak = M.good(True, source=src, recv_mono=self._leak_mono,
+                            note="ArduSub reports a leak")
+        elif s.armed.quality.has_value:
+            s.leak = M.good(False, source=src, recv_mono=now,
+                            note="no leak reported")
+        else:
+            s.leak = prev.leak
 
     def _power(self, fast: dict, prev: NavSnapshot, s: NavSnapshot,
                now: float) -> None:

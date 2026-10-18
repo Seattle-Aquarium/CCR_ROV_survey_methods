@@ -27,6 +27,7 @@ import math
 import time
 from urllib.parse import urlsplit
 
+from .. import paramfile
 from ..nav import collector as C
 from ..nav import extensions as E
 from ..nav import geo
@@ -37,7 +38,8 @@ from .world import ORIGIN, TOPSIDE, TOPSIDE_HEADING, SimWorld
 #: Never resolves, so nothing that bypasses the simulator can reach a network.
 SIM_HOST = "simulated-rov.invalid"
 
-#: The navigation parameters from the 15 October 2026 flight record.
+#: The navigation parameters from the 15 October 2026 flight record: what
+#: the simulated vehicle has if the reference file cannot be read.
 PARAMS: dict[str, float] = {
     "AHRS_EKF_TYPE": 3.0, "AHRS_GPS_USE": 1.0, "AHRS_ORIENTATION": 16.0,
     "AHRS_ORIG_LAT": ORIGIN[0], "AHRS_ORIG_LON": ORIGIN[1], "AHRS_ORIG_ALT": 0.0,
@@ -58,6 +60,34 @@ PARAMS: dict[str, float] = {
     "WPNAV_SPEED": 20.0,
 }
 
+#: Where the simulated vehicle differs from Nereo's reference file, so the
+#: Parameters tab has something to show. Each kind on purpose:
+DIFFERENCES = {
+    # Two key parameters somebody changed and did not change back.
+    "JS_GAIN_DEFAULT": 0.5,
+    "JS_LIGHTS_STEPS": 4.0,
+    # Two others, which only the second section lists.
+    "PSC_VELXY_P": 6.0,
+    "NTF_LED_BRIGHT": 1.0,
+    # Ones the autopilot rewrites by itself, which are not differences.
+    "STAT_RUNTIME": 1_284_311.0, "STAT_FLTTIME": 102_377.0, "STAT_BOOTCNT": 412.0,
+    "BARO1_GND_PRESS": 101_822.4, "BARO2_GND_PRESS": 102_160.9,
+    "COMPASS_DEC": 0.2655291, "SR0_EXTRA1": 4.0, "SR0_POSITION": 3.0,
+    # And the site's origin, which belongs to the site and not to the file.
+    "ORIGIN_LAT": ORIGIN[0], "ORIGIN_LON": ORIGIN[1],
+}
+
+
+def vehicle_params() -> dict[str, float]:
+    """Every parameter the simulated vehicle has: Nereo's reference, as the
+    real one would have it, with `DIFFERENCES` on top."""
+    ref = paramfile.read(paramfile.reference_path("Nereo"))
+    params = dict(ref.params) if ref.params else dict(PARAMS)
+    params.update(PARAMS)            # the navigation set flown on 15 October
+    params.update(DIFFERENCES)
+    return params
+
+
 #: How often the autopilot sends each message, as mavlink2rest measured them.
 RATES = {
     "ATTITUDE": 10.0, "VFR_HUD": 4.0, "GLOBAL_POSITION_INT": 5.0,
@@ -65,6 +95,7 @@ RATES = {
     "BATTERY_STATUS": 1.0, "HEARTBEAT": 1.0, "EKF_STATUS_REPORT": 2.0,
     "GPS_RAW_INT": 5.0, "SYS_STATUS": 2.0, "SCALED_PRESSURE2": 2.0,
     "VIBRATION": 2.0, "SYSTEM_TIME": 1.0, "DISTANCE_SENSOR": 9.2,
+    "STATUSTEXT": 0.02,
 }
 
 #: EKF_STATUS_REPORT flag bits.
@@ -231,8 +262,9 @@ def message(world: SimWorld, sysid: int, comp: int, name: str, t: float):
         names = ("CamTilt", "CamPan", "TetherTrn", "Lights1", "Lights2",
                  "PilotGain", "InputHold", "RollPitch", "RFTarget")
         which = names[int(t * 10) % len(names)]
-        value = (v.surftrak_target if v.surftrak_target else -0.01) \
-            if which == "RFTarget" else 0.0
+        value = {"RFTarget": v.surftrak_target if v.surftrak_target else -0.01,
+                 "PilotGain": 0.5, "Lights1": 1700.0, "Lights2": 1700.0,
+                 "CamTilt": 1500.0}.get(which, 0.0)
         return ({"type": "NAMED_VALUE_FLOAT", "time_boot_ms": boot_ms,
                  "name": which, "value": value}, RATES[name], True)
     if name == "BATTERY_STATUS":
@@ -295,6 +327,15 @@ def message(world: SimWorld, sysid: int, comp: int, name: str, t: float):
     if name == "SYSTEM_TIME":
         return ({"type": "SYSTEM_TIME", "time_unix_usec": int(wall * 1e6),
                  "time_boot_ms": boot_ms}, RATES[name], True)
+    if name == "STATUSTEXT":
+        leaking = key == "leak_detected"
+        text = "Leak Detected" if leaking else "EKF3 IMU0 is using GPS"
+        return ({"type": "STATUSTEXT",
+                 "severity": {"type": "MAV_SEVERITY_CRITICAL" if leaking
+                              else "MAV_SEVERITY_INFO"},
+                 "text": list(text.ljust(50, chr(0))), "id": 0, "chunk_seq": 0},
+                # ArduSub repeats the leak warning; the rest is said once.
+                0.5 if leaking else RATES[name], True)
     # GPS_GLOBAL_ORIGIN and AUTOPILOT_VERSION come only when asked for.
     return None
 
@@ -332,7 +373,7 @@ class SimNavCollector(C.NavCollector):
         super().__init__(SIM_HOST, allow_writes=False, on_event=on_event)
         self.world = world
         self.mav = SimMav(world)
-        self.set_parameter_reader(lambda: dict(PARAMS))
+        self.set_parameter_reader(vehicle_params)
 
     def start(self, session_id: str = "") -> None:
         super().start(session_id)

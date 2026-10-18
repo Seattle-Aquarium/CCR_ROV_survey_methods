@@ -127,10 +127,8 @@ class LogsPage(ctk.CTkFrame):
 
     def _build_files(self, body) -> None:
         c = Card(body, "1.  Files",
-                 "Tick the types, then search. Totals come first; open them "
-                 "up with List individual files. Click a type, a folder or a "
-                 "file to select it — click again to unselect, Shift-click for "
-                 "a range. What is selected is the Manual selection below.")
+                 "Tick the types, then search. Click to select, again to "
+                 "unselect, Shift-click for a range.")
         c.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         c.body.grid_columnconfigure(0, weight=1)
         self.card = c

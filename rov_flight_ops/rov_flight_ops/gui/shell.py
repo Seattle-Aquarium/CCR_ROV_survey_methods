@@ -273,8 +273,10 @@ class TabStrip(ctk.CTkFrame):
 
     def add(self, name: str, key: str = "") -> ctk.CTkFrame:
         n = len(self._buttons) + 1
+        # Sized to the name: eight tabs at the default width did not fit
+        # a 1500-pixel window beside the recorder's badge.
         btn = ctk.CTkButton(
-            self, text=f"{n}  {name}", font=T.FONT_TAB, height=36,
+            self, text=f"{n}  {name}", font=T.FONT_TAB, height=36, width=40,
             corner_radius=8, fg_color="transparent", hover_color=T.SURFACE,
             text_color=T.TEXT_MUTED, border_width=0, border_color=T.ACCENT,
             command=lambda: self.select(name))

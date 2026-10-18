@@ -368,3 +368,18 @@ def test_manual_flight_is_not_closed_by_the_disarm_watcher(tmp_path, monkeypatch
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+def test_every_strip_has_a_unit_beside_its_axis():
+    """Counts, flags, bytes and uptime too: a number with no unit beside it
+    was the one thing on the strip that could not be read on its own."""
+    from rov_flight_ops.gui import monitorpage as MP
+    for group, columns in laptop.GROUPS.items():
+        for column in columns:
+            top = 3e9 if laptop.UNITS.get(column) == "bytes" else 10.0
+            _div, unit = MP.axis_scale(column, top)
+            assert unit, f"{group}: {column} has no unit"
+    assert MP.axis_scale("phy_rx_bytes", 3 * 2 ** 30) == (2 ** 30, "GiB")
+    assert MP.axis_scale("system_uptime_s", 3 * 3600) == (3600.0, "h")
+    assert MP.axis_scale("cpu_package_temp_c", 50) == (1.0, "°C")
+    assert MP.axis_scale("network_packets_discarded", 4) == (1.0, "packets")

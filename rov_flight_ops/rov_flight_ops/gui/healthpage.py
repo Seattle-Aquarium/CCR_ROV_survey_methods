@@ -100,9 +100,8 @@ class HealthPage(ctk.CTkFrame):
         self.repair_btn.configure(state="disabled")
 
         c4 = Card(body, "5.  Autopilot logs (.BIN)",
-                  "The flight controller writes these itself, so they survive "
-                  "a companion-computer failure. Use them when a transect has "
-                  "no telemetry in the mcap.")
+                  "Written by the flight controller, so they survive a Pi "
+                  "failure. For transects with no telemetry in the mcap.")
         c4.grid(row=3, column=0, sticky="ew", pady=(0, 12))
         c4.body.grid_columnconfigure(0, weight=1)
         self.bins_frame = ctk.CTkFrame(c4.body, fg_color="transparent")

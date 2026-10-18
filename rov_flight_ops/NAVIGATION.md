@@ -64,6 +64,8 @@ confirm a specific change.
 |   lat/lon · source · age            ‖  tools · features         |
 +-------------------------------------‖ ─ ─ ─ ─ ─ ═ ─ ─ ─ ─ ─ ─ ─ |
 | GUIDANCE  |  SITE / ORIGIN | TO SITE‖  inspector: meters, °T    |
+| ALT · DEPTH · FWD · GAIN | V · A · W ‖                           |
+| UGPS receivers Rx 0-3               ‖                           |
 +-------------------------------------+---------------------------+
 ```
 
@@ -80,18 +82,13 @@ line of their own rather than losing **Apply**. To give the map more height,
 drag the log pane at the foot of the window closed — the map takes whatever
 height the page has.
 
-**The flight and power gauges are gone.** The altitude gauge, the 0–1,000 W
-power gauge and their rows used to sit here; live, in the water, nobody looked
-at them — Cockpit is on the monitor above with the same numbers on it — and
-they were taking the space the map and the diagnostics needed.
-
-**None of that telemetry stopped being collected.** The collector still gathers
-altitude, depth, speed, voltage, current, watts and watt-hours on every cycle,
-and navigation, the session log, replay, the flight summary and the exported
-CSVs all still read them. What went is the gauge widgets on this page, not the
-measurements behind them. `gui/navgauges.py` is still in the tree, still
-tested, and currently drawn by nothing — if these want a home later, it is
-waiting.
+**The flight numbers are one row under the map**, not gauges: altitude above
+the bottom with Surftrak's setpoint under it (*no lock* when the range is
+invalid), depth, forward speed along the heading (the EKF's
+`LOCAL_POSITION_NED` velocity turned through the vehicle's yaw), the pilot's
+gain (ArduSub's `PilotGain` named value, as a percentage), and busbar volts,
+amps and watts. A stale value is muted; a missing one is a dash, never a zero.
+The old dials are still in `gui/navgauges.py`, tested and drawn by nothing.
 
 **Navigation readiness** is the profile selector and the sensor matrix. Its
 four columns are four different questions, and conflating any two of them is
@@ -549,15 +546,17 @@ how much that claim is worth, and those are different questions that the same
 two numbers answer identically whether the acoustics are correcting the
 estimator or stopped four minutes ago.
 
-So **the track is colored by what each position was resting on**, and the line
-under the coordinates says it in words.
+So **the track is drawn by what each position was resting on**, and the line
+under the coordinates says it in words. The ROV's track is black and the
+vessel's red (October 2026: both have to be found instantly), each on a white
+halo; the ROV's pattern carries the trust:
 
 | On the map | Means |
 |---|---|
-| **green** | acoustically aided — an absolute position with a recent fix behind it |
-| **blue** | dead-reckoned — relative aiding from a confirmed origin. The shape is right; the whole thing drifts |
-| **coral** | degraded — aiding is claimed but something behind it is stale or invalid |
-| **coral, dashed** | no aiding at all — constant-position mode |
+| **black, solid** | acoustically aided — an absolute position with a recent fix behind it |
+| **black, long dashes** | dead-reckoned — relative aiding from a confirmed origin. The shape is right; the whole thing drifts |
+| **dark orange** | degraded — aiding is claimed but something behind it is stale or invalid |
+| **dark orange, dashed** | no aiding at all — constant-position mode |
 | **gray, dotted** | not established |
 
 Each point keeps the verdict it was recorded with. A track recoloured from the
@@ -704,10 +703,10 @@ uploaded to the vehicle.
 
 ## Energy, and where the flight gauges went
 
-**There is no longer a power gauge on any page.** This chapter used to carry
-one, and an altitude gauge; they went in the September 2026 restructure,
-because the space mattered more than the dials did and Cockpit already shows
-the pilot the same numbers.
+**There is no power gauge on any page.** This chapter used to carry one, and
+an altitude gauge; they went in the September 2026 restructure, because the
+space mattered more than the dials did. Volts, amps and watts are plain
+numbers now, under the map and at the top of the Monitoring board.
 
 Everything below still describes how the numbers are computed, because the
 computation is still running: `nav/power.py` is unchanged, the collector reads
@@ -763,8 +762,8 @@ saved state whose session id matches — yesterday's total is not this flight's.
 Every message's age is the time since a **new** message arrived, taken from
 mavlink2rest's own counter — not the time since the last successful request.
 A successful HTTP GET proves the service answered; it says nothing about
-whether the vehicle has sent anything. **Message health** under *Health…*
-shows the counter, the measured rate and the real age for every message.
+whether the vehicle has sent anything. **Message health** on the
+Parameters tab shows the measured rate and the real age for every message.
 
 ---
 
@@ -905,7 +904,7 @@ With Nereo on the bench, disarmed, tether connected. Tick these before flying.
 
 **Connection**
 - [ ] The page finds the vehicle; the footer shows the host and an age.
-- [ ] *Health… → Message health* lists `ATTITUDE`, `VFR_HUD`,
+- [ ] *Parameters → Message health* lists `ATTITUDE`, `VFR_HUD`,
       `GLOBAL_POSITION_INT`, `RANGEFINDER`, `NAMED_VALUE_FLOAT`,
       `BATTERY_STATUS` with plausible rates.
 - [ ] Unplug the tether: within a few seconds every reading goes stale and the

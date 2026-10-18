@@ -234,6 +234,11 @@ CATALOG: dict[str, tuple[Fault, ...]] = {
            GNSS compass stopped sending NMEA, or the extension's listener died
            on a sentence it does not know (the October 2026 firmware-update
            problem). Both vessel rows go red."""),
+        _f(NAV, "leak_detected", "a leak sensor is wet",
+           """ArduSub is sending "Leak Detected" every 20 seconds: a moisture
+           sensor in one of the enclosures is wet. The Leak sensors row on the
+           Monitoring board goes red. Surface, power down and open the
+           enclosures before the water reaches the electronics."""),
         _f(NAV, "compass_interference", "the ROV's compass is disturbed",
            """The vehicle's heading swings by twenty degrees either way while it
            flies straight -- magnetic interference from a piling or a steel
@@ -252,8 +257,8 @@ CATALOG: dict[str, tuple[Fault, ...]] = {
            out. Look at the spectrum."""),
         _f(DVL, "bottom_lock_lost", "the DVL has lost bottom lock",
            """No beam finds the bottom: altitude reads −1, velocity is invalid,
-           and the stock BlueOS extension drops every invalid report -- so the
-           rates under "Did it reach the autopilot?" fall to zero. These are the
+           and the stock BlueOS extension drops every invalid report -- so its
+           rates under Delivery and stream health fall to zero. These are the
            gaps that end up in the mcap."""),
         _f(DVL, "extension_stopped", "the BlueOS DVL extension stopped",
            """The DVL is fine and streaming, but the BlueOS extension that

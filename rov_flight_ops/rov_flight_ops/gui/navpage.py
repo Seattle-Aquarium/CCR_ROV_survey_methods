@@ -2,11 +2,9 @@
 Navigation: planning and following surveys, and the health of what navigates.
 
 This chapter is about *where*: laying out a survey, following it, and knowing
-whether the position it is drawn against can be believed. Altitude, velocity,
-depth and power used to have gauges here and no longer do -- they are flying
-instruments rather than navigation ones, the space they took is worth more to
-the map, and the telemetry behind them is still collected, logged, replayed
-and used wherever navigation needs it.
+whether the position it is drawn against can be believed. Altitude, depth,
+speed, gain and power are one row of plain numbers under the map rather than
+gauges: the map is worth the space more.
 
     +-----------------------------------+----------------------+
     |                                   |  readiness · profile |
@@ -15,6 +13,7 @@ and used wherever navigation needs it.
     |                                   |  survey plan:        |
     +-----------------------------------+  tools, features,    |
     |  guidance / site / origin strip    |  inspector          |
+    |  altitude depth fwd gain | V A W   |                     |
     |  UGPS receivers: Rx 0-3 SNR        |                     |
     +-----------------------------------+----------------------+
 
@@ -25,7 +24,8 @@ any of them puts it back, and the settings file remembers where each was
 left. The strip
 beneath it carries what must never need looking for: which line is being
 followed and how far off it the vehicle is, the site, and whether the origin
-is confirmed. Under that, one row for the UGPS antenna's four receivers --
+is confirmed. Under that, the flight numbers, then one row for the UGPS
+antenna's four receivers --
 each one's signal-to-noise, noise floor and the last minute of it -- read
 straight from the G2 topside, with a line saying whether any receiver
 stands out from the others. Details expand into a drawer over the page;
@@ -267,9 +267,13 @@ class NavigationPage(ctk.CTkFrame):
 
         self._build_strip(col, row=3)
 
+        from .flightstrip import FlightNumbers
+        self.numbers = FlightNumbers(col)
+        self.numbers.grid(row=4, column=0, sticky="ew", pady=(6, 0))
+
         from .ugpsstrip import ReceiversStrip
         self.ugps_strip = ReceiversStrip(col, self.app)
-        self.ugps_strip.grid(row=4, column=0, sticky="ew", pady=(6, 0))
+        self.ugps_strip.grid(row=5, column=0, sticky="ew", pady=(6, 0))
         self._ugps_ticks = 0
 
     def _build_strip(self, parent, row: int) -> None:
@@ -838,6 +842,12 @@ class NavigationPage(ctk.CTkFrame):
             self._start_live()
         self._render()
 
+    def ensure_live(self) -> None:
+        """Start reading the vehicle if nothing is yet, without waiting for
+        the tab to be opened: the Monitoring board reads the same snapshot."""
+        if self.collector is None:
+            self._start_live()
+
     def _start_live(self) -> None:
         host = (self.app.vehicle_host() or "192.168.2.2"
                 if hasattr(self.app, "vehicle_host") else "192.168.2.2")
@@ -896,6 +906,13 @@ class NavigationPage(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _tick(self) -> None:
+        try:
+            if self.numbers.winfo_ismapped():
+                self.numbers.update_from(self.collector.snapshot()
+                                         if self.collector else None)
+        except Exception:
+            diagnostics.log_exception("navigation numbers", *sys.exc_info(),
+                                      level=logging.WARNING)
         try:
             self._render_ugps()
         except Exception:

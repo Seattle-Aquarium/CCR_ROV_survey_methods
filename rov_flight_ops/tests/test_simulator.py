@@ -467,3 +467,80 @@ def test_the_mounting_offset_line_clears_the_beam_tiles(app):
     finally:
         app.simulator.disengage("test")
         app.withdraw()
+
+
+# --------------------------------------------------------------------------
+#  what the Monitoring board, Navigation numbers and Parameters tab read
+# --------------------------------------------------------------------------
+
+
+def test_a_leak_reaches_the_snapshot_and_the_gain_and_forward_speed_are_read():
+    from rov_flight_ops.sim.nav import SimNavCollector
+    w = W.SimWorld()
+    s0 = w.schedule.windows(S.NAV, "leak_detected", w.t() + 3000)[0]
+    w.t0_mono -= (s0 + 2) - w.t()                     # jump into the leak
+    col = SimNavCollector(w)
+    col.start("test")
+    try:
+        assert wait_for(lambda: col.snapshot().leak.value is True, 15), \
+            "the leak text was not read"
+        s = col.snapshot()
+        assert "Leak" in s.statustext.value
+        assert wait_for(lambda: col.snapshot().pilot_gain.number() is not None, 10)
+        assert col.snapshot().pilot_gain.number() == pytest.approx(0.5)
+        fwd, spd = col.snapshot().forward.held(), col.snapshot().speed.held()
+        assert fwd is not None and spd is not None and abs(fwd) <= spd + 0.05
+    finally:
+        col.stop(2.0)
+
+
+def test_the_simulated_vehicle_differs_from_its_reference_on_purpose():
+    from rov_flight_ops import paramcheck as PC
+    from rov_flight_ops import paramfile
+    from rov_flight_ops.sim import nav as SN
+    cmp = PC.compare(SN.vehicle_params(),
+                     paramfile.read(paramfile.reference_path("Nereo")).params)
+    assert {r.name for r in cmp.key_differences} == {"JS_GAIN_DEFAULT",
+                                                     "JS_LIGHTS_STEPS"}
+    assert {r.name for r in cmp.others} == {"PSC_VELXY_P", "NTF_LED_BRIGHT"}
+    assert {"STAT_RUNTIME", "COMPASS_DEC", "SR0_POSITION"} <= set(cmp.ignored)
+
+
+def test_the_new_panels_fill_from_the_simulated_vehicle(app):
+    app.simulator.engage()
+    try:
+        app.deiconify()
+        app.geometry("1500x950")
+        app.nav.select("Monitoring")
+        _pump(app, 4.0)
+        board = app.pages["monitor"].board
+        assert {"link", "navigator", "dvl", "leak", "rx", "u1"} <= set(board._rows)
+        assert board.headline.cget("text")
+        assert " V " in board.power_label.cget("text") + " "
+        assert not board.power_label.cget("text").startswith("—")
+
+        app.nav.select("Parameters")
+        _pump(app, 3.0)
+        params = app.pages["parameters"]
+        params._update()
+        assert params.comparison.headline()[0] == "DIFFERS"
+        ok, why = params._writable(params._snapshot())
+        assert not ok and "armed" in why            # the simulated ROV is flying
+        assert params.key_all.cget("state") == "disabled"
+
+        app.nav.select("Navigation")
+        _pump(app, 2.0)
+        value, _sub = app.pages["navigation"].numbers.cells["depth"]
+        assert value.cget("text").endswith(" m")
+
+        app.nav.select("DVL")
+        _pump(app, 3.0)
+        dvl = app.pages["dvl"]
+        # The four beams and the echo start level with each other.
+        beams_card = dvl.beams.master.master
+        echo_card = dvl.acoustic.master.master
+        assert abs(beams_card.winfo_rooty() - echo_card.winfo_rooty()) <= 2
+        assert dvl.charts.winfo_width() > dvl.beams.winfo_width() * 1.6,             "the live charts take the full width"
+    finally:
+        app.simulator.disengage("test")
+        app.withdraw()

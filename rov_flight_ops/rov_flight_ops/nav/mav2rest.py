@@ -519,6 +519,10 @@ SLOW = (
     "DISTANCE_SENSOR",
     "GPS_GLOBAL_ORIGIN",
     "AUTOPILOT_VERSION",
+    # The vehicle's own words. mavlink2rest keeps only the newest, but ArduSub
+    # repeats a leak warning every 20 s while the sensor is wet, so one read
+    # in two seconds does not miss it.
+    "STATUSTEXT",
 )
 
 #: How long each message stays believable once it has stopped arriving. A
@@ -545,6 +549,7 @@ MAX_AGE = {
     # not aged out on the clock at all -- it is shown with its age instead.
     "GPS_GLOBAL_ORIGIN": 1e9,
     "AUTOPILOT_VERSION": 1e9,
+    "STATUSTEXT": 1e9,
 }
 
 

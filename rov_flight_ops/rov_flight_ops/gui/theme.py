@@ -41,6 +41,12 @@ ERROR = pair("error")
 FIELD_BG = (brand.WHITE, "#0A1E36")
 FIELD_BORDER = (brand.STONE_TINTS[20], "#37567F")
 
+#: The chosen segment of a segmented button. Its text is TEXT whichever is
+#: chosen, so the chosen colour is a tint TEXT can be read on -- the accent
+#: itself put grey on blue in light mode and white on bright green in dark.
+SEGMENT_SELECTED = ("#CFE0F4", "#00785A")
+SEGMENT_SELECTED_HOVER = ("#B9D2EE", "#006A50")
+
 # Type scale, following the hierarchy on p.24 of the guidelines: Title is Bold,
 # Header 1 Medium, Header 2 SemiBold, body copy Regular.
 #

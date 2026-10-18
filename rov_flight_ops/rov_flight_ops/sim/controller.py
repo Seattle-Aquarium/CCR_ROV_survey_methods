@@ -168,16 +168,11 @@ class Simulator:
         app._show_versions()
         app.folder_entry.delete(0, "end")
         app.folder_entry.insert(0, str(self.folder))
-        from ..gui.widgets import say
         was = s["flight_dir"]
-        say(app.found, "ROV FLIGHT SIMULATOR — this is the simulator's own flight "
-                       "folder, emptied each time it starts. Nothing the "
-                       "simulation does is written anywhere else, and nothing "
-                       "reaches a vehicle.\n"
-                       + (f"Your flight folder ({was}) is put back when the "
-                          f"simulator is switched off." if was else
-                          "No flight folder was chosen before; none will be "
-                          "afterwards."))
+        app._log("The flight folder is now the simulator's own, emptied each "
+                 "time it starts. "
+                 + (f"Yours ({was}) is put back when it is switched off." if was
+                    else "None was chosen before; none will be afterwards."))
         from ..survey import SurveyPlan, plan_path
         app._apply_plan(SurveyPlan.load(plan_path(self.folder)))
 
@@ -233,9 +228,6 @@ class Simulator:
         app.folder_entry.delete(0, "end")
         if app.flight_dir:
             app.folder_entry.insert(0, str(app.flight_dir))
-        from ..gui.widgets import say
-        say(app.found, "Nothing selected yet." if not app.flight_dir else
-            f"Reading {app.flight_dir}…")
         plan = s.get("plan")
         if plan is not None:
             app._apply_plan(plan)

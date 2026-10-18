@@ -53,8 +53,6 @@ from .widgets import (
     entry,
     fit_wrap,
     label,
-    output_box,
-    say,
 )
 
 #: How far back the charts look. A survey transect is a few minutes, so the
@@ -74,8 +72,10 @@ ROW_H = 86
 #: Room at the left for the reading's name and thresholds, and for its value.
 NAME_W = 236
 VALUE_W = 136
-#: Kept clear on the right for the strip's own axis labels.
-AXIS_W = 84
+#: Kept clear on the right for the strip's own axis labels and its unit.
+AXIS_W = 124
+#: The space between one strip's box and the next.
+STRIP_GAP = 6
 #: The shared time axis along the foot.
 TIME_H = 30
 #: Space above and below the line inside each strip.
@@ -90,10 +90,54 @@ FONT_TIP = (T.FAMILY, 10)
 
 #: Colours that are not a reading's level, as (light, dark).
 GRID_FAINT = ("#E4E8EE", "#16304F")
+#: Each strip's box, and its edge: a strip should read as one thing, and the
+#: strip under it as another.
+STRIP_FILL = ("#F3F6F9", "#0F2643")
+STRIP_EDGE = ("#C9D2DD", "#29507A")
 #: A line for a reading with no thresholds -- not a status colour.
 PLAIN_LINE = ("#4F6D8F", "#9FB4C7")
 #: The simulator's own colour, for the strips it fills that L342-D cannot.
 SIM_MARK = ("#5B3F8C", "#B9A2E6")
+
+#: What a reading with no unit of its own is counted in, for the axis.
+COUNT_UNITS = {
+    "disk_queue_length": "requests",
+    "network_packets_discarded": "packets",
+    "cockpit_process_count": "processes",
+    "cockpit_handle_count": "handles",
+    "cockpit_thread_count": "threads",
+    "pi_eth_carrier_drops": "drops",
+}
+
+
+def axis_scale(column: str, top: float) -> tuple[float, str]:
+    """(divisor, unit) for a strip's axis: bytes in KiB/MiB/GiB and uptime
+    in minutes or hours, so the labels are plain numbers and the unit is said
+    once, beside them."""
+    unit = laptop.UNITS.get(column, "")
+    if unit == "bytes":
+        for size, suffix in ((2 ** 30, "GiB"), (2 ** 20, "MiB"), (2 ** 10, "KiB")):
+            if abs(top) >= size:
+                return float(size), suffix
+        return 1.0, "bytes"
+    if column == "system_uptime_s":
+        return (3600.0, "h") if abs(top) >= 2 * 3600 else (60.0, "min")
+    if column in BOOL_COLUMNS:
+        return 1.0, "state"
+    if unit == "C":
+        return 1.0, "°C"
+    return 1.0, unit or COUNT_UNITS.get(column, "")
+
+
+def axis_number(v: float) -> str:
+    if v == int(v) and abs(v) < 1e6:
+        return f"{int(v):,}"
+    if abs(v) >= 1000:
+        return f"{v:,.0f}"
+    if abs(v) >= 10:
+        return f"{v:.1f}"
+    return f"{v:.2f}"
+
 
 #: Readings that are TRUE or FALSE, drawn on a fixed two-value axis.
 BOOL_COLUMNS = frozenset({"nic_carrier", "phy_carrier", "nic_low_power",
@@ -172,12 +216,40 @@ FAST_TRACE_NOTE = (
     f"here.")
 
 
-class MonitorPage(ctk.CTkFrame):
-    """The recorder, the path to the vehicle, and the live charts.
+def _short_status(st) -> str:
+    """The recorder's state in a few words; the flight id is on every tab's
+    status line already, and the whole story is in the log."""
+    if st.problem:
+        return st.problem if len(st.problem) < 60 else st.problem[:57] + "…"
+    if st.state == "recording":
+        mins = (time.time() - st.started) / 60 if st.started else 0
+        tail = " · by hand" if st.by_hand else (
+            f" · closing in {max(0, flightlog.DISARM_GRACE_S - st.since_disarm):.0f} s"
+            if st.since_disarm is not None else "")
+        return f"Recording · {st.rows:,} rows · {mins:.1f} min{tail}"
+    if st.state == "starting":
+        return "Starting…"
+    if st.state == "closing":
+        return "Closing — reading the vehicle…"
+    if st.transition:
+        return f"{st.transition}…"
+    return "Waiting for the vehicle" if st.armed is None else "Waiting for the ROV to arm"
 
-    Built into whatever parents the Monitoring tab gives it -- the vehicle path
-    and the recorder side by side, the charts beneath -- or, given none, into a
-    scrolling column of its own.
+
+def _set_text(widget, text: str, color) -> None:
+    if getattr(widget, "_shown", None) != (text, color):
+        widget._shown = (text, color)
+        widget.configure(text=text, text_color=color)
+
+
+class MonitorPage(ctk.CTkFrame):
+    """The system at a glance, the flight (folder, recording, vehicle), and
+    the live charts.
+
+    Built into whatever parents the Monitoring tab gives it -- the glance on
+    the left, the flight on the right, the charts beneath -- or, given none,
+    into a scrolling column of its own. Every message goes to the window's
+    log at the foot of the program: this tab has no report boxes of its own.
     """
 
     def __init__(self, master, app, parents=None):
@@ -212,106 +284,77 @@ class MonitorPage(ctk.CTkFrame):
             body.grid(row=0, column=0, sticky="nsew")
             body.grid_columnconfigure(0, weight=1)
             parents = (body, body, body)
-            rows = (1, 0, 2)
+            rows = (0, 1, 2)
         else:
             rows = (0, 0, 0)
-        network_parent, recorder_parent, chart_parent = parents
-        self._build_network_card(network_parent, rows[0])
-        self._build_recorder_card(recorder_parent, rows[1])
+        board_parent, flight_parent, chart_parent = parents
+        from .goboard import GoBoard
+        self.board = GoBoard(board_parent)
+        self.board.grid(row=rows[0], column=0, sticky="nsew", pady=(0, 12))
+        self._build_flight_card(flight_parent, rows[1])
         self._build_chart_card(chart_parent, rows[2])
 
     # ------------------------------------------------------------------
-    #  the recorder
+    #  the flight: folder, recording, vehicle
     # ------------------------------------------------------------------
 
-    def _build_recorder_card(self, body, row: int) -> None:
-        c = Card(body, "3.  Recording this flight",
-                 "Starts itself when the ROV arms and closes when it has been "
-                 "disarmed for 90 seconds, so a surface interval between "
-                 "transects does not split one dive into several files. "
-                 "Everything lands in the flight folder's logs folder.")
+    def _build_flight_card(self, parent, row: int) -> None:
+        """Three lines, one per thing done here: choose the folder, start or
+        stop the recording, check the path to the vehicle."""
+        c = Card(parent, "2.  Flight")
         c.grid(row=row, column=0, sticky="nsew", pady=(0, 12))
-        c.body.grid_columnconfigure(0, weight=1)
+        b = c.body
+        b.grid_columnconfigure(1, weight=1)
+        for r, text in enumerate(("Folder", "Recording", "Vehicle")):
+            label(b, text, muted=True).grid(row=r, column=0, sticky="w",
+                                           padx=(0, 12), pady=3)
 
-        r = ctk.CTkFrame(c.body, fg_color="transparent")
-        r.grid(row=0, column=0, sticky="w")
+        builder = getattr(self.app, "build_folder_row", None)
+        if callable(builder):
+            builder(b, row=0, column=1)
+
+        r = ctk.CTkFrame(b, fg_color="transparent")
+        r.grid(row=1, column=1, sticky="ew", pady=3)
+        r.grid_columnconfigure(3, weight=1)
         self.watch_btn = button(r, "Start monitoring", self._toggle_watch,
-                                "primary", width=170)
+                                "primary", width=150)
         self.watch_btn.grid(row=0, column=0)
         self.manual_btn = button(r, "Record now", self._toggle_manual, "ghost",
-                                 width=130)
-        self.manual_btn.grid(row=0, column=1, padx=(8, 0))
-        button(r, "Open logs folder", self._open_logs, "ghost", width=150
-               ).grid(row=0, column=2, padx=(8, 0))
-
-        self.state_label = ctk.CTkLabel(
-            c.body, text="Not watching.", font=T.FONT_BODY,
-            text_color=T.TEXT_MUTED, anchor="w", justify="left",
-            wraplength=500)
-        self.state_label.grid(row=1, column=0, sticky="w", pady=(10, 0))
-
-        self.detail = ctk.CTkLabel(
-            c.body, text="", font=T.FONT_SMALL, text_color=T.TEXT_MUTED,
-            anchor="w", justify="left", wraplength=500)
-        self.detail.grid(row=2, column=0, sticky="w", pady=(4, 0))
-        fit_wrap(c.body, self.state_label, self.detail)
-
-    # ------------------------------------------------------------------
-    #  the path to the vehicle
-    # ------------------------------------------------------------------
-
-    def _build_network_card(self, body, row: int) -> None:
-        c = Card(body, "2.  The path to the vehicle",
-                 "Read this on deck, before the dive. It says which adapter "
-                 "actually carries the tether, whether that adapter is a "
-                 "bridge with a real one underneath it, and whether Windows "
-                 "is allowed to power any of them down. A flight recorded "
-                 "without knowing those is a flight whose network column "
-                 "cannot be interpreted afterwards.")
-        c.grid(row=row, column=0, sticky="nsew", pady=(0, 12))
-        c.body.grid_columnconfigure(0, weight=1)
+                                 width=110)
+        self.manual_btn.grid(row=0, column=1, padx=(6, 0))
+        button(r, "Logs", self._open_logs, "ghost", width=60
+               ).grid(row=0, column=2, padx=(6, 0))
+        # One line: what the recorder is doing. Everything longer goes to the
+        # log at the foot of the window.
+        self.state_label = ctk.CTkLabel(r, text="Not watching.", font=T.FONT_SMALL,
+                                        text_color=T.TEXT_MUTED, anchor="w")
+        self.state_label.grid(row=0, column=3, sticky="ew", padx=(10, 0))
 
         # The one place the vehicle's address is typed. Everything that talks
         # to the ROV -- the recorder, the logs tab, the preview -- reads it.
-        hr = ctk.CTkFrame(c.body, fg_color="transparent")
-        hr.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        hr.grid_columnconfigure(1, weight=1)
-        label(hr, "vehicle address", muted=True).grid(row=0, column=0,
-                                                      padx=(0, 8))
-        self.host_entry = entry(hr, "192.168.2.2  (blank = the tether address)",
-                                width=280)
-        self.host_entry.grid(row=0, column=1, sticky="ew")
+        hr = ctk.CTkFrame(b, fg_color="transparent")
+        hr.grid(row=2, column=1, sticky="ew", pady=3)
+        self.host_entry = entry(hr, "192.168.2.2 (blank = tether)", width=170)
+        self.host_entry.grid(row=0, column=0)
         saved = getattr(self.app, "settings", {}).get("vehicle_host", "")
         if saved:
             self.host_entry.insert(0, saved)
         self.host_entry.bind("<FocusOut>", lambda _e: self._remember_host())
         self.host_entry.bind("<Return>", lambda _e: self._remember_host())
-
-        r = ctk.CTkFrame(c.body, fg_color="transparent")
-        r.grid(row=1, column=0, sticky="w")
-        button(r, "Check the network", self._check_network, "primary",
-               width=170).grid(row=0, column=0)
-        button(r, "Measure the link", self._calibrate, "ghost", width=150
-               ).grid(row=0, column=1, padx=(8, 0))
-        button(r, "Save to flight folder", self._save_network, "ghost",
-               width=180).grid(row=0, column=2, padx=(8, 0))
-
-        self.net_box = output_box(c.body, wrap="none")
-        self.net_box.grid(row=2, column=0, sticky="ew", pady=(10, 0))
-        c.add_grip(self.net_box, self.net_box.min_height)
+        button(hr, "Check the network", self._check_network, "ghost",
+               width=140).grid(row=0, column=1, padx=(6, 0))
+        button(hr, "Measure the link", self._calibrate, "ghost", width=130
+               ).grid(row=0, column=2, padx=(6, 0))
+        button(hr, "Save", self._save_network, "ghost", width=60
+               ).grid(row=0, column=3, padx=(6, 0))
         self._net_text = ""
-        self._say(self.net_box,
-                  "Not checked yet.\n\n"
-                  "Check the network reads the adapters and their settings — "
-                  "about four seconds, most of it waiting on ARP.\n"
-                  "Measure the link watches the counters for four seconds "
-                  "with the tether live, and reports whether they move fast "
-                  "enough for the fast trace to mean anything on this "
-                  "laptop.")
+        self._capabilities_said: tuple = ()
 
-    @staticmethod
-    def _say(box, text: str) -> None:
-        say(box, text)
+    def _say(self, text: str) -> None:
+        """To the log at the foot of the window, where every message goes."""
+        log_to = getattr(self.app, "_log", None)
+        if callable(log_to):
+            log_to(text)
 
     def _remember_host(self) -> None:
         setter = getattr(self.app, "set_vehicle_host", None)
@@ -320,7 +363,6 @@ class MonitorPage(ctk.CTkFrame):
 
     def _check_network(self) -> None:
         host = self._host()
-        self._say(self.net_box, "Reading the adapters…")
         simulating = getattr(self.app, "simulating", False)
 
         def work(progress, cancel):
@@ -334,9 +376,8 @@ class MonitorPage(ctk.CTkFrame):
 
     def _calibrate(self) -> None:
         host = self._host()
-        self._say(self.net_box,
-                  "Watching the counters for four seconds — leave the video "
-                  "running while this runs.")
+        self._say("Watching the tether's counters for four seconds — leave the "
+                  "video running.")
 
         simulating = getattr(self.app, "simulating", False)
 
@@ -354,10 +395,10 @@ class MonitorPage(ctk.CTkFrame):
 
     def _network_done(self, result) -> None:
         if result is None or isinstance(result, Exception):
-            self._say(self.net_box, f"Could not read the network: {result}")
+            self._say(f"Could not read the network: {result}")
             return
         self._net_text = str(result)
-        self._say(self.net_box, self._net_text)
+        self._say(self._net_text)
 
     def _save_network(self) -> None:
         """Keep the check beside the flight it was taken for.
@@ -385,7 +426,7 @@ class MonitorPage(ctk.CTkFrame):
         except OSError as ex:
             messagebox.showerror("Could not save", str(ex))
             return
-        messagebox.showinfo("Saved", f"Written to logs\\{name}")
+        self._say(f"Network check saved to logs\\{name}.")
 
     def _logs_folder(self) -> Path | None:
         rec = self.recorder
@@ -394,15 +435,10 @@ class MonitorPage(ctk.CTkFrame):
         return Path(rec.flight_dir) / "logs"
 
     def _build_chart_card(self, body, row: int) -> None:
-        c = Card(body, "4.  Live monitoring",
-                 "One group at a time, each reading on its own scale. Colour "
-                 "says how it compares with a healthy flight: ● normal (green), "
-                 "▲ unusual (amber), ✖ bad (red); dashed lines are the "
-                 "thresholds, listed under each name — point at a name for "
-                 "why. Normal is measured from the September–October 2026 "
-                 "flights; unusual and bad are from the hardware's limits. "
-                 "Charts fill while a flight records. A blank strip is a "
-                 "sensor this laptop does not publish.")
+        c = Card(body, "3.  Live monitoring",
+                 "Colour compares with a healthy flight: ● normal (green), "
+                 "▲ unusual (amber), ✖ bad (red). Dashed lines are the "
+                 "thresholds; point at a name for details.")
         c.grid(row=row, column=0, sticky="ew")
         c.body.grid_columnconfigure(0, weight=1)
 
@@ -411,7 +447,7 @@ class MonitorPage(ctk.CTkFrame):
         self.group_pick = ctk.CTkSegmentedButton(
             strip, values=list(laptop.GROUPS), command=self._pick_group,
             font=T.FONT_SECTION, fg_color=T.SURFACE_ALT,
-            selected_color=T.ACCENT, selected_hover_color=T.ACCENT_HOVER,
+            selected_color=T.SEGMENT_SELECTED, selected_hover_color=T.SEGMENT_SELECTED_HOVER,
             unselected_color=T.SURFACE_ALT, unselected_hover_color=T.BORDER,
             text_color=T.TEXT)
         self.group_pick.set(self._group)
@@ -501,10 +537,9 @@ class MonitorPage(ctk.CTkFrame):
             if self.app.flight_dir is None:
                 messagebox.showinfo(
                     self.app.title(),
-                    "Choose a flight folder first, in section 1 above.\n\n"
-                    "The monitor writes into that folder's logs folder and "
-                    "will not guess one, so a flight is never filed somewhere "
-                    "nobody looks.")
+                    "Choose a flight folder first (section 2).\n\n"
+                    "The monitor writes into its logs folder and will not "
+                    "guess one.")
                 return
             rec.retarget(self._host())
             rec.request("watch")
@@ -552,10 +587,7 @@ class MonitorPage(ctk.CTkFrame):
 
     def _pick_group(self, name: str, redraw: bool = True) -> None:
         self._group = name
-        note = laptop.GROUP_NOTES.get(name, "")
-        if name in ("Network", "Tether"):
-            note = f"{note}\n{FAST_TRACE_NOTE}"
-        self.group_note.configure(text=note)
+        self.group_note.configure(text=laptop.GROUP_NOTES.get(name, ""))
         if redraw:
             self._redraw()
 
@@ -604,54 +636,76 @@ class MonitorPage(ctk.CTkFrame):
             if self.canvas.winfo_ismapped():
                 self._update_state()
                 self._redraw()
+            if self.board.winfo_ismapped():
+                self._update_board()
         except Exception:
-            pass
+            from .. import diagnostics
+            import logging
+            import sys
+            diagnostics.log_exception("Monitoring tick", *sys.exc_info(),
+                                      level=logging.WARNING)
         self.after(1000, self._tick)
+
+    def _update_board(self) -> None:
+        """Gather what the board judges, judge it, paint it.
+
+        The first time the board is on screen it starts the readers it needs
+        -- the Navigation tab's collector, the DVL view, the UGPS topside --
+        each of which is read-only and would start anyway when its own tab
+        was opened.
+        """
+        from .. import board as B
+        app = self.app
+        app.ensure_vehicle_readers()
+        nav = app.pages.get("navigation")
+        col = getattr(nav, "collector", None)
+        rec = getattr(app, "recorder", None)
+        dvl = app.dvl_recorder().live.snapshot(history=False)
+        # Read, not started: starting it is `ensure_vehicle_readers`'s call.
+        cap = app.simulator.ugps if getattr(app, "simulating", False) else app.ugps
+        ugps = cap.snapshot() if cap is not None else None
+        rows = rec.history.rows()[-120:] if rec is not None else []
+        inp = B.Inputs(snapshot=col.snapshot() if col is not None else None,
+                       recorder_status=rec.status if rec is not None else None,
+                       recorder_watching=bool(rec and rec.watching),
+                       latest_row=rows[-1] if rows else None,
+                       history_rows=rows, dvl=dvl, ugps=ugps)
+        self.board.update_from(B.judge(inp))
+        self.board.fit(self.board.winfo_width())
 
     def _update_state(self) -> None:
         rec = getattr(self.app, "recorder", None)
         if rec is None:
-            self.state_label.configure(text="Not watching.",
-                                       text_color=T.TEXT_MUTED)
-            self.detail.configure(text="")
+            _set_text(self.state_label, "Not watching.", T.TEXT_MUTED)
             return
         st = rec.status
-        color = T.WARN if st.problem else (
-            T.OK if st.state == "recording" else T.TEXT_MUTED)
-        self.state_label.configure(text=st.line(), text_color=color)
-
-        bits = [f"vehicle {rec.host}" + ("" if rec.watching else " (not watching)")]
-        if getattr(self.app, "simulating", False):
-            bits.append("ROV flight simulator: a simulated flight — nothing is "
-                        "written to disk")
+        bits = [_short_status(st)]
+        warn = bool(st.problem or st.degraded)
+        if st.state == "recording":
+            # Written is not the same as on the disk: rows are synced every
+            # few seconds, and this is the last time that succeeded.
+            if st.last_write and time.time() - st.last_write > 5:
+                bits.append(f"NOT WRITING for {time.time() - st.last_write:.0f} s")
+                warn = True
+            elif st.last_sync:
+                bits.append(f"synced {time.time() - st.last_sync:.0f} s")
+        elif st.state == "idle":
+            achieved = achieved_hz(rec.history)
+            if achieved is not None and st.outcome:
+                bits.append(f"{achieved:.2f} rows/s")
         if st.degraded:
             bits.append(f"⚠ {st.degraded}")
         if st.pending_host:
-            bits.append(f"switching to {st.pending_host} when this flight closes")
-        if st.state == "recording":
-            if st.csv_path is not None:
-                bits.append(f"writing {st.csv_path}")
-            if st.last_write:
-                age = time.time() - st.last_write
-                bits.append(f"last row written {age:.0f} s ago"
-                            + ("  <-- NOT WRITING" if age > 5 else ""))
-            # Written is not the same as on the disk: rows are synced every
-            # few seconds, and this is the last time that succeeded.
-            if st.last_sync:
-                bits.append(f"last synced to disk {time.time() - st.last_sync:.0f} s ago")
-        elif st.state == "idle" and st.outcome:
-            bits.append(f"last flight: {st.outcome}")
-            achieved = achieved_hz(rec.history)
-            if achieved is not None:
-                bits.append(f"rows at {achieved:.2f} Hz achieved (target "
-                            f"{1 / laptop.DEFAULT_PERIOD_S:g} Hz)")
-        elif rec.flight_dir:
-            bits.append(f"next flight goes to {Path(rec.flight_dir) / 'logs'}")
-        missing = [k for k, v in (rec.capabilities or {}).items()
-                   if v.startswith("unavailable")]
-        if missing:
-            bits.append("not readable on this laptop: " + ", ".join(missing))
-        self.detail.configure(text="\n".join(bits))
+            bits.append(f"→ {st.pending_host} next flight")
+        color = T.WARN if warn else (T.OK if st.state == "recording"
+                                     else T.TEXT_MUTED)
+        _set_text(self.state_label, "  ·  ".join(bits), color)
+        # Said once in the log, not repeated on screen.
+        missing = tuple(k for k, v in (rec.capabilities or {}).items()
+                        if v.startswith("unavailable"))
+        if missing and missing != self._capabilities_said:
+            self._capabilities_said = missing
+            self._say("Not readable on this laptop: " + ", ".join(missing) + ".")
         self._sync_buttons()
 
     # ------------------------------------------------------------------
@@ -752,7 +806,8 @@ class MonitorPage(ctk.CTkFrame):
         m = self._apply_appearance_mode
         out = {"text": m(T.TEXT), "muted": m(T.TEXT_MUTED), "grid": m(T.BORDER),
                "faint": m(GRID_FAINT), "plain": m(PLAIN_LINE),
-               "tip_bg": m(T.SURFACE), "tip_edge": m(T.BORDER), "sim": m(SIM_MARK)}
+               "tip_bg": m(T.SURFACE), "tip_edge": m(T.BORDER), "sim": m(SIM_MARK),
+               "strip": m(STRIP_FILL), "edge": m(STRIP_EDGE), "plot": m(T.FIELD_BG)}
         for level, pair in bands.LEVEL_COLORS.items():
             out[level] = m(pair)
         return out
@@ -793,12 +848,9 @@ class MonitorPage(ctk.CTkFrame):
         self._geom = {"s": s, "width": width, "columns": columns,
                       "x0": x0, "x1": x1}
 
-        # The time grid first, so every strip draws over it.
+        # The time grid is drawn inside each strip's plot.
         ticks = _time_ticks(span)
-        if x1 - x0 > 40 * s:
-            for ago in ticks:
-                x = x1 - ago / span * (x1 - x0)
-                cv.create_line(x, 0, x, plot_bottom, fill=c["faint"], dash=(2, 4))
+        self._ticks = ticks if x1 - x0 > 40 * s else ()
 
         simulated = bool(getattr(self.app, "simulating", False))
         for i, column in enumerate(columns):
@@ -826,8 +878,9 @@ class MonitorPage(ctk.CTkFrame):
         """One reading: its name and thresholds, its value and level, its line."""
         top = i * ROW_H * s
         bottom = top + ROW_H * s
-        if i:
-            cv.create_line(6 * s, top, width - 6 * s, top, fill=c["grid"])
+        inset = STRIP_GAP / 2 * s
+        cv.create_rectangle(2 * s, top + inset, width - 2 * s, bottom - inset,
+                            fill=c["strip"], outline=c["edge"])
 
         times, values, levels = self._judged(rec, column)
         cut = bisect.bisect_left(times, now - span)
@@ -837,8 +890,8 @@ class MonitorPage(ctk.CTkFrame):
 
         # A stripe down the left edge in the level's colour: the one thing to
         # see when scanning a group for trouble.
-        cv.create_rectangle(0, top + 6 * s, 5 * s, bottom - 6 * s,
-                            fill=c[level] if level is not None else c["grid"],
+        cv.create_rectangle(2 * s, top + inset, 8 * s, bottom - inset,
+                            fill=c[level] if level is not None else c["edge"],
                             outline="")
 
         name_room = (NAME_W - 22) * s
@@ -847,9 +900,8 @@ class MonitorPage(ctk.CTkFrame):
         cv.create_text(14 * s, top + 17 * s, anchor="w", fill=c["text"], font=f_name,
                        text=self._fit(column, FONT_NAME, s, name_room))
         unit = laptop.UNITS.get(column, "")
-        rate = hz_text(refresh_hz(column))
         cv.create_text(14 * s, top + 36 * s, anchor="w", fill=c["muted"],
-                       font=f_note, text=f"{unit}  ·  {rate}" if unit else rate)
+                       font=f_note, text=hz_text(refresh_hz(column)))
         limits = bands.threshold_text(column, unit)
         if limits:
             cv.create_text(14 * s, top + 53 * s, anchor="w", fill=c["muted"],
@@ -879,6 +931,12 @@ class MonitorPage(ctk.CTkFrame):
         if x1 - x0 < 30 * s:
             return
         f_axis = T.scale_font(FONT_AXIS, s)
+        box_top, box_bottom = top + (STRIP_GAP / 2 + 3) * s, top + (ROW_H - STRIP_GAP / 2 - 3) * s
+        cv.create_rectangle(x0, box_top, x1, box_bottom, fill=c["plot"],
+                            outline=c["edge"])
+        for ago in getattr(self, "_ticks", ()):
+            x = x1 - ago / span * (x1 - x0)
+            cv.create_line(x, box_top + 1, x, box_bottom, fill=c["faint"], dash=(2, 4))
         if len(values) < 2:
             cv.create_text((x0 + x1) / 2, (y0 + y1) / 2, text="—",
                            fill=c["muted"], font=f_axis)
@@ -915,19 +973,24 @@ class MonitorPage(ctk.CTkFrame):
             return x0 + max(0.0, min(1.0, fx)) * (x1 - x0)
 
         # The axis: three labelled ticks and faint lines across the strip.
+        div, unit = axis_scale(column, max(abs(hi), abs(lo)))
         if flag:
             marks = ((1.0, "TRUE"), (0.0, "FALSE"))
         else:
             mid = (hi + lo) / 2
-            marks = ((hi, _pretty(hi, column)), (mid, _pretty(mid, column)),
-                     (lo, _pretty(lo, column)))
+            marks = tuple((v, axis_number(v / div)) for v in (hi, mid, lo))
         for v, text in marks:
             y = y_of(v)
-            cv.create_line(x0, y, x1, y, fill=c["faint"])
+            cv.create_line(x0 + 1, y, x1, y, fill=c["faint"])
             cv.create_line(x1, y, x1 + 4 * s, y, fill=c["grid"])
             cv.create_text(x1 + 7 * s, y, anchor="w", fill=c["text"], font=f_axis,
                            text=text)
-        cv.create_line(x1, y0, x1, y1, fill=c["grid"])
+        # The unit once, beside the labels -- every strip has one.
+        if unit:
+            font = self._font(FONT_AXIS, s)
+            room = max(font.measure(text) for _v, text in marks)
+            cv.create_text(x1 + 7 * s + room + 6 * s, y_of((hi + lo) / 2), anchor="w",
+                           fill=c["muted"], font=f_axis, text=unit)
         if not flag:
             for val, lv in bands.threshold_lines(column):
                 if lo <= val <= hi:
