@@ -59,7 +59,8 @@ WARN_V = 10.5
 
 
 def output_pct(level: float) -> float:
-    for (a, pa), (b, pb) in zip(DIMMING, DIMMING[1:]):
+    # Each point with the next, so one list is a point shorter by design.
+    for (a, pa), (b, pb) in zip(DIMMING, DIMMING[1:], strict=False):
         if a <= level <= b:
             return pa + (pb - pa) * (level - a) / (b - a)
     return 0.0 if level <= 0 else 100.0
