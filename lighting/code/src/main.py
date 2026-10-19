@@ -340,7 +340,9 @@ class LightingController:
         for i in range(len(self._lights)):
             if self.set_light_level(i, level, why=why):
                 success += 1
-            # Let each light ACK before the next command (PR #43).
+            # Let each light ACK before the next command (PR #43). The pause
+            # is arbitrary: it could be tuned to the lights' actual response
+            # time, or the code that catches their replies made more robust.
             time.sleep_ms(self.INTER_LIGHT_MS)
         # Ask each light what it now thinks, ahead of the rotation.
         for addr in reversed(self.LIGHT_ADDRESSES):
