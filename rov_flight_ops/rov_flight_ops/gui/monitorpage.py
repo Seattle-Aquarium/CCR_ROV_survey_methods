@@ -639,9 +639,10 @@ class MonitorPage(ctk.CTkFrame):
             if self.board.winfo_ismapped():
                 self._update_board()
         except Exception:
-            from .. import diagnostics
             import logging
             import sys
+
+            from .. import diagnostics
             diagnostics.log_exception("Monitoring tick", *sys.exc_info(),
                                       level=logging.WARNING)
         self.after(1000, self._tick)

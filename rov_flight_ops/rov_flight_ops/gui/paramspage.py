@@ -148,12 +148,12 @@ class Table(ctk.CTkFrame):
                         lab.configure(wraplength=self._wrap)
                     grid_row += 1
                 self._widgets.append(made)
-        for r, made in zip(rows, self._widgets):
+        for r, made in zip(rows, self._widgets, strict=True):
             if r.get("header"):
                 text, font, color = r["cells"][0]
                 _set(made["cells"][0], text=text, font=font, text_color=color)
                 continue
-            for lab, (text, font, color) in zip(made["cells"], r["cells"]):
+            for lab, (text, font, color) in zip(made["cells"], r["cells"], strict=True):
                 _set(lab, text=text, font=font, text_color=color)
             if made["button"] is not None:
                 text, command, enabled = r["button"]
@@ -419,7 +419,7 @@ class ParamsPage(ctk.CTkFrame):
                 if r.advice:
                     spec["note"] = (f"▲ {r.advice}", B.COLORS[B.CHECK])
                 rows.append(spec)
-        for table, rows in zip(self.key_tables, halves):
+        for table, rows in zip(self.key_tables, halves, strict=True):
             table.show(rows)
         n = len(self._key_settable())
         _set(self.key_all, text=f"Set {n} to reference" if n > 1 else

@@ -211,13 +211,19 @@ def test_a_path_the_firmware_does_not_serve_is_asked_rarely(sim, fast, tmp_path)
     cap = CAP.UgpsCapture(sim.host, timeout=0.5)
     cap.use_folder(tmp_path)
     cap.ensure_running()
+
+    def filtered():
+        return [p for _m, p in sim.requests if p.endswith("/acoustic/filtered")]
+
     try:
+        # Waited on the count being checked, not on a proxy for it: a slow
+        # CI runner once reached six fresh solutions on eleven requests.
+        assert wait_for(lambda: len(filtered()) >= 12)
         assert wait_for(lambda: cap.snapshot()["receivers"][0]["fresh_solutions"] >= 6)
     finally:
         assert cap.shutdown()
     raw = [p for _m, p in sim.requests if p.endswith("/acoustic/raw")]
-    filtered = [p for _m, p in sim.requests if p.endswith("/acoustic/filtered")]
-    assert len(raw) == 1 and len(filtered) >= 12
+    assert len(raw) == 1 and len(filtered()) >= 12
     assert "not served" in one(tmp_path, "_events.txt").read_text(encoding="utf-8")
 
 
