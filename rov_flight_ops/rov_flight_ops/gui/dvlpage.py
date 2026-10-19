@@ -6,23 +6,21 @@ Nothing here drives the capture beyond starting a live view when the tab is
 opened with no flight folder chosen: the capture records whichever tab is
 open, because the operator is flying and not looking at this.
 
-Seven sections:
+Five sections:
 
-1. **The DVL and this capture** -- where the DVL is, whether each of its three
-   streams is connected, and what is being written where.
-2. **Did it reach the autopilot?** -- what the DVL emitted, side by side with
-   what mavlink2rest counted arriving from the BlueOS extension, because that
-   is where the dropped messages are seen: in the mcaps, Cockpit and QGC, and
-   not on the DVL's own web page.
-3. **The four beams** -- distance, signal, noise and validity, each drawn where
-   its transducer points on the vehicle.
-4. **Stream health** -- the cadence, every gap and which side of the link it
-   came from, latency, the DVL's clock and temperature.
-5. **Live charts** -- the same over the last 2, 10 or 30 minutes, with invalid
-   stretches shaded and gaps marked.
-6. **Echo and spectrum** -- the latest acoustic snapshot, and how often they
-   are taken.
-7. **Water Linked diagnostic log** -- collected only on request, only with the
+1. **DVL** -- every figure the page has, in words, laid out across the width:
+   the DVL's address and a lamp for each of its three streams, then most
+   important first what the DVL sent beside what mavlink2rest counted
+   arriving from the BlueOS extension (where dropped messages show: in the
+   mcaps, Cockpit and QGC, not on the DVL's own page), the cadence, every gap
+   and which side of the link it came from, temperature, latency and the
+   DVL's clock -- and the capture's events.
+2. **The four beams** -- distance, signal, noise and validity, each drawn where
+   its transducer points on the vehicle -- beside
+3. **Echo and spectrum** -- the latest acoustic snapshot, one above the other.
+4. **Live charts** -- the last 2, 10 or 30 minutes across the full width,
+   invalid stretches shaded and gaps marked.
+5. **Water Linked diagnostic log** -- collected only on request, only with the
    vehicle confirmed disarmed.
 
 **Drawn on Tk canvases** for the reason the Monitoring charts are: a survey
@@ -77,8 +75,11 @@ GAP_WORDS = {"dvl_quiet": "DVL quiet", "missing_reports": "missing reports",
 #: Sizes on the canvases, in unscaled units; multiplied by the display scale.
 STRIP_H = 64
 NAME_W = 132
-BEAMS_H = 280
-ACOUSTIC_H = 210
+BEAMS_H = 290
+#: Kept clear under the beam tiles for the line about the mounting offset,
+#: which used to run into the aft tiles.
+BEAMS_FOOT_H = 26
+ACOUSTIC_H = 170
 
 #: The page refreshes its text this often while it is on screen...
 TICK_MS = 500
@@ -107,6 +108,21 @@ def _f(value, nd: int = 2, unit: str = "") -> str:
     return str(value)
 
 
+def _axis(value: float) -> str:
+    """An axis label with the digits its size needs: a figure of merit of
+    0.0002 is not "0.0"."""
+    a = abs(value)
+    if a == 0:
+        return "0"
+    if a < 0.1:
+        return f"{value:.2g}"
+    if a < 10:
+        return f"{value:.2f}"
+    if a < 1000:
+        return f"{value:.1f}"
+    return f"{value:,.0f}"
+
+
 def _rate(snap, kind: str) -> str:
     return f"{snap.rates.get(kind, 0.0):.1f}/s"
 
@@ -114,8 +130,8 @@ def _rate(snap, kind: str) -> str:
 def _segmented(master, values, command=None):
     return ctk.CTkSegmentedButton(
         master, values=values, command=command, font=T.FONT_SMALL,
-        fg_color=T.SURFACE_ALT, selected_color=T.ACCENT,
-        selected_hover_color=T.ACCENT_HOVER, unselected_color=T.SURFACE_ALT,
+        fg_color=T.SURFACE_ALT, selected_color=T.SEGMENT_SELECTED,
+        selected_hover_color=T.SEGMENT_SELECTED_HOVER, unselected_color=T.SURFACE_ALT,
         unselected_hover_color=T.BORDER, text_color=T.TEXT)
 
 
@@ -137,14 +153,12 @@ class DvlPage(ctk.CTkFrame):
         body.grid_columnconfigure(0, weight=1)
         self.body = body
 
-        left, right = app.pair(body, row=0, split_key="dvl_pair_share")
-        self._build_connection(left)
-        self._build_delivery(right)
-        self._build_beams(body, 1)
-        self._build_health(body, 2)
-        self._build_charts(body, 3)
-        self._build_acoustic(body, 4)
-        self._build_diagnostic(body, 5)
+        self._build_connection(body, 0)
+        left, right = app.pair(body, row=1, split_key="dvl_pair_share")
+        self._build_beams(left, 0)
+        self._build_acoustic(right, 0)
+        self._build_charts(body, 2)
+        self._build_diagnostic(body, 3)
 
     # ------------------------------------------------------------------
     #  drawing at display scale
@@ -170,49 +184,45 @@ class DvlPage(ctk.CTkFrame):
     #  1. the DVL and this capture
     # ------------------------------------------------------------------
 
-    def _build_connection(self, parent) -> None:
-        c = Card(parent, "1.  The DVL and this capture",
-                 "Everything the DVL sends is written to the flight folder's "
-                 "logs\\dvl from the moment a folder is chosen until the "
-                 "program closes — armed or not. Leave the address blank to "
-                 "use the one the BlueOS DVL extension reports.")
-        c.grid(row=0, column=0, sticky="nsew")
+    def _build_connection(self, parent, row: int) -> None:
+        c = Card(parent, "1.  DVL",
+                 "Most important first. Gaps by the DVL's clock: quiet = made "
+                 "nothing, missing = never arrived, stall = late.")
+        c.grid(row=row, column=0, sticky="ew", pady=(0, 12))
         c.body.grid_columnconfigure(0, weight=1)
-        row = ctk.CTkFrame(c.body, fg_color="transparent")
-        row.grid(row=0, column=0, sticky="ew")
-        row.grid_columnconfigure(1, weight=1)
-        label(row, "DVL address", muted=True).grid(row=0, column=0, padx=(0, 8))
-        self.host_entry = entry(row, "blank = ask the BlueOS DVL extension "
-                                     "(e.g. 192.168.2.95)", width=260)
-        self.host_entry.grid(row=0, column=1, sticky="ew")
-        saved = self.app.settings.get("dvl_host", "")
-        if saved:
-            self.host_entry.insert(0, saved)
-        self.host_entry.bind("<Return>", lambda _e: self._commit_host())
-        self.host_entry.bind("<FocusOut>", lambda _e: self._commit_host())
-
-        b = ctk.CTkFrame(c.body, fg_color="transparent")
-        b.grid(row=1, column=0, sticky="w", pady=(8, 0))
-        button(b, "Open DVL folder", self._open_folder, "ghost", width=150
-               ).grid(row=0, column=0)
-        button(b, "DVL web page", self._open_web, "ghost", width=130
-               ).grid(row=0, column=1, padx=(8, 0))
-
         self.conn_label = ctk.CTkLabel(c.body, text="", font=T.FONT_BODY,
-                                       text_color=T.TEXT, anchor="w", justify="left")
-        self.conn_label.grid(row=2, column=0, sticky="ew", pady=(10, 0))
-        self.capture_label = ctk.CTkLabel(c.body, text="", font=T.FONT_SMALL,
-                                          text_color=T.TEXT_MUTED, anchor="w",
-                                          justify="left")
-        self.capture_label.grid(row=3, column=0, sticky="ew", pady=(4, 0))
-        self.problem_label = ctk.CTkLabel(c.body, text="", font=T.FONT_BODY,
+                                       text_color=T.TEXT, anchor="w", justify="left",
+                                       cursor="hand2")
+        self.conn_label.grid(row=0, column=0, sticky="nw")
+        # The address opens the DVL's own web page.
+        self.conn_label.bind("<Button-1>", lambda _e: self._open_web())
+        b = ctk.CTkFrame(c.body, fg_color="transparent")
+        b.grid(row=0, column=1, sticky="ne")
+        button(b, "Address…", self._change_host, "ghost", width=90
+               ).grid(row=0, column=0)
+        button(b, "Folder", self._open_folder, "ghost", width=70
+               ).grid(row=0, column=1, padx=(6, 0))
+        self.problem_label = ctk.CTkLabel(c.body, text="", font=T.FONT_SMALL,
                                           text_color=T.WARN, anchor="w",
                                           justify="left")
-        self.problem_label.grid(row=4, column=0, sticky="ew", pady=(4, 0))
-        fit_wrap(c.body, self.conn_label, self.capture_label, self.problem_label)
+        self.problem_label.grid(row=1, column=0, columnspan=2, sticky="ew")
+        fit_wrap(c.body, self.conn_label, self.problem_label, margin=220)
+        self._build_health(c.body, 2)
+        c.add_grip(self.events_box, self.events_box.min_height)
 
-    def _commit_host(self) -> None:
-        text = self.host_entry.get().strip()
+    def _change_host(self) -> None:
+        """The DVL's address, when the BlueOS extension's is not the one."""
+        now = self.app.settings.get("dvl_host", "")
+        dlg = ctk.CTkInputDialog(
+            title="DVL address",
+            text=f"The DVL's address, e.g. 192.168.2.95.\nBlank: ask the BlueOS "
+                 f"DVL extension.\n\nNow: {now or 'asking the extension'}")
+        text = dlg.get_input()
+        if text is None:
+            return
+        self._commit_host(text.strip())
+
+    def _commit_host(self, text: str) -> None:
         if text and webapi.Address.parse(text) is None:
             messagebox.showwarning(self.app.title(),
                                    f"“{text}” is not an address. Type an IP or "
@@ -250,47 +260,14 @@ class DvlPage(ctk.CTkFrame):
         webbrowser.open(addr.base_url)
 
     # ------------------------------------------------------------------
-    #  2. did it reach the autopilot?
-    # ------------------------------------------------------------------
-
-    def _build_delivery(self, parent) -> None:
-        c = Card(parent, "2.  Did it reach the autopilot?",
-                 "What the DVL sent, beside what mavlink2rest counted arriving "
-                 "from the BlueOS DVL extension. The stock extension forwards "
-                 "only valid reports, so an invalid stretch on the left is a "
-                 "gap on the right — and in the mcap.")
-        c.grid(row=0, column=0, sticky="nsew")
-        c.body.grid_columnconfigure(0, weight=0)
-        c.body.grid_columnconfigure(1, weight=1)
-        rows = [("dvl_vel", "DVL velocity reports"),
-                ("dvl_dr", "DVL dead-reckoning reports"),
-                ("ext_dist", "→ DISTANCE_SENSOR (extension)"),
-                ("ext_gvpe", "→ GLOBAL_VISION_POSITION_ESTIMATE"),
-                ("ext_vpd", "→ VISION_POSITION_DELTA"),
-                ("ap_rf", "autopilot RANGEFINDER"),
-                ("ext", "BlueOS DVL extension"),
-                ("clients", "clients on the DVL's JSON output")]
-        self.delivery: dict[str, ctk.CTkLabel] = {}
-        for i, (key, name) in enumerate(rows):
-            ctk.CTkLabel(c.body, text=name, font=T.FONT_SMALL,
-                         text_color=T.TEXT_MUTED, anchor="w"
-                         ).grid(row=i, column=0, sticky="w", padx=(0, 12))
-            v = ctk.CTkLabel(c.body, text="—", font=T.FONT_MONO,
-                             text_color=T.TEXT, anchor="w", justify="left")
-            v.grid(row=i, column=1, sticky="w")
-            self.delivery[key] = v
-
-    # ------------------------------------------------------------------
     #  3. the beams
     # ------------------------------------------------------------------
 
     def _build_beams(self, parent, row: int) -> None:
-        c = Card(parent, "3.  The four beams",
-                 "Each transducer where it points on the vehicle (forward is "
-                 "up), from Water Linked's transducer drawing and the DVL's "
-                 "mounting offset. Confirm it once on the bench by covering one "
-                 "transducer: its tile should go red.")
-        c.grid(row=row, column=0, sticky="ew", pady=(0, 12))
+        c = Card(parent, "2.  The four beams",
+                 "Where each points, forward up. Cover one on the bench: its "
+                 "tile goes red.")
+        c.grid(row=row, column=0, sticky="nsew", pady=(0, 12))
         c.body.grid_columnconfigure(0, weight=1)
         self.beams = self._make_canvas(c.body, BEAMS_H)
         self.beams.grid(row=0, column=0, sticky="ew")
@@ -310,7 +287,10 @@ class DvlPage(ctk.CTkFrame):
         snap = self.recorder.live.snapshot(history=False)
         c = self._colors()
         F = lambda font: T.scale_font(font, s)        # noqa: E731
-        cx, cy = w / 2, h / 2
+        # The tiles and the vehicle are laid out above a footer band, so the
+        # note along the foot can never run into the aft tiles.
+        area_h = h - BEAMS_FOOT_H * s
+        cx, cy = w / 2, area_h / 2
         bw, bh = 66 * s, 104 * s
         cv.create_rectangle(cx - bw, cy - bh, cx + bw, cy + bh, outline=c["border"],
                             width=max(1, int(2 * s)))
@@ -341,12 +321,13 @@ class DvlPage(ctk.CTkFrame):
             if v.get("status_high_temperature"):
                 cv.create_text(cx, cy + 70 * s, text="DVL HOT", fill=c["warn"],
                                font=F(FONT_FLAG))
-        tile_w, tile_h = min(250 * s, w * 0.3), 92 * s
+        tile_w, tile_h = min(250 * s, w * 0.31), 92 * s
+        reach = max(0.0, area_h / 2 - tile_h / 2 - 6 * s)
         for beam in P.BEAMS:
             az = math.radians(P.beam_azimuth_on_vehicle(beam, off))
             sx, sy = math.sin(az), -math.cos(az)
             bx = cx + w * 0.32 * (1 if sx > 1e-6 else -1 if sx < -1e-6 else 0)
-            by = cy + h * 0.27 * (1 if sy > 1e-6 else -1 if sy < -1e-6 else 0)
+            by = cy + reach * (1 if sy > 1e-6 else -1 if sy < -1e-6 else 0)
             color = BEAM_COLORS[beam.id]
             tid = beam.id
             bvalid = v.get(f"t{tid}_valid")
@@ -361,9 +342,10 @@ class DvlPage(ctk.CTkFrame):
             cv.create_text(x0 + pad, y0 + 13 * s, anchor="w", fill=color,
                            font=F(FONT_TILE_TITLE),
                            text=f"T{beam.number} · id {tid} · {P.beam_position(beam, off)}")
+            # The lamp on the distance's line: the title can take the width.
             r = 5 * s
-            cv.create_oval(x0 + tile_w - pad - 2 * r, y0 + 13 * s - r,
-                           x0 + tile_w - pad, y0 + 13 * s + r,
+            cv.create_oval(x0 + tile_w - pad - 2 * r, y0 + 35 * s - r,
+                           x0 + tile_w - pad, y0 + 35 * s + r,
                            fill=(c["ok"] if bvalid else c["warn"] if bvalid is False
                                  else c["border"]), outline="")
             cv.create_text(x0 + pad, y0 + 35 * s, anchor="w", fill=c["text"],
@@ -380,43 +362,54 @@ class DvlPage(ctk.CTkFrame):
                 else "mounting offset not read yet (0° assumed)")
         cv.create_text(8 * s, h - 8 * s, anchor="sw", fill=c["muted"],
                        font=F(FONT_CANVAS_SMALL),
-                       text=f"{note}  ·  T = transducer number on Water Linked's "
-                            f"drawing; id = the protocol's number (T − 1)")
+                       text=f"{note}  ·  T = Water Linked's number; id = T − 1")
 
     # ------------------------------------------------------------------
-    #  4. stream health
+    #  1, continued: every figure
     # ------------------------------------------------------------------
 
     def _build_health(self, parent, row: int) -> None:
-        c = Card(parent, "4.  Stream health",
-                 "Gaps are read from the DVL's own clock and its own count of "
-                 "milliseconds since its previous report, so each can be put on "
-                 "one side of the link: the DVL made nothing (quiet), the DVL "
-                 "made reports that never arrived (missing), or they arrived "
-                 "late (stall). A silence while the acoustics were switched off "
-                 "is none of these, and is counted apart.")
-        c.grid(row=row, column=0, sticky="ew", pady=(0, 12))
-        c.body.grid_columnconfigure((1, 3), weight=1)
-        names = [("cadence", "report interval"), ("last", "last report"),
-                 ("gaps", "gaps this capture"), ("invalid", "invalid velocity"),
-                 ("latency", "DVL processing / network"), ("clock", "DVL clock vs laptop"),
-                 ("cycling", "periodic cycling"), ("temp", "temperature / CPU"),
-                 ("range", "range mode"), ("warnings", "DVL warnings"),
-                 ("streams", "stream rates"), ("snaps", "acoustic snapshots")]
+        """Every figure, four pairs to a line, read left to right, most
+        important first; then the capture's events."""
+        grid = ctk.CTkFrame(parent, fg_color="transparent")
+        grid.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        grid.grid_columnconfigure((1, 3, 5, 7), weight=1, uniform="value")
+        names = [("dvl_vel", "velocity reports"),
+                 ("ext_vpd", "→ VISION_POSITION_DELTA"),
+                 ("ext_gvpe", "→ GLOBAL_VISION_POSITION_EST."),
+                 ("ap_rf", "autopilot RANGEFINDER"),
+                 ("last", "last report"),
+                 ("cadence", "report interval"),
+                 ("gaps", "gaps this capture"),
+                 ("invalid", "invalid velocity"),
+                 ("ext", "BlueOS DVL extension"),
+                 ("ext_dist", "→ DISTANCE_SENSOR"),
+                 ("warnings", "DVL warnings"),
+                 ("temp", "temperature / CPU"),
+                 ("cycling", "periodic cycling"),
+                 ("range", "range mode"),
+                 ("dvl_dr", "dead-reckoning reports"),
+                 ("latency", "DVL processing / network"),
+                 ("clock", "DVL clock vs laptop"),
+                 ("streams", "stream rates"),
+                 ("snaps", "acoustic snapshots"),
+                 ("clients", "clients on its JSON output")]
         self.health: dict[str, ctk.CTkLabel] = {}
+        self.delivery = self.health
+        across = 4
         for i, (key, name) in enumerate(names):
-            r, col = divmod(i, 2)
-            ctk.CTkLabel(c.body, text=name, font=T.FONT_SMALL, text_color=T.TEXT_MUTED,
-                         anchor="w").grid(row=r, column=col * 2, sticky="w",
-                                          padx=(0 if col == 0 else 18, 10))
-            v = ctk.CTkLabel(c.body, text="—", font=T.FONT_MONO, text_color=T.TEXT,
+            r, col = divmod(i, across)
+            ctk.CTkLabel(grid, text=name, font=T.FONT_SMALL, text_color=T.TEXT_MUTED,
+                         anchor="w").grid(row=r, column=col * 2, sticky="nw",
+                                          padx=(0 if col == 0 else 16, 8))
+            v = ctk.CTkLabel(grid, text="—", font=T.FONT_SMALL, text_color=T.TEXT,
                              anchor="w", justify="left")
-            v.grid(row=r, column=col * 2 + 1, sticky="w")
+            v.grid(row=r, column=col * 2 + 1, sticky="nw")
             self.health[key] = v
-        self.events_box = output_box(c.body, wrap="none")
-        self.events_box.grid(row=len(names) // 2 + 1, column=0, columnspan=4,
+        self._fit_health(grid)
+        self.events_box = output_box(parent, wrap="none")
+        self.events_box.grid(row=row + 1, column=0, columnspan=2,
                              sticky="ew", pady=(10, 0))
-        c.add_grip(self.events_box, self.events_box.min_height)
         say(self.events_box, "Events appear here as they happen, newest first; all "
                              "of them are in the capture's events file.")
 
@@ -425,11 +418,9 @@ class DvlPage(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _build_charts(self, parent, row: int) -> None:
-        c = Card(parent, "5.  Live charts",
-                 "Shaded: velocity invalid (what the extension drops). Vertical "
-                 "lines: gaps — grey the DVL was quiet, red reports went missing, "
-                 "yellow they arrived late. Report interval is drawn on both "
-                 "clocks: the DVL's (white) and this laptop's (red).")
+        c = Card(parent, "4.  Live charts",
+                 "Shaded: velocity invalid. Lines: gaps — grey quiet, red "
+                 "missing, yellow late.")
         c.grid(row=row, column=0, sticky="ew", pady=(0, 12))
         c.body.grid_columnconfigure(0, weight=1)
         self.window_pick = _segmented(c.body, list(WINDOWS), self._pick_window)
@@ -439,6 +430,20 @@ class DvlPage(ctk.CTkFrame):
         self.charts.grid(row=1, column=0, sticky="ew")
         self._charts_repaint = Repaint(self, self._draw_charts)
         self.charts.bind("<Configure>", self._charts_repaint.ask)
+
+    def _fit_health(self, grid) -> None:
+        """Values wrap within their quarter of the width, never across it."""
+        def fit(event=None) -> None:
+            try:
+                scaling = ctk.ScalingTracker.get_widget_scaling(grid) or 1.0
+            except Exception:
+                scaling = 1.0
+            room = int(grid.winfo_width() / scaling / 4) - 150
+            if room > 60:
+                for v in self.health.values():
+                    if v.cget("wraplength") != room:
+                        v.configure(wraplength=room)
+        grid.bind("<Configure>", fit, add="+")
 
     def _pick_window(self, name: str) -> None:
         self._window = name
@@ -530,9 +535,9 @@ class DvlPage(ctk.CTkFrame):
                     coords += [x_of(t), y1 - (v - lo) / (hi - lo) * (y1 - y0)]
                 if len(coords) >= 4:
                     cv.create_line(*coords, fill=color, width=lw)
-            cv.create_text(w - 6 * s, y0, anchor="ne", text=_f(hi, 1),
+            cv.create_text(w - 6 * s, y0, anchor="ne", text=_axis(hi),
                            fill=c["muted"], font=F(FONT_CANVAS_SMALL))
-            cv.create_text(w - 6 * s, y1, anchor="se", text=_f(lo, 1),
+            cv.create_text(w - 6 * s, y1, anchor="se", text=_axis(lo),
                            fill=c["muted"], font=F(FONT_CANVAS_SMALL))
         for gap in snap.gaps:
             if gap.ended_unix < now - span:
@@ -546,12 +551,9 @@ class DvlPage(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _build_acoustic(self, parent, row: int) -> None:
-        c = Card(parent, "6.  Echo and spectrum",
-                 "The DVL's own diagnostic views, read from its web API: each "
-                 "beam's echo strength against range, and each beam's spectral "
-                 "density (dBm) around the 1 MHz carrier. Each read is the "
-                 "latest ping, written whole to the capture.")
-        c.grid(row=row, column=0, sticky="ew", pady=(0, 12))
+        c = Card(parent, "3.  Echo and spectrum",
+                 "The latest ping, per beam, from the DVL's web API.")
+        c.grid(row=row, column=0, sticky="nsew", pady=(0, 12))
         c.body.grid_columnconfigure(0, weight=0)
         c.body.grid_columnconfigure(1, weight=1)
         label(c.body, "snapshots", muted=True).grid(row=0, column=0, padx=(0, 8),
@@ -566,7 +568,7 @@ class DvlPage(ctk.CTkFrame):
         self.snap_pick.set(next((k for k, v in SNAPSHOT_CHOICES.items() if v == hz),
                                 "5 /s"))
         self.snap_pick.grid(row=0, column=1, sticky="w")
-        self.acoustic = self._make_canvas(c.body, ACOUSTIC_H)
+        self.acoustic = self._make_canvas(c.body, ACOUSTIC_H * 2)
         self.acoustic.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self._acoustic_repaint = Repaint(self, self._draw_acoustic)
         self.acoustic.bind("<Configure>", self._acoustic_repaint.ask)
@@ -581,24 +583,26 @@ class DvlPage(ctk.CTkFrame):
         cv = self.acoustic
         cv.delete("all")
         s = self._scale()
-        h = int(ACOUSTIC_H * s)
+        h = int(ACOUSTIC_H * 2 * s)
         if int(cv.cget("height")) != h:
             cv.configure(height=h)
         w = cv.winfo_width()
         if w < 200 * s:
             return
         snap = self.recorder.live.snapshot(history=False)
-        half = w / 2
-        self._panel(cv, 0, half, h, s, snap.echo, "echo strength", "range (m)")
-        self._panel(cv, half, w, h, s, snap.spectrum, "spectral density",
+        half = h / 2
+        self._panel(cv, 0, w, 0, half, s, snap.echo, "echo strength", "range (m)")
+        cv.create_line(6 * s, half, w - 6 * s, half, fill=self._colors()["border"])
+        self._panel(cv, 0, w, half, h, s, snap.spectrum, "spectral density",
                     "frequency (kHz)")
 
-    def _panel(self, cv, left, right, h, s, data: dict, title, xname) -> None:
+    def _panel(self, cv, left, right, top, bottom, s, data: dict, title,
+               xname) -> None:
         c = self._colors()
         F = lambda font: T.scale_font(font, s)        # noqa: E731
         x0, x1 = left + 46 * s, right - 12 * s
-        y0, y1 = 24 * s, h - 28 * s
-        cv.create_text(left + 9 * s, 11 * s, anchor="w", text=f"{title} (dBm)",
+        y0, y1 = top + 24 * s, bottom - 28 * s
+        cv.create_text(left + 9 * s, top + 11 * s, anchor="w", text=f"{title} (dBm)",
                        fill=c["text"], font=F(FONT_CANVAS_SMALL))
         rows = data.get("data") if data else None
         if not isinstance(rows, list) or not rows or not isinstance(rows[0], list):
@@ -647,12 +651,9 @@ class DvlPage(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _build_diagnostic(self, parent, row: int) -> None:
-        c = Card(parent, "7.  Water Linked diagnostic log",
-                 "The DVL records its own internal logs for a set time and "
-                 "returns them as a file for Water Linked support — the one "
-                 "thing it will not stream. Only with the vehicle confirmed "
-                 "disarmed. The capture keeps running throughout, so it will "
-                 "show whether the DVL's output changes while it records.")
+        c = Card(parent, "5.  Water Linked diagnostic log",
+                 "The DVL's internal log, for Water Linked support. Disarmed "
+                 "only; the capture keeps running throughout.")
         c.grid(row=row, column=0, sticky="ew")
         c.body.grid_columnconfigure(0, weight=0)
         c.body.grid_columnconfigure(1, weight=1)
@@ -810,24 +811,15 @@ class DvlPage(ctk.CTkFrame):
                                                       else (s.ws_error or "not connected"))
         api_ok = not s.web_error and bool(s.status.get("reachable"))
         web = f"{lamp(api_ok)} web API " + (s.web_error or "")
-        self.conn_label.configure(text=f"DVL {addr}{src}\n{tcp}\n{ws}\n{web}",
+        self.conn_label.configure(text=f"DVL {addr}{src}      {tcp}      {ws}      {web}",
                                   text_color=T.OK if s.tcp_connected else T.TEXT)
-        if s.capturing:
-            mb = s.bytes_in / 1e6
-            cap_text = (f"Recording capture {s.capture_id} into {s.folder}\n"
-                        f"{s.lines_in:,} TCP lines · {mb:.1f} MB from the stream · "
-                        f"{len(s.files)} files")
-        elif rec.transition:
-            cap_text = f"{rec.transition}…"
+        if s.problem:
+            self.problem_label.configure(text=s.problem)
+            self.problem_label.grid()
         else:
-            cap_text = ("Live view only — nothing is written. Choose a flight "
-                        "folder on Monitoring to record the DVL.")
-        self.capture_label.configure(text=cap_text)
-        problem = s.problem or ("; ".join(s.notes[-2:]) if s.notes else "")
-        self.problem_label.configure(text=problem,
-                                     text_color=T.WARN if s.problem else T.TEXT_MUTED)
+            self.problem_label.grid_remove()
 
-        # 2. delivery
+        # 6. delivery
         d = self.delivery
         d["dvl_vel"].configure(text=f"{_rate(s, 'velocity')}  "
                                     f"(valid {_rate(s, 'velocity_valid')}, "
@@ -863,7 +855,6 @@ class DvlPage(ctk.CTkFrame):
         d["clients"].configure(text=(f"{clients}  (this program is one of them)"
                                      if clients is not None else "—"))
 
-        # 4. health
         h = self.health
         med = s.median_ms
         h["cadence"].configure(text=(f"median {med:.0f} ms ≈ {1000 / med:.1f} Hz"
@@ -886,10 +877,19 @@ class DvlPage(ctk.CTkFrame):
                                      f"{cad.get('invalid_ms', 0) / 1000:.1f} s"
                                      if cad else "—"))
         v = s.velocity
+        # The network leg is the DVL's clock against this laptop's: with the
+        # DVL's clock days out it is that, not a latency.
+        net = v.get("rx_minus_tx_ms")
+        net_text = (_f(net, 1, "ms") if not isinstance(net, (int, float))
+                    or abs(net) < 10_000 else "— (DVL clock not set)")
         h["latency"].configure(text=f"{_f(v.get('tx_minus_tov_ms'), 1, 'ms')} / "
-                                    f"{_f(v.get('rx_minus_tx_ms'), 1, 'ms')}")
-        h["clock"].configure(text=(f"{_f(st.get('dvl_clock_minus_laptop_ms'), 0, 'ms')} "
-                                   f"± {_f(st.get('clock_uncertainty_ms'), 0)} · NTP "
+                                    f"{net_text}")
+        skew = st.get("dvl_clock_minus_laptop_ms")
+        skew_text = (f"{abs(skew) / 86_400_000:.0f} days "
+                     f"{'behind' if skew < 0 else 'ahead'}"
+                     if isinstance(skew, (int, float)) and abs(skew) >= 86_400_000
+                     else f"{_f(skew, 0, 'ms')} ± {_f(st.get('clock_uncertainty_ms'), 0)}")
+        h["clock"].configure(text=(f"{skew_text} · NTP "
                                    f"{'synced' if st.get('ntp_synchronized') else 'not synced'}"
                                    if st.get("dvl_clock_utc") else "—"))
         cyc = st.get("cfg_periodic_cycling_enabled")

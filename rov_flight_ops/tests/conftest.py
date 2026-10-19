@@ -102,6 +102,12 @@ def app(tmp_path_factory):
         from rov_flight_ops.dvl.recorder import DvlRecorder
         a.dvl = DvlRecorder(vehicle_host="192.0.2.1", vehicle=False,
                             flight_id=a._flight_for_dvl)
+        # The Monitoring board starts the Navigation collector and the G2
+        # reader the first time it is on screen. Not here, for the same
+        # reason, unless it is the simulator's own; `test_board` checks the
+        # starting itself.
+        real_readers = a.ensure_vehicle_readers
+        a.ensure_vehicle_readers = lambda: real_readers() if a.simulating else None
         yield a
         try:
             a.dvl.shutdown(timeout=10)

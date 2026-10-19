@@ -1,6 +1,6 @@
 # The lights: where each number comes from
 
-What tab 4 *Lights* and the Navigation row show, what each figure is, and what
+What tab 5 *Lights* and the Navigation row show, what each figure is, and what
 this program writes. Written 13 October 2026, before anything has run on
 Lutris; the assumptions are listed at the end and in the
 [extension's README](../../blueos_extensions/light_monitor/README.md).

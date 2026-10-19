@@ -276,9 +276,8 @@ class LightsPage(ctk.CTkFrame):
 
     def _build_connection(self, parent, row: int) -> None:
         c = Card(parent, "1.  The Light Monitor",
-                 "The BlueOS extension that reads the light controller on the Pi's USB. "
-                 "This tab reads the extension, never the controller, and keeps a copy "
-                 "of the extension's recording in the flight folder's logs\\lights.")
+                 "Read from the BlueOS extension, never the controller; its "
+                 "recording is copied into logs\\lights.")
         c.grid(row=row, column=0, sticky="ew", pady=(0, 12))
         c.body.grid_columnconfigure(0, weight=1)
         self.conn_label = ctk.CTkLabel(c.body, text="", font=T.FONT_BODY, text_color=T.TEXT,
@@ -309,8 +308,8 @@ class LightsPage(ctk.CTkFrame):
 
     def _build_power(self, parent, col: int) -> None:
         c = Card(parent, "Power",
-                 "Vehicle: ArduSub's measurement. Lights: what they should draw at "
-                 "the levels they report (≈), unless a power monitor is fitted.")
+                 "Vehicle: ArduSub's measurement. Lights: expected (≈) at the "
+                 "levels they report.")
         c.grid(row=0, column=col, sticky="nsew", padx=(0, 6))
         self.power = self._kv(c.body, (
             ("veh_v", "Vehicle supply"), ("veh_a", "Vehicle current"),
@@ -330,8 +329,8 @@ class LightsPage(ctk.CTkFrame):
             ("mav", "MAVLink")))
 
     def _build_events(self, parent, col: int) -> None:
-        c = Card(parent, "Events", "From the extension, newest first. Warnings also go "
-                 "to Cockpit and QGC as STATUSTEXT, and into the tlog / mcap.")
+        c = Card(parent, "Events", "Newest first. Warnings also reach Cockpit "
+                 "and the tlog / mcap.")
         c.grid(row=0, column=col, sticky="nsew", padx=(6, 0))
         # One line tall like every report box in the program; its handle
         # drags it open.

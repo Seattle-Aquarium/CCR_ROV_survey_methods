@@ -4,27 +4,29 @@ ROV Flight Operations (working title) -- the desktop application.
 Everything to do with the vehicle and what it recorded, in the order a survey
 day uses it:
 
-1. **Monitoring** -- where the operator sits before a flight. The flight folder
-   is chosen here first, usually before the ROV is even connected, because it
+1. **Monitoring** -- where the operator sits before a flight: what is
+   connected, go or no-go, and the flight folder, chosen here first because it
    is where everything the program writes is filed.
-2. **Navigation** -- where the operator sits *during* a flight: the map, the
-   flight and power instruments, and the navigation suite. Cockpit is on the
+2. **Parameters** -- the vehicle's ArduSub parameters against its reference
+   file, and setting one back to it with the vehicle disarmed.
+3. **Navigation** -- where the operator sits *during* a flight: the map, the
+   flight and power numbers, and the navigation suite. Cockpit is on the
    monitor above and has the camera; this has everything else.
-3. **DVL** -- the Water Linked DVL beam by beam, everything it sends captured
+4. **DVL** -- the Water Linked DVL beam by beam, everything it sends captured
    to the flight folder from the moment one is chosen, and whether what it
    sends reaches the autopilot.
-4. **Lights** -- the four DeepSea lights as the BlueOS Light Monitor extension
+5. **Lights** -- the four DeepSea lights as the BlueOS Light Monitor extension
    hears them from their controller: each light's level, temperatures,
    power-on count and faults, and the vehicle's supply. A copy of the
    extension's recording is kept in the flight folder.
-5. **Transects** -- straight after the flight, with the vehicle disarmed on
+6. **Transects** -- straight after the flight, with the vehicle disarmed on
    deck: type the transect times, save them, and check them against the dive
    profile.
-6. **BlueOS logs** -- see what is on the Pi, download it into the flight
+7. **BlueOS logs** -- see what is on the Pi, download it into the flight
    folder, and clear old files off it.
-7. **Flight summary** -- the day read back, and whether the recordings are
+8. **Flight summary** -- the day read back, and whether the recordings are
    sound.
-8. **Analyze transects** -- per-transect CSVs and sensor health.
+9. **Analyze transects** -- per-transect CSVs and sensor health.
 
 Imagery -- photos and video -- is ROV Imagery Processing, a separate program.
 """
@@ -47,7 +49,7 @@ from ..config import AppConfig
 from ..survey import PLAN_FILENAME, Site, SurveyPlan, plan_path
 from . import theme as T
 from .shell import Shell
-from .widgets import Card, SiteFrame, button, entry, output_box, say
+from .widgets import SiteFrame, button, entry
 
 APP_NAME = "ROV Flight Operations"
 
@@ -86,10 +88,44 @@ class App(Shell):
         self._close_request = None
         self._close_began = 0.0
         self._close_asked_at = 0.0
+        #: The ROV flight simulator. Off until its switch in the banner is
+        #: turned on, and only ever on with no vehicle connected.
+        from ..sim.controller import Simulator
+        self.simulator = Simulator(self)
+        self.sim_controls = None
         super().__init__()
 
     def save_settings(self) -> None:
         settings.save(self.settings)
+
+    # ------------------------------------------------------------------
+    #  the ROV flight simulator's switch, in the banner
+    # ------------------------------------------------------------------
+
+    def build_banner_extras(self, parent) -> list[tuple]:
+        from .simbanner import SimControls
+        self.sim_controls = SimControls(self, parent)
+        return self.sim_controls.pairs()
+
+    def banner_tick(self, connected: bool) -> None:
+        if self.sim_controls is not None:
+            self.sim_controls.tick(connected)
+
+    @property
+    def simulating(self) -> bool:
+        sim = getattr(self, "simulator", None)
+        return bool(sim is not None and sim.active)
+
+    def _tab_shown(self, name: str) -> None:
+        super()._tab_shown(name)
+        if self.sim_controls is not None and self.simulating:
+            self.sim_controls.tick(False)
+
+    def _maybe_read_versions(self, connected: bool) -> None:
+        # The simulated vehicle's versions are the simulator's; the real one
+        # is not asked while it runs.
+        if not self.simulating:
+            super()._maybe_read_versions(connected)
 
     # ------------------------------------------------------------------
     #  what the banner's lamps and versions read
@@ -170,7 +206,13 @@ class App(Shell):
     # ------------------------------------------------------------------
 
     def dvl_recorder(self):
-        """The application's DVL capture, made on first use."""
+        """The application's DVL capture, made on first use.
+
+        The simulated one while the simulator runs; the real one keeps running
+        underneath it, unseen, and is shown again when it stops.
+        """
+        if self.simulating and self.simulator.dvl is not None:
+            return self.simulator.dvl
         if self.dvl is None:
             from ..dvl.capture import DEFAULT_SNAPSHOT_HZ
             from ..dvl.recorder import DvlRecorder
@@ -233,7 +275,11 @@ class App(Shell):
     # ------------------------------------------------------------------
 
     def lights_client(self):
-        """The application's Light Monitor reader, started on first use."""
+        """The application's Light Monitor reader, started on first use.
+
+        The simulator's while it runs; the real one is left as it was."""
+        if self.simulating and self.simulator.lights is not None:
+            return self.simulator.lights
         if self.lights is None:
             from ..lights import DEFAULT_PORT, LightsClient
             try:
@@ -258,6 +304,23 @@ class App(Shell):
     #  the UGPS G2
     # ------------------------------------------------------------------
 
+    def ensure_vehicle_readers(self) -> None:
+        """Start what the Monitoring board reads, if it is not running yet:
+        the Navigation tab's collector, the DVL view, the G2 reader and the
+        Light Monitor reader. Each is read-only, and each would start anyway
+        when its own tab opened."""
+        nav = self.pages.get("navigation")
+        if nav is not None:
+            nav.ensure_live()
+        # Once: a capture stopped on the DVL tab stays stopped. The
+        # simulator's runs by itself.
+        if not self.simulating and not getattr(self, "_dvl_view_started", False):
+            self._dvl_view_started = True
+            from ..dvl.recorder import dvl_folder
+            self.dvl_recorder().ensure_running(dvl_folder(self.flight_dir))
+        self.ugps_capture()
+        self.lights_client()
+
     def ugps_capture(self):
         """The application's G2 reader, started on first use.
 
@@ -265,6 +328,8 @@ class App(Shell):
         tab's receiver row works on the bench; written to disk only once a
         folder is. The address is the settings file's `ugps_host`.
         """
+        if self.simulating and self.simulator.ugps is not None:
+            return self.simulator.ugps
         if self.ugps is None:
             from ..ugps import DEFAULT_HOST, UgpsCapture
             self.ugps = UgpsCapture(self.settings.get("ugps_host") or DEFAULT_HOST,
@@ -297,23 +362,30 @@ class App(Shell):
         from .logspage import LogsPage
         from .monitorpage import MonitorPage
         from .navpage import NavigationPage
+        from .paramspage import ParamsPage
         from .summarypage import SummaryPage
         from .transectpage import TransectPage
         from .transectsetup import TransectSetup
 
-        # 1. Monitoring: the flight folder, then the vehicle path and the
-        #    recorder side by side, then the live charts.
+        # 1. Monitoring: the system at a glance on the left, the flight --
+        #    folder, recording, vehicle -- on the right, the live charts
+        #    beneath both.
         tab = self.add_tab("Monitoring", "monitoring")
         body = self.scroll_body(tab)
-        self._build_folder_card(body, row=0)
-        left, right = self.pair(body, row=1, split_key="monitor_pair_share")
+        left, right = self.pair(body, row=0, split_key="monitor_pair_share")
         charts = ctk.CTkFrame(body, fg_color="transparent")
-        charts.grid(row=2, column=0, sticky="ew")
+        charts.grid(row=1, column=0, sticky="ew")
         charts.grid_columnconfigure(0, weight=1)
         monitor = MonitorPage(tab, self, parents=(left, right, charts))
         self.mount("Monitoring", "monitor", monitor)
 
-        # 2. Navigation. Deliberately *not* inside a scrolling body: this is
+        # 2. Parameters: the vehicle against its reference file.
+        tab = self.add_tab("Parameters", "parameters")
+        params = ParamsPage(tab, self)
+        params.grid(row=0, column=0, sticky="nsew")
+        self.mount("Parameters", "parameters", params)
+
+        # 3. Navigation. Deliberately *not* inside a scrolling body: this is
         #    an instrument panel, and an instrument that can be scrolled off
         #    the screen is an instrument that will be, at the worst moment.
         tab = self.add_tab("Navigation", "navigation")
@@ -321,29 +393,29 @@ class App(Shell):
         nav.grid(row=0, column=0, sticky="nsew")
         self.mount("Navigation", "navigation", nav)
 
-        # 3. DVL: the beams, the stream's health, and what reached MAVLink.
+        # 4. DVL: the beams, the stream's health, and what reached MAVLink.
         tab = self.add_tab("DVL", "dvl")
         dvl = DvlPage(tab, self)
         dvl.grid(row=0, column=0, sticky="nsew")
         self.mount("DVL", "dvl", dvl)
 
-        # 4. Lights: the four DeepSea lights, from the Light Monitor extension.
+        # 5. Lights: the four DeepSea lights, from the Light Monitor extension.
         tab = self.add_tab("Lights", "lights")
         lights = LightsPage(tab, self)
         lights.grid(row=0, column=0, sticky="nsew")
         self.mount("Lights", "lights", lights)
 
-        # 5. Transects.
+        # 6. Transects.
         tab = self.add_tab("Transects", "transects")
         self.mount("Transects", "transects", TransectSetup(tab, self))
 
-        # 6. BlueOS logs.
+        # 7. BlueOS logs.
         tab = self.add_tab("BlueOS logs", "blueos_logs")
         logs = LogsPage(tab, self)
         logs.grid(row=0, column=0, sticky="nsew")
         self.mount("BlueOS logs", "logs", logs)
 
-        # 7. Flight summary: the report, then recording health, in one column.
+        # 8. Flight summary: the report, then recording health, in one column.
         tab = self.add_tab("Flight summary", "flight_summary")
         body = self.scroll_body(tab)
         summary = SummaryPage(body, self, scroll=False)
@@ -353,7 +425,7 @@ class App(Shell):
         self.mount("Flight summary", "summary", summary)
         self.mount("Flight summary", "health", health)
 
-        # 8. Analyze transects.
+        # 9. Analyze transects.
         tab = self.add_tab("Analyze transects", "analyze_transects")
         analyze = TransectPage(tab, self)
         analyze.grid(row=0, column=0, sticky="nsew")
@@ -395,7 +467,8 @@ class App(Shell):
                 text, color = f"{text}  ·  ⚠ a recorder worker is stuck", T.WARN
             # The DVL capture fails separately from the flight recorder, and
             # a failure in it must be seen from every tab just the same.
-            dvl_problem = self.dvl.problem if self.dvl is not None else ""
+            shown_dvl = self.dvl_recorder() if self.simulating else self.dvl
+            dvl_problem = shown_dvl.problem if shown_dvl is not None else ""
             if dvl_problem:
                 short = dvl_problem if len(dvl_problem) < 70 else dvl_problem[:67] + "…"
                 text, color = f"{text}  ·  ⚠ DVL: {short}", T.WARN
@@ -409,28 +482,26 @@ class App(Shell):
     #  the flight folder
     # ------------------------------------------------------------------
 
-    def _build_folder_card(self, body, row: int) -> None:
-        c = Card(body, "1.  Flight folder",
-                 "Choose it first, before the dive — even before the ROV is "
-                 "connected. The flight recorder, the network checks, the "
-                 "transect plan and every download from the Pi are filed "
-                 "inside it.")
-        c.grid(row=row, column=0, sticky="ew", pady=(0, 12))
-        r = ctk.CTkFrame(c.body, fg_color="transparent")
-        r.grid(row=0, column=0, sticky="ew")
+    def build_folder_row(self, body, row: int, column: int) -> None:
+        """The flight folder: its path, Browse and Open, on one line. What is
+        in it is said in the log."""
+        r = ctk.CTkFrame(body, fg_color="transparent")
+        r.grid(row=row, column=column, sticky="ew", pady=3)
         r.grid_columnconfigure(0, weight=1)
-        self.folder_entry = entry(r, "No folder selected", width=700)
-        self.folder_entry.grid(row=0, column=0, sticky="ew", padx=(0, 10))
-        button(r, "Browse…", self._pick_folder, "primary", width=110
+        self.folder_entry = entry(r, "No folder selected — choose it first",
+                                  width=200)
+        self.folder_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        button(r, "Browse…", self._pick_folder, "primary", width=100
                ).grid(row=0, column=1)
-        button(r, "Open", self._open_folder, "ghost", width=80
-               ).grid(row=0, column=2, padx=(8, 0))
-        self.found = output_box(c.body, wrap="none")
-        self.found.grid(row=1, column=0, sticky="ew", pady=(10, 0))
-        c.add_grip(self.found, self.found.min_height)
-        say(self.found, "Nothing selected yet.")
+        button(r, "Open", self._open_folder, "ghost", width=60
+               ).grid(row=0, column=2, padx=(6, 0))
 
     def _pick_folder(self) -> None:
+        if self.simulating:
+            messagebox.showinfo(APP_NAME, "The ROV flight simulator is running "
+                                          "in its own flight folder. Switch it "
+                                          "off in the banner to choose one.")
+            return
         d = filedialog.askdirectory(title="Select the flight folder")
         if d:
             self.use_flight(Path(d))
@@ -448,6 +519,8 @@ class App(Shell):
         operator is told so and asked first. Transects typed for the previous
         flight are not silently carried over when the new folder has none.
         """
+        if self.simulating:
+            self.simulator.disengage("a flight folder was chosen")
         new = Path(path)
         old = self.flight_dir
         rec = self.recorder
@@ -482,16 +555,14 @@ class App(Shell):
         flight = self.flight_dir
         if not flight:
             return
-        say(self.found, f"Reading {flight}…")
-
         def shown(disc) -> None:
             if flight != self.flight_dir:
                 return
             if isinstance(disc, Exception):
-                say(self.found, f"Could not read {flight}: {disc}")
+                self._log(f"Could not read {flight}: {disc}")
                 return
             self.discovery = disc
-            say(self.found, disc.summary())
+            self._log(f"Flight folder {flight}:\n{disc.summary()}")
             for key in ("analyze", "health", "summary"):
                 page = self.pages.get(key)
                 if page is not None and hasattr(page, "refresh"):
@@ -650,6 +721,13 @@ class App(Shell):
         the recorder closes on its own thread, the window shows how it is
         going, and it closes when the recorder is finished.
         """
+        # The simulator first: what is closed below is the real program.
+        if self.simulating:
+            try:
+                self.simulator.disengage("the program is closing")
+            except Exception:
+                diagnostics.log_exception("stopping the simulator", *sys.exc_info(),
+                                          level=logging.WARNING)
         # The Navigation collector, the tile fetcher and the navigation log
         # first, and unconditionally: they are cheap to stop, none of them can
         # block, and doing it here means they are stopped even on the paths

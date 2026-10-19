@@ -22,8 +22,8 @@ from rov_flight_ops.dvl.live import ChartPoint
 from rov_flight_ops.dvl.recorder import DvlRecorder
 
 
-def test_the_dvl_tab_is_third_and_keyed(app):
-    assert app.nav.sections[2] == "DVL"
+def test_the_dvl_tab_is_fourth_and_keyed(app):
+    assert app.nav.sections[3] == "DVL"
     assert app.nav.key_of("DVL") == "dvl"
     assert "dvl" in app.pages
 
@@ -134,4 +134,8 @@ def test_the_text_says_what_reached_the_autopilot(fed, app):
     gaps = page.health["gaps"].cget("text")
     assert "missing reports 2" in gaps and "~6" in gaps
     assert "100 ms" in page.health["cadence"].cget("text")
-    assert "Live view only" in page.capture_label.cget("text")
+    # Section 1 is the address and a lamp per stream, and nothing else.
+    conn = page.conn_label.cget("text")
+    assert "192.168.2.95" in conn
+    for stream in ("TCP stream", "web stream", "web API"):
+        assert stream in conn

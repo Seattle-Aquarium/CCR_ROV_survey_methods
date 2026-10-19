@@ -170,7 +170,8 @@ def test_rates_are_shown_beside_each_reading():
 # --------------------------------------------------------------------------
 
 
-PAIRS = ("monitor_pair_share", "dvl_pair_share", "logs_pair_share")
+PAIRS = ("monitor_pair_share", "params_pair_share", "dvl_pair_share",
+         "logs_pair_share")
 
 
 def test_every_pair_of_sections_has_a_divider(app):

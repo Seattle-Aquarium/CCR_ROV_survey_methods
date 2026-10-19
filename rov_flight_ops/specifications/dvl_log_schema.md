@@ -8,7 +8,7 @@ guarantees about these files are in
 ## Where, and what a capture is
 
 A **capture** runs from the moment a flight folder is chosen (Monitoring,
-section 1) until the program closes or another folder is chosen — armed or
+section 2) until the program closes or another folder is chosen — armed or
 not. Its files go in
 
 ```

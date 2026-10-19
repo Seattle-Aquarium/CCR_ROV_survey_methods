@@ -127,8 +127,8 @@ def test_an_extension_restart_starts_the_ids_again(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_lights_is_the_fourth_tab(app):
-    assert app.nav.sections[3] == "Lights"
+def test_lights_is_the_fifth_tab(app):
+    assert app.nav.sections[4] == "Lights"
     assert app.nav.key_of("Lights") == "lights"
     assert "lights" in app.pages
 

@@ -64,27 +64,22 @@ class TransectPage(ctk.CTkFrame):
 
         # ---- 1. what will be read ------------------------------------
         c1 = Card(body, "1.  Recordings",
-                  "The .mcap files found in this flight. Several are normal — "
-                  "BlueOS starts a new one every time recording restarts, and "
-                  "they are read as one continuous dive.")
+                  "The flight's .mcap files, read as one dive.")
         c1.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.found = label(c1.body, "No flight folder selected yet.", muted=True)
         self.found.grid(row=0, column=0, sticky="w")
 
         # ---- 2. what will be cut -------------------------------------
         c2 = Card(body, "2.  Transects",
-                  "Taken from the survey plan on the Transects tab. Edit them there "
-                  "and they change here too — and in the video overlays.")
+                  "From the Transects tab; edit them there.")
         c2.grid(row=1, column=0, sticky="ew", pady=(0, 12))
         self.plan_summary = label(c2.body, "", muted=True)
         self.plan_summary.grid(row=0, column=0, sticky="w")
 
         # ---- 3. options ----------------------------------------------
         c3 = Card(body, "3.  Options",
-                  "Depth_std puts every transect on the MLLW datum so dives at "
-                  "different tide stages compare. It needs the internet; "
-                  "without it the column is left blank and everything else "
-                  "still runs.")
+                  "Depth_std puts transects on the MLLW tide datum; it needs "
+                  "the internet, and is left blank without it.")
         c3.grid(row=2, column=0, sticky="ew", pady=(0, 12))
         c3.body.grid_columnconfigure(1, weight=1)
 
@@ -109,9 +104,8 @@ class TransectPage(ctk.CTkFrame):
 
         # ---- 4. run ---------------------------------------------------
         c4 = Card(body, "4.  Extract",
-                  "One CSV per transect, plus a map of the site. Existing files "
-                  "are replaced; anything open in Excel is written alongside "
-                  "instead of being lost.")
+                  "One CSV per transect, plus a site map. A file open in Excel "
+                  "is written alongside.")
         c4.grid(row=3, column=0, sticky="ew", pady=(0, 12))
         row = ctk.CTkFrame(c4.body, fg_color="transparent")
         row.grid(row=0, column=0, sticky="w")

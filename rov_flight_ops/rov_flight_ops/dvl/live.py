@@ -133,6 +133,16 @@ class LiveState:
             self._history.append(point)
             self.version += 1
 
+    def prepend(self, points, temperatures=()) -> None:
+        """History from before the capture began, put in front of what has
+        arrived since, in one step. Readers walk the history newest-first and
+        stop at their window's edge, so older points must never land after
+        newer ones -- which appending them alongside a live stream can do."""
+        with self._lock:
+            self._history.extendleft(reversed(list(points)))
+            self._temps.extendleft(reversed(list(temperatures)))
+            self.version += 1
+
     def add_temperature(self, t: float, celsius: float) -> None:
         with self._lock:
             self._temps.append((t, celsius))

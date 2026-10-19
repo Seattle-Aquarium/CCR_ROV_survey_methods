@@ -27,7 +27,7 @@ light controller --USB--> this extension (the only reader of the port)
    |  each light's state, events                 -> its page, /api/v1/state
    |  NAMED_VALUE_FLOAT + STATUSTEXT             -> mavlink2rest -> tlog / mcap / Cockpit / QGC
    '- vehicle voltage & current, pilot's Lights1 & PilotGain <- mavlink2rest (read-only)
-rov_flight_ops (tab 4 "Lights", the Navigation row) <- /api/v1/state, /api/v1/records
+rov_flight_ops (tab 5 "Lights", the Navigation row) <- /api/v1/state, /api/v1/records
 ```
 
 * **Reads, never writes, the controller.** A Ctrl-C byte on the controller's

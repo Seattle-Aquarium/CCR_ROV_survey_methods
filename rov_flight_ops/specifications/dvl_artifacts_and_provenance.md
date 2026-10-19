@@ -100,7 +100,7 @@ spectrum 2,877 bytes) are from that one demo session.
    capture finds it without one being typed.
 4. **Whether mavlink2rest counts messages the extension sends.** The mcaps
    record them (255/0 topics); whether mavlink2rest's REST view does is not
-   known. If it does not, section 2's arrows read "never sent by this
+   known. If it does not, section 6's arrows read "never sent by this
    vehicle" and the comparison has to be done afterwards against the mcap
    (Recipe A/B of the diagnosis guide).
 5. The beam positions (cover one transducer — bench checklist).

@@ -21,7 +21,7 @@ controller --USB, second serial port "telemetry" (datalink.py)--> Raspberry Pi
 Pi: BlueOS Light Monitor extension (blueos_extensions/light_monitor)
    records every line, works out each light's state, publishes a summary to
    MAVLink (NAMED_VALUE_FLOAT / STATUSTEXT) -> tlog on BlueOS 1.4, mcap on 1.5,
-   Cockpit, QGC; serves a page and an API -> rov_flight_ops tab 4 "Lights"
+   Cockpit, QGC; serves a page and an API -> rov_flight_ops tab 5 "Lights"
 ```
 
 The lights only ever **answer**: SeaSense is strict command/response (DeepSea's

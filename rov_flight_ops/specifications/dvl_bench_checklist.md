@@ -9,22 +9,22 @@ Vehicle: ____________   DVL software (DVL tab → events, or the capture's
 
 ## Connection
 
-- [ ] Choose a flight folder. The DVL tab, section 1, says *Recording
-      capture … into …\logs\dvl* and lists the files.
+- [ ] Choose a flight folder. The DVL tab's *Folder* button opens
+      …\logs\dvl, where the capture's files appear and grow.
 - [ ] The DVL address fills itself in from the BlueOS DVL extension
       (`(the BlueOS DVL extension)` after it). Address: ______________.
       If it does not, type the address you use in the browser and note why.
 - [ ] All three lamps go solid: **TCP stream**, **web stream**, **web API**.
-- [ ] Section 2: *clients on the DVL's JSON output* reads **2** (this program
+- [ ] Section 6: *clients on its JSON output* reads **2** (this program
       and the extension). If **1**, the extension is not connected to the DVL.
-- [ ] Section 4: *periodic cycling* reads **off**; *range mode* names a
+- [ ] Section 6: *periodic cycling* reads **off**; *range mode* names a
       running configuration.
-- [ ] Section 4: *DVL clock vs laptop* shows an offset. NTP synced? ____.
+- [ ] Section 6: *DVL clock vs laptop* shows an offset. NTP synced? ____.
       Offset: ______ ms.
 
 ## Did it reach the autopilot?
 
-- [ ] Section 2's `→` rows: do they show rates, or *never sent by this
+- [ ] Section 6's `→` rows: do they show rates, or *never sent by this
       vehicle*? ____________. (Rates mean mavlink2rest sees the extension's
       messages and the comparison works live; *never sent* means it has to
       be done afterwards against the mcap — see the diagnosis guide.)

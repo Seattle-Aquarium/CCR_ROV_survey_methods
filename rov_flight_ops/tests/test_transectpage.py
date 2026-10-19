@@ -56,10 +56,12 @@ def test_the_tabs_run_in_the_order_of_a_survey_day(app):
     operator sits for the whole dive, and the transect times are typed
     afterwards with the vehicle disarmed on deck. DVL went in at 3 in October
     2026, beside Navigation, because it is read during the dive too, and
-    Lights at 4 for the same reason.
+    Lights beside it for the same reason, and Parameters at 2, because it is
+    checked on deck before the dive.
     """
-    assert app.nav.sections == ["Monitoring", "Navigation", "DVL", "Lights",
-                                "Transects", "BlueOS logs", "Flight summary",
+    assert app.nav.sections == ["Monitoring", "Parameters", "Navigation", "DVL",
+                                "Lights", "Transects", "BlueOS logs",
+                                "Flight summary",
                                 "Analyze transects"]
     assert "analyze" in app.pages
     assert not any("photo" in k.lower() or "video" in k.lower() for k in app.pages)
