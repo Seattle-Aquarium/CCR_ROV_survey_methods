@@ -40,11 +40,11 @@ complete, the tether is the place to look.
 
 1. Choose the flight folder. The capture starts; the DVL tab says what it
    is writing.
-2. On the DVL tab, section 2: `clients on the DVL's JSON output` should read
+2. On the DVL tab, section 6: `clients on its JSON output` should read
    **2** — this program and the BlueOS extension. **1** means the extension
    is not connected to the DVL at all.
 3. Periodic cycling should read **off**.
-4. If the vehicle's mavlink2rest shows the extension's messages, section 2's
+4. If the vehicle's mavlink2rest shows the extension's messages, section 6's
    `→ DISTANCE_SENSOR` rate should track the DVL's valid velocity rate when
    the rangefinder is enabled in the extension.
 
@@ -165,7 +165,7 @@ stalls = [l for l in open(stem + "_events.txt") if "delivery_stall" in l]
 
 Stalls that line up with lost pings are the tether; stalls with clean pings
 are this laptop (its CPU, its adapter's power saving — see Monitoring,
-section 2).
+section 4).
 
 ### Recipe E — the DVL itself
 

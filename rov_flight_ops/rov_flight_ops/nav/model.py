@@ -445,11 +445,20 @@ class NavSnapshot:
     surftrak_target: Reading = unknown      # m, only when genuinely valid
     depth: Reading = unknown                # m, negative down
     speed: Reading = unknown                # m/s horizontal over ground
+    forward: Reading = unknown              # m/s along the vehicle's heading
     heading: Reading = unknown              # deg true-ish, see note
     roll: Reading = unknown
     pitch: Reading = unknown
     yaw: Reading = unknown
     climb: Reading = unknown
+    #: The pilot's thruster gain, 0-1, from ArduSub's PilotGain named value.
+    pilot_gain: Reading = unknown
+    #: True while ArduSub is reporting a leak (its "Leak Detected" text).
+    leak: Reading = unknown
+    #: The vehicle's newest status text.
+    statustext: Reading = unknown
+    #: Other named values ArduSub publishes (Lights1, Lights2, CamTilt...).
+    named: dict[str, Reading] = field(default_factory=dict)
 
     # -- power ------------------------------------------------------------
     voltage: Reading = unknown              # V

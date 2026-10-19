@@ -2,11 +2,9 @@
 Navigation: planning and following surveys, and the health of what navigates.
 
 This chapter is about *where*: laying out a survey, following it, and knowing
-whether the position it is drawn against can be believed. Altitude, velocity,
-depth and power used to have gauges here and no longer do -- they are flying
-instruments rather than navigation ones, the space they took is worth more to
-the map, and the telemetry behind them is still collected, logged, replayed
-and used wherever navigation needs it.
+whether the position it is drawn against can be believed. Altitude, depth,
+speed, gain and power are one row of plain numbers under the map rather than
+gauges: the map is worth the space more.
 
     +-----------------------------------+----------------------+
     |                                   |  readiness · profile |
@@ -15,6 +13,7 @@ and used wherever navigation needs it.
     |                                   |  survey plan:        |
     +-----------------------------------+  tools, features,    |
     |  guidance / site / origin strip    |  inspector          |
+    |  altitude depth fwd gain | V A W   |                     |
     |  UGPS receivers: Rx 0-3 SNR        |                     |
     +-----------------------------------+----------------------+
 
@@ -25,7 +24,8 @@ any of them puts it back, and the settings file remembers where each was
 left. The strip
 beneath it carries what must never need looking for: which line is being
 followed and how far off it the vehicle is, the site, and whether the origin
-is confirmed. Under that, one row for the UGPS antenna's four receivers --
+is confirmed. Under that, the flight numbers, then one row for the UGPS
+antenna's four receivers --
 each one's signal-to-noise, noise floor and the last minute of it -- read
 straight from the G2 topside, with a line saying whether any receiver
 stands out from the others. Details expand into a drawer over the page;
@@ -267,9 +267,13 @@ class NavigationPage(ctk.CTkFrame):
 
         self._build_strip(col, row=3)
 
+        from .flightstrip import FlightNumbers
+        self.numbers = FlightNumbers(col)
+        self.numbers.grid(row=4, column=0, sticky="ew", pady=(6, 0))
+
         from .ugpsstrip import ReceiversStrip
         self.ugps_strip = ReceiversStrip(col, self.app)
-        self.ugps_strip.grid(row=4, column=0, sticky="ew", pady=(6, 0))
+        self.ugps_strip.grid(row=5, column=0, sticky="ew", pady=(6, 0))
         self._ugps_ticks = 0
 
     def _build_strip(self, parent, row: int) -> None:
@@ -838,6 +842,12 @@ class NavigationPage(ctk.CTkFrame):
             self._start_live()
         self._render()
 
+    def ensure_live(self) -> None:
+        """Start reading the vehicle if nothing is yet, without waiting for
+        the tab to be opened: the Monitoring board reads the same snapshot."""
+        if self.collector is None:
+            self._start_live()
+
     def _start_live(self) -> None:
         host = (self.app.vehicle_host() or "192.168.2.2"
                 if hasattr(self.app, "vehicle_host") else "192.168.2.2")
@@ -897,6 +907,13 @@ class NavigationPage(ctk.CTkFrame):
 
     def _tick(self) -> None:
         try:
+            if self.numbers.winfo_ismapped():
+                self.numbers.update_from(self.collector.snapshot()
+                                         if self.collector else None)
+        except Exception:
+            diagnostics.log_exception("navigation numbers", *sys.exc_info(),
+                                      level=logging.WARNING)
+        try:
             self._render_ugps()
         except Exception:
             diagnostics.log_exception("navigation UGPS row", *sys.exc_info(),
@@ -926,6 +943,11 @@ class NavigationPage(ctk.CTkFrame):
         self.ugps_strip.update_from(get().snapshot())
 
     def _render(self) -> None:
+        if (getattr(self, "_sim_fit_pending", False)
+                and self.map.canvas.winfo_ismapped()
+                and self.map.canvas.winfo_width() > 200):
+            self._sim_fit_pending = False
+            self._fit()
         if self.collector is None:
             self.map.draw()
             return
@@ -1359,6 +1381,98 @@ class NavigationPage(ctk.CTkFrame):
         self._revalidate()
         from .navdialogs import ApplyDialog
         ApplyDialog(self, self.check)
+
+    # ------------------------------------------------------------------
+    #  the ROV flight simulator
+    # ------------------------------------------------------------------
+
+    def enter_simulation(self, collector, plan: P.Plan, folder: Path) -> None:
+        """Read the simulated vehicle, and fly the simulator's survey plan.
+
+        Everything this page had -- its plan, profile, origin and what it was
+        following -- is kept and put back by `leave_simulation`. The session
+        log is opened in the simulator's folder, which the application has
+        already made the flight folder.
+        """
+        self._sim_saved = {
+            "plan": self.plan, "plan_path": self.plan_path, "history": self.history,
+            "profile_key": self.profile_key, "origin_state": self.origin_state,
+            "following": self.following, "waypoints": self.waypoints,
+        }
+        if self.collector is not None:
+            self.collector.stop()
+        self.stop_following("the simulator started")
+        self._open_session("live")
+        self.collector = collector
+        self.profile_key = "acoustic"
+        self.profile_menu.set(PR.PROFILES[self.profile_key].label)
+        self._sync_profile_to_collector()
+        collector.start(self.session.session_id if self.session else "")
+        self.waypoints = waypoints.WaypointStore(Path(folder))
+        self.plan = plan
+        self.plan_path = Path(folder) / P.FILENAME
+        self.history = P.History(self.plan)
+        self._adopt(self.plan)
+        lat, lon = plan.features[0].anchor.lat, plan.features[0].anchor.lon
+        self.origin_state = O.OriginState(active=True, active_lat=lat,
+                                          active_lon=lon, active_alt_m=0.0,
+                                          confirmed_mono=time.monotonic())
+        self.map.rov_track = []
+        self._sync_markers()
+        self._render()
+        # Close enough to see the lanes and the vehicle on them -- once the
+        # map is on screen, since a fit worked out for a hidden map is a fit
+        # to a 1-pixel canvas.
+        self._sim_fit_pending = True
+
+    def follow_simulated_lane(self, vehicle) -> None:
+        """Follow whichever lane of the simulator's grid the vehicle is flying."""
+        if getattr(self, "_sim_saved", None) is None or not self.plan.features \
+                or vehicle.lane < 0:
+            return
+        grid = self.plan.features[0]
+        want = (grid.id, vehicle.lane + 1)
+        if self.following != want:
+            self.following = want
+            self.progress = GD.Progress()
+            if self.session is not None:
+                self.session.event("follow_start", {
+                    "plan": self.plan.name, "feature": grid.id,
+                    "feature_name": grid.name, "lane": want[1],
+                    "note": "the simulator's lane"})
+
+    def leave_simulation(self) -> None:
+        """Put back what `enter_simulation` kept, and read the real vehicle."""
+        saved = getattr(self, "_sim_saved", None)
+        if saved is None:
+            return
+        self._sim_saved = None
+        if self.collector is not None:
+            self.collector.stop()
+        self.collector = None
+        self.following = None
+        self.guidance = GD.Guidance()
+        self.map.guidance = self.guidance
+        if self.session is not None:
+            self.session.close("the simulator stopped")
+            self.session = None
+        self.plan = saved["plan"]
+        self.plan_path = saved["plan_path"]
+        self.history = saved["history"]
+        self.profile_key = saved["profile_key"]
+        self.profile_menu.set(PR.PROFILES[self.profile_key].label)
+        self.origin_state = saved["origin_state"]
+        self.waypoints = saved["waypoints"]
+        if self.editor is not None:
+            self.editor.plan = self.plan
+            self.editor.selected_id = None
+        self.map.rov_track = []
+        self.map.rov_fix = None
+        self.plan_panel.refresh()
+        self._sync_markers()
+        # A live collector against the real vehicle, as when the tab opened.
+        self._start_live()
+        self.map.draw()
 
     def start_replay(self, frames, label_text: str, *, synthetic: bool = False
                      ) -> None:

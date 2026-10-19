@@ -35,7 +35,6 @@ from dataclasses import dataclass
 
 import customtkinter as ctk
 
-from .. import brand
 from ..nav import geo, tiles
 from ..nav import trust as TR
 from ..nav.model import NO_VALUE, Fix, Quality
@@ -61,21 +60,28 @@ MAX_DRAWN_POINTS = 4000
 #: Picking from the palette keeps the Aquarium's colors without inheriting a
 #: collision that was harmless everywhere else.
 #:
-#: Green is aided, blue is dead-reckoned, coral is trouble. "No aiding" shares
-#: coral with "degraded" and is separated by a dash instead, which is apter --
-#: a track with no horizontal aiding is not a measured path -- and more robust
-#: on a Rugged screen in daylight, which loses saturation before it loses
-#: pattern.
+#: The ROV's track is black ink and the vessel's red, in both modes -- the
+#: chart under them is the same light chart either way, and the two have to
+#: be told apart at a glance (October 2026, the operators' request, outside
+#: the brand palette on purpose). What a stretch of the ROV's track rested on
+#: is carried by the line's pattern: solid where it was acoustically aided,
+#: long dashes where it was dead-reckoned, and a dark orange where it was in
+#: trouble, dashed again where there was no aiding at all. Pattern survives a
+#: Rugged screen in daylight, which loses saturation first.
+ROV_INK = "#111111"
+VESSEL_RED = "#E0201B"
+HALO = "#FFFFFF"
 TRUST_COLORS = {
-    TR.ABSOLUTE: ("#00795A", brand.ALGAE),        # Algae, darkened for white
-    TR.RELATIVE: (brand.MEDITERRANEAN, brand.SEAFOAM),
-    TR.DEGRADED: ("#B4472F", brand.CORAL),
-    TR.NO_AIDING: ("#B4472F", brand.CORAL),       # + a dash, see TRUST_DASH
-    TR.UNKNOWN: T.TEXT_MUTED,
+    TR.ABSOLUTE: (ROV_INK, ROV_INK),
+    TR.RELATIVE: (ROV_INK, ROV_INK),              # + long dashes
+    TR.DEGRADED: ("#C2410C", "#C2410C"),
+    TR.NO_AIDING: ("#C2410C", "#C2410C"),         # + a dash, see TRUST_DASH
+    TR.UNKNOWN: ("#6B7280", "#6B7280"),
 }
 
 #: Dash pattern per state, or None for a solid line.
 TRUST_DASH = {
+    TR.RELATIVE: (10, 5),
     TR.NO_AIDING: (2, 4),
     TR.UNKNOWN: (1, 5),
 }
@@ -95,7 +101,14 @@ TRUST_WORDS = {
 
 
 def trust_color(state: str) -> str:
-    return _hex(TRUST_COLORS.get(state, T.TEXT_MUTED))
+    return _hex(TRUST_COLORS.get(state, TRUST_COLORS[TR.UNKNOWN]))
+
+
+def legend_color(state: str):
+    """The legend's colour for a state: the window's own text colour for the
+    black ink, which would vanish on the dark window around the chart."""
+    color = trust_color(state)
+    return T.TEXT if color == ROV_INK else color
 
 
 #: The chart pack stops at z19, but `TileCache` enlarges past a layer's top
@@ -401,9 +414,8 @@ class MapCanvas(ctk.CTkFrame):
             drew_tiles = self._draw_tiles(w, h) if self.show_tiles else 0
             self._draw_grid(w, h, faint=drew_tiles > 0)
             self._draw_planned()
-            self._draw_track(self.vessel_track, _hex(T.WARN), width=2,
-                             dash=(4, 3))
-            self._draw_track(self.rov_track, _hex(T.ACCENT), width=3,
+            self._draw_track(self.vessel_track, VESSEL_RED, width=3)
+            self._draw_track(self.rov_track, ROV_INK, width=3,
                              depth_colored=self.color_by_depth,
                              by_trust=self.color_by_trust)
             self._draw_markers()
@@ -530,6 +542,8 @@ class MapCanvas(ctk.CTkFrame):
         """
         if not points:
             return
+        s = T.scale_of(self) or 1.0
+        width = max(1, int(round(width * s)))
         by_segment: dict[int, list] = {}
         for p in points:
             by_segment.setdefault(getattr(p, "segment", 0), []).append(p)
@@ -556,8 +570,12 @@ class MapCanvas(ctk.CTkFrame):
             kw = {"width": width, "capstyle": "round", "joinstyle": "round"}
             if dash:
                 kw["dash"] = dash
+            # A white halo under every track, so black and red both read on
+            # dark water and on the pier alike.
+            flat = [v for at in drawn for v in at]
+            self.canvas.create_line(*flat, fill=HALO, width=width + max(2, int(2 * s)),
+                                    capstyle="round", joinstyle="round")
             if not by_trust:
-                flat = [v for at in drawn for v in at]
                 self.canvas.create_line(*flat, fill=color, **kw)
                 continue
 
@@ -597,8 +615,8 @@ class MapCanvas(ctk.CTkFrame):
 
     def trust_styles(self) -> list[tuple[str, str, str, tuple | None]]:
         """(state, words, color, dash) for each state present in the track."""
-        return [(s, TRUST_WORDS.get(s, s), c, trust_dash(s))
-                for s, c in self.trust_legend()]
+        return [(s, TRUST_WORDS.get(s, s), legend_color(s), trust_dash(s))
+                for s, _c in self.trust_legend()]
 
     def _draw_depth_dots(self) -> None:
         """The seabed depth the vehicle measured, as colored dots.
@@ -711,35 +729,56 @@ class MapCanvas(ctk.CTkFrame):
         if at is None:
             return
         x, y = at
+        s = T.scale_of(self) or 1.0
         stale = f.quality is not Quality.OK
-        color = _hex(T.TEXT_MUTED) if stale else _hex(T.WARN)
+        color = "#8A8F98" if stale else VESSEL_RED
         # The bow points along HDT true heading. Not course over ground, not
         # the ROV's yaw, not the direction of travel -- and when HDT is stale
         # the hull is drawn without a bow at all rather than pointing a way
         # nobody has confirmed.
         hdg = self.vessel_heading
         if hdg is None:
-            self.canvas.create_oval(x - 7, y - 7, x + 7, y + 7,
-                                    outline=color, width=2)
-            self.canvas.create_text(x + 10, y - 10, text="vessel · no HDT",
-                                    anchor="w", fill=_hex(T.WARN),
-                                    font=T.FONT_SMALL)
+            r = 10 * s
+            self.canvas.create_oval(x - r, y - r, x + r, y + r, fill=color,
+                                    outline=HALO, width=max(2, int(2 * s)))
+            self._tag(x + 14 * s, y + 16 * s, "vessel · no HDT", color)
         else:
             self._hull(x, y, hdg, color, filled=not stale)
-            self.canvas.create_text(x + 12, y - 12,
-                                    text=f"vessel {hdg:.0f}°T"
-                                         + (" · stale" if stale else ""),
-                                    anchor="w", fill=color, font=T.FONT_SMALL)
+            # Below the hull: the ROV's label sits above its own arrow, and
+            # the two are often close.
+            self._tag(x + 16 * s, y + 16 * s,
+                      f"vessel {hdg:.0f}°T" + (" · stale" if stale else ""), color)
 
-    def _hull(self, x, y, heading_deg, color, *, filled=True) -> None:
+    def _arrow(self, x, y, heading_deg, size: float) -> list[float]:
+        """A broad arrowhead pointing along `heading_deg`, `size` pixels long."""
         a = math.radians(heading_deg)
         pts = []
-        for lx, ly in ((0, -11), (6, 4), (0, 1), (-6, 4)):
+        for lx, ly in ((0, -1.0), (0.62, 0.55), (0, 0.25), (-0.62, 0.55)):
+            lx, ly = lx * size, ly * size
             rx = lx * math.cos(a) - ly * math.sin(a)
             ry = lx * math.sin(a) + ly * math.cos(a)
             pts += [x + rx, y + ry]
-        self.canvas.create_polygon(*pts, fill=color if filled else "",
-                                   outline=color, width=2)
+        return pts
+
+    def _hull(self, x, y, heading_deg, color, *, filled=True) -> None:
+        s = T.scale_of(self) or 1.0
+        self.canvas.create_polygon(*self._arrow(x, y, heading_deg, 20 * s),
+                                   fill=color if filled else HALO,
+                                   outline=HALO if filled else color,
+                                   width=max(2, int(2 * s)))
+
+    def _tag(self, x, y, text: str, color) -> None:
+        """A marker's label, bold, on a white backing so it reads anywhere."""
+        font = (T.FAMILY_SEMIBOLD, T.FONT_SMALL[1])
+        item = self.canvas.create_text(x, y, text=text, anchor="w", fill=color,
+                                       font=font)
+        box = self.canvas.bbox(item)
+        if box:
+            pad = 2
+            back = self.canvas.create_rectangle(box[0] - pad, box[1] - pad,
+                                                box[2] + pad, box[3] + pad,
+                                                fill=HALO, outline="")
+            self.canvas.tag_lower(back, item)
 
     def _draw_rov(self) -> None:
         f = self.rov_fix
@@ -749,32 +788,30 @@ class MapCanvas(ctk.CTkFrame):
         if at is None:
             return
         x, y = at
+        s = T.scale_of(self) or 1.0
         stale = f.quality is not Quality.OK
-        color = _hex(T.TEXT_MUTED) if stale else _hex(T.ACCENT)
+        color = "#6B7280" if stale else ROV_INK
         hdg = self.rov_heading
         if hdg is not None:
-            a = math.radians(hdg)
-            pts = []
-            for lx, ly in ((0, -12), (8, 7), (0, 3), (-8, 7)):
-                rx = lx * math.cos(a) - ly * math.sin(a)
-                ry = lx * math.sin(a) + ly * math.cos(a)
-                pts += [x + rx, y + ry]
-            self.canvas.create_polygon(*pts, fill="" if stale else color,
-                                       outline=color, width=2)
+            self.canvas.create_polygon(*self._arrow(x, y, hdg, 22 * s),
+                                       fill=HALO if stale else color,
+                                       outline=color if stale else HALO,
+                                       width=max(2, int(2 * s)))
         else:
-            self.canvas.create_oval(x - 8, y - 8, x + 8, y + 8,
-                                    fill="" if stale else color,
-                                    outline=color, width=2)
+            r = 10 * s
+            self.canvas.create_oval(x - r, y - r, x + r, y + r,
+                                    fill=HALO if stale else color,
+                                    outline=color if stale else HALO,
+                                    width=max(2, int(2 * s)))
         if stale:
             age = f.age()
-            self.canvas.create_text(
-                x + 13, y + 12, anchor="w", fill=_hex(T.WARN),
-                font=T.FONT_SMALL,
-                text="last known" + (f" · {age:.0f} s" if age else ""))
-        if f.kind == "dead":
-            self.canvas.create_text(x + 13, y - 12, anchor="w",
-                                    fill=_hex(T.TEXT_MUTED),
-                                    font=T.FONT_SMALL, text="dead-reckoned")
+            self._tag(x + 18 * s, y + 16 * s,
+                      "ROV last known" + (f" · {age:.0f} s" if age else ""),
+                      "#B4472F")
+        elif f.kind == "dead":
+            self._tag(x + 18 * s, y - 16 * s, "ROV · dead-reckoned", ROV_INK)
+        else:
+            self._tag(x + 18 * s, y - 16 * s, "ROV", ROV_INK)
 
     def _draw_scale(self, w: int, h: int) -> None:
         if self.center is None:

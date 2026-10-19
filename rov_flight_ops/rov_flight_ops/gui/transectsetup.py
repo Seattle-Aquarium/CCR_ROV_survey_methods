@@ -42,9 +42,8 @@ class TransectSetup(ctk.CTkFrame):
 
         # ---- 1. sites & transects ------------------------------------
         c1 = Card(body, "1.  Sites and transects",
-                  "Times are TC-25, as written down in the field — the clock "
-                  "the GoPro shows after a GoPro Labs precision-time sync. "
-                  f"Save writes them into the flight folder as {PLAN_FILENAME}.")
+                  "Times are TC-25, the GoPro clock after a Labs time sync. "
+                  f"Save writes {PLAN_FILENAME} into the flight folder.")
         c1.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.folder_note = ctk.CTkLabel(c1.body, text="", font=T.FONT_SMALL,
                                         text_color=T.TEXT_MUTED, anchor="w")
@@ -64,11 +63,9 @@ class TransectSetup(ctk.CTkFrame):
 
         # ---- 2. preview -----------------------------------------------
         c2 = Card(body, "2.  Preview the transects",
-                  "Draws the dive profile with your transects marked. Reads "
-                  "the flight folder's recordings when they are there; "
-                  "otherwise reads the autopilot's log straight off the "
-                  "vehicle — a few megabytes, not the gigabyte recordings — "
-                  "so this works before anything is downloaded.")
+                  "The dive profile with your transects marked, from the "
+                  "recordings or, before they are downloaded, the autopilot's "
+                  "log on the vehicle.")
         c2.grid(row=1, column=0, sticky="ew", pady=(0, 12))
         c2.body.grid_columnconfigure(0, weight=1)
         prow = ctk.CTkFrame(c2.body, fg_color="transparent")
@@ -79,8 +76,8 @@ class TransectSetup(ctk.CTkFrame):
                      text_color=T.TEXT_MUTED).grid(row=0, column=1, padx=(18, 8))
         self.source = ctk.CTkSegmentedButton(
             prow, values=list(SOURCES), font=T.FONT_SMALL,
-            fg_color=T.SURFACE_ALT, selected_color=T.ACCENT,
-            selected_hover_color=T.ACCENT_HOVER, unselected_color=T.SURFACE_ALT,
+            fg_color=T.SURFACE_ALT, selected_color=T.SEGMENT_SELECTED,
+            selected_hover_color=T.SEGMENT_SELECTED_HOVER, unselected_color=T.SURFACE_ALT,
             unselected_hover_color=T.BORDER, text_color=T.TEXT)
         self.source.set("Automatic")
         self.source.grid(row=0, column=2)
@@ -126,11 +123,17 @@ class TransectSetup(ctk.CTkFrame):
         source = SOURCES[self.source.get()]
         host = self.app.vehicle_host()
         self.preview_note.configure(text="Reading…", text_color=T.TEXT_MUTED)
+        sim = getattr(self.app, "simulator", None)
+        trace = (sim.recorder.depth_trace()
+                 if sim is not None and sim.active and sim.recorder else None)
 
         def work(progress, cancel):
-            store, notes, where = P.preview_store(
-                flight, windows, cfg=cfg, host=host, source=source,
-                progress=progress, cancel=cancel)
+            if trace is not None:
+                store, notes, where = _simulated_store(trace)
+            else:
+                store, notes, where = P.preview_store(
+                    flight, windows, cfg=cfg, host=host, source=source,
+                    progress=progress, cancel=cancel)
             style = (depthplot.PlotStyle() if mode == "dark"
                      else depthplot.PlotStyle.light())
             img = depthplot.render_profile(store, windows, width=980, height=300,
@@ -160,6 +163,29 @@ class TransectSetup(ctk.CTkFrame):
         lines += [f"note: {n}" for n in res.notes]
         self.preview_note.configure(text="\n".join(lines), text_color=T.TEXT)
         self.app.status.configure(text="Preview drawn — check the transects.")
+
+
+def _simulated_store(trace):
+    """The ROV flight simulator's dive so far, as the preview reads telemetry.
+
+    `trace` is (wall time, depth m, altitude m) once a second, from the
+    simulated recorder; depth goes in as the autopilot's relative altitude, in
+    millimetres and negative below the surface, which is what the preview
+    draws from a real recording.
+    """
+    import numpy as np
+
+    from ..depthplot import DEPTH_FIELD
+    from ..telemetry import Series, TelemetryStore
+
+    store = TelemetryStore()
+    t = np.asarray([x[0] for x in trace], dtype=float)
+    store.series[DEPTH_FIELD] = Series(
+        t=t, v=np.asarray([-x[1] * 1000.0 for x in trace], dtype=float))
+    if len(t):
+        store.t_start, store.t_end = float(t[0]), float(t[-1])
+    return store, ["simulated — the ROV flight simulator's dive so far"], \
+        "the ROV flight simulator"
 
 
 class _Preview:

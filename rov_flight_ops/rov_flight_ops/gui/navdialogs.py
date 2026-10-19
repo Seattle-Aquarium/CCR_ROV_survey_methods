@@ -29,7 +29,6 @@ from ..nav import origin as O
 from ..nav import profiles as PR
 from ..nav import session as SESS
 from . import theme as T
-from .navstatus import message_health_rows
 from .widgets import Card, button, entry, label, output_box, say
 
 log = logging.getLogger(__name__)
@@ -58,7 +57,10 @@ class _Drawer(ctk.CTkToplevel):
 
 
 class DetailsDrawer(_Drawer):
-    """Parameters, message health and the profile findings, in full."""
+    """What is wrong with navigation, and what changed around it.
+
+    The profile check, message health, parameters and origin that were tabs
+    here are on the Parameters tab now, all in one place."""
 
     def __init__(self, page, snapshot, check, origin_state):
         super().__init__(page, "Navigation details")
@@ -70,10 +72,6 @@ class DetailsDrawer(_Drawer):
         # Diagnosis first: it is the tab an operator opens this for.
         self._diagnosis_tab(tabs.add("Diagnosis"), snapshot)
         self._changed_tab(tabs.add("What changed?"))
-        self._profile_tab(tabs.add("Profile check"), check)
-        self._messages_tab(tabs.add("Message health"), snapshot)
-        self._params_tab(tabs.add("Parameters"), snapshot)
-        self._origin_tab(tabs.add("Origin"), origin_state)
 
     # -- diagnosis --------------------------------------------------------
 
@@ -201,110 +199,6 @@ class DetailsDrawer(_Drawer):
         lines += ["", "Events are listed by how far they were from the "
                       "moment. Nothing here says one caused another."]
         say(self._changed_box, "\n".join(lines))
-
-    def _profile_tab(self, tab, check) -> None:
-        box = output_box(tab, wrap="none", muted=False)
-        box.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(0, weight=1)
-        box.configure(height=520)
-        if check is None:
-            say(box, "The profile has not been checked yet.")
-            return
-        lines = [f"{check.profile.label}",
-                 f"{check.profile.summary}",
-                 "",
-                 f"Definition {check.profile.version}, written against "
-                 f"{check.profile.written_for}",
-                 f"Result: {check.summary()}"]
-        if check.params_age is not None:
-            lines.append(f"Parameters read {check.params_age:.0f} s ago")
-        lines += ["", "PARAMETERS", "-" * 70]
-        for f in check.findings:
-            mark = "  ok " if f.ok else f"{f.severity.value.upper():>5}"
-            lines.append(f"[{mark}] {f.param:<18} has {f.current_text():<26} "
-                         f"wants {f.want_text()}")
-            if not f.ok:
-                lines.append(f"          {f.requirement.why}")
-        if check.notes:
-            lines += ["", "INTEGRATION", "-" * 70]
-            for sev, text in check.notes:
-                lines.append(f"[{sev.value.upper():>5}] {text}")
-        say(box, "\n".join(lines))
-
-    def _messages_tab(self, tab, snapshot) -> None:
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(0, weight=1)
-        box = output_box(tab, wrap="none", muted=False)
-        box.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
-        box.configure(height=520)
-        if snapshot is None:
-            say(box, "Nothing has been read yet.")
-            return
-        now = time.monotonic()
-        rows = message_health_rows(snapshot, now)
-        lines = [
-            "Age is time since a NEW message arrived — mavlink2rest's own",
-            "counter — not time since the last successful request. A message",
-            "whose counter has not moved is stale however often it is fetched.",
-            "",
-            f"{'MESSAGE':<24}{'RATE':>10}{'AGE':>8}  NOTE",
-            "-" * 78]
-        for name, rate, age, note in rows:
-            lines.append(f"{name:<24}{rate:>10}{age:>8}  {note}")
-        say(box, "\n".join(lines))
-
-    def _params_tab(self, tab, snapshot) -> None:
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(0, weight=1)
-        box = output_box(tab, wrap="none", muted=False)
-        box.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
-        box.configure(height=520)
-        params = (snapshot.params if snapshot else {}) or {}
-        if not params:
-            say(box, "No parameters have been read from the vehicle.\n\n"
-                     "They are read from the head of the autopilot's own "
-                     "dataflash log, which sends the vehicle nothing.")
-            return
-        keep = [k for k in sorted(params)
-                if k.startswith(("EK3_", "EK2_", "AHRS_", "VISO_", "GPS_",
-                                 "RNGFND1_", "ORIGIN_", "SCR_", "BATT_",
-                                 "SURFTRAK"))]
-        lines = [f"{len(params):,} parameters read; "
-                 f"{len(keep)} relevant to navigation.", "-" * 60]
-        for k in keep:
-            v = params[k]
-            extra = ""
-            if k.startswith("EK3_SRC"):
-                extra = f"   {PR.source_name(k, v)}"
-            lines.append(f"{k:<22} {v:>14g}{extra}")
-        say(box, "\n".join(lines))
-
-    def _origin_tab(self, tab, st) -> None:
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(0, weight=1)
-        box = output_box(tab, wrap="word", muted=False)
-        box.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
-        box.configure(height=520)
-        lines = [st.summary(), ""]
-        if st.authority_reason:
-            lines += ["AUTHORITY", st.authority_reason, ""]
-        if st.families:
-            lines.append("PARAMETER FAMILIES ON THIS VEHICLE")
-            for f in st.families:
-                lines.append(f"  {f.prefix}*  {f.text()}")
-                lines.append(f"      {f.note()}")
-            lines.append("")
-        if st.scripting_enabled is not None:
-            lines.append(f"SCR_ENABLE is {int(st.scripting_enabled)} — Lua "
-                         f"scripting is "
-                         f"{'on' if st.scripting_enabled else 'OFF'}.")
-            lines.append("")
-        if st.warnings:
-            lines.append("WARNINGS")
-            for w in st.warnings:
-                lines.append(f"  • {w}")
-        say(box, "\n".join(lines))
 
 
 # --------------------------------------------------------------------------

@@ -1476,8 +1476,17 @@ class DvlCapture:
     #  the vehicle side: the extension, and what reached MAVLink
     # ------------------------------------------------------------------
 
+    #: How long the vehicle thread waits before asking a silent extension
+    #: again.
+    EXTENSION_RETRY_S = EXTENSION_RETRY_S
+
+    def _mavlink(self, host: str, system: int, component: int):
+        """A mavlink2rest reader for one sender on the vehicle."""
+        from ..nav.mav2rest import Mavlink2Rest
+        return Mavlink2Rest(host, system=system, component=component, timeout=2.0)
+
     def _vehicle_loop(self) -> None:
-        from ..nav.mav2rest import NEVER_SENT, Mavlink2Rest
+        from ..nav.mav2rest import NEVER_SENT
         sinks = {"raw": _Sink(self, "vehicle_raw"),
                  "mavlink": _Sink(self, "mavlink", header=MAVLINK_COLUMNS)}
         ext_session: webapi.Session | None = None
@@ -1496,12 +1505,8 @@ class DvlCapture:
                 began = time.monotonic()
                 if host != self.vehicle_host:
                     host = self.vehicle_host
-                    readers = {
-                        (255, 0): Mavlink2Rest(host, system=255, component=0,
-                                               timeout=2.0),
-                        (1, 1): Mavlink2Rest(host, system=1, component=1,
-                                             timeout=2.0),
-                    }
+                    readers = {(255, 0): self._mavlink(host, 255, 0),
+                               (1, 1): self._mavlink(host, 1, 1)}
                     prev.clear()
                     absent.clear()
                     ext_next = 0.0
@@ -1512,7 +1517,7 @@ class DvlCapture:
                         seq += 1
                         sinks["raw"].json_line(reply.record(seq, "dvl_extension"))
                     if not values.get("ext_reachable"):
-                        ext_next = began + EXTENSION_RETRY_S
+                        ext_next = began + self.EXTENSION_RETRY_S
                     self._extension_seen(values)
 
                 vehicle_down = False
