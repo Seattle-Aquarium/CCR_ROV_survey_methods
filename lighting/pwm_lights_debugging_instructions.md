@@ -103,9 +103,9 @@ You should see the startup banner followed by a continuous stream of lines
 like:
 
 ```
-PWM: 1523 us | Level: 52%
-PWM: 1523 us | Level: 52%
-PWM: 1524 us | Level: 52%
+PWM: 1580 us | Step: 6/10 | LOUT: 88
+PWM: 1580 us | Step: 6/10 | LOUT: 88
+PWM: 1581 us | Step: 6/10 | LOUT: 88
 ...
 ```
 
@@ -129,7 +129,7 @@ Press **Ctrl-]** to exit the REPL when you're done.
   occasionally reads `NO SIGNAL` → **PWM input is noisy**. Check the GP16
   signal wire from the BlueROV servo output for loose terminals, poor
   ground, or routing near the 24 V / light cables.
-- **`Level:` value changes even when PWM looks steady** → software bug,
+- **`Step:` value changes even when PWM looks steady** → software bug,
   worth filing a separate issue.
 
 ## 7. Revert the change when finished

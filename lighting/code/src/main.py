@@ -92,6 +92,15 @@ class LightingController:
     PWM_MIN_US = 1100
     PWM_MAX_US = 1900
 
+    # LOUT for each brightness step: off, then one step per 10% of full light
+    # output. The SeaSense dimming curve is far from linear (LOUT 60 gives only
+    # 15%), so each value is the whole LOUT nearest its 10% on the manual's
+    # curve, lighting/simulation/data/lsl_seasense_dimming.csv. Together they
+    # give 0, 10, 20, 30, 41, 50, 60, 71, 81, 88 and 100% of full output.
+    # The PWM range is split evenly into len(LOUT_STEPS) - 1 steps, so ArduSub's
+    # JS_LIGHTS_STEPS must be 10 for each brighter/dimmer press to move one step.
+    LOUT_STEPS = (0, 39, 67, 74, 80, 84, 88, 92, 95, 97, 100)
+
     # Accept-range for raw pulse samples. Pulses outside this are treated
     # as EMI glitches and dropped by the PWM reader's ISR.
     PWM_VALID_MIN_US = 900
@@ -104,8 +113,11 @@ class LightingController:
     # Signal loss timeout - lights off if no PWM edges for this long
     SIGNAL_TIMEOUT_MS = 1000
 
-    # Minimum brightness change (%) before updating lights (deadband)
-    LEVEL_DEADBAND = 5
+    # How far (us) a pulse must pass the midpoint between two steps before
+    # the step changes, so jitter at a midpoint can't flicker the lights.
+    # Flipping back and forth takes a 40 us swing, the same immunity the old
+    # 5-level deadband gave against the flicker fixed in #41
+    STEP_HYSTERESIS_US = 20
 
     # Control loop interval
     LOOP_INTERVAL_MS = 50
@@ -135,7 +147,7 @@ class LightingController:
         self._lights = []
         self._power_monitor = None
         self._pwm_reader = None
-        self._current_level = 0
+        self._current_step = 0
 
         self._init_uart()
         self._init_lights()
@@ -192,17 +204,23 @@ class LightingController:
             valid_max_us=self.PWM_VALID_MAX_US,
         )
         print(f"PWM input initialized: GP{self.PWM_INPUT_PIN}")
-        print(f"  PWM range: {self.PWM_MIN_US}-{self.PWM_MAX_US} us -> 0-100% brightness")
+        print(f"  PWM range: {self.PWM_MIN_US}-{self.PWM_MAX_US} us -> {len(self.LOUT_STEPS) - 1} steps, LOUT {self.LOUT_STEPS}")
         print(f"  Accept range: {self.PWM_VALID_MIN_US}-{self.PWM_VALID_MAX_US} us, median window: {self.MEDIAN_WINDOW}")
 
-    def pwm_to_level(self, pulse_width_us):
-        """Map PWM pulse width (us) to light level (0-100)."""
-        if pulse_width_us <= self.PWM_MIN_US:
-            return 0
-        if pulse_width_us >= self.PWM_MAX_US:
-            return 100
-        return int((pulse_width_us - self.PWM_MIN_US) * 100
-                    / (self.PWM_MAX_US - self.PWM_MIN_US))
+    def pwm_to_step(self, pulse_width_us):
+        """Snap PWM pulse width (us) to the nearest brightness step.
+
+        Steps are evenly spaced from PWM_MIN_US (step 0, off) to PWM_MAX_US
+        (the last step). The current step is held until the pulse is
+        STEP_HYSTERESIS_US past the midpoint to a neighbouring step.
+        """
+        steps = len(self.LOUT_STEPS) - 1
+        step_us = (self.PWM_MAX_US - self.PWM_MIN_US) / steps
+        width = min(max(pulse_width_us, self.PWM_MIN_US), self.PWM_MAX_US)
+        position = (width - self.PWM_MIN_US) / step_us
+        if abs(position - self._current_step) <= 0.5 + self.STEP_HYSTERESIS_US / step_us:
+            return self._current_step
+        return round(position)
 
     def set_light_level(self, light_index, level):
         """
@@ -305,26 +323,27 @@ class LightingController:
                 if signal_lost:
                     pw_samples = []
                     pw_filtered = 0
-                    target_level = 0
+                    target_step = 0
                 else:
                     pw_samples.append(self._pwm_reader.pulse_width_us)
                     if len(pw_samples) > self.MEDIAN_WINDOW:
                         pw_samples.pop(0)
                     pw_filtered = sorted(pw_samples)[len(pw_samples) // 2]
-                    target_level = self.pwm_to_level(pw_filtered)
+                    target_step = self.pwm_to_step(pw_filtered)
 
-                # Only update lights if level changed beyond deadband
-                if abs(target_level - self._current_level) >= self.LEVEL_DEADBAND:
-                    self.set_all_lights(target_level)
-                    self._current_level = target_level
+                # Only update lights when the step changes
+                if target_step != self._current_step:
+                    self.set_all_lights(self.LOUT_STEPS[target_step])
+                    self._current_step = target_step
 
                 # Periodic status output
                 now_ms = time.ticks_ms()
                 if time.ticks_diff(now_ms, last_status_ms) >= self.STATUS_INTERVAL_MS:
+                    step = f"Step: {self._current_step}/{len(self.LOUT_STEPS) - 1} | LOUT: {self.LOUT_STEPS[self._current_step]}"
                     if signal_lost:
-                        print(f"PWM: NO SIGNAL | Level: {self._current_level}%")
+                        print(f"PWM: NO SIGNAL | {step}")
                     else:
-                        print(f"PWM: {pw_filtered} us | Level: {self._current_level}%")
+                        print(f"PWM: {pw_filtered} us | {step}")
                     last_status_ms = now_ms
 
                 time.sleep_ms(self.LOOP_INTERVAL_MS)

@@ -73,7 +73,7 @@ def test_a_light_step_follows_the_steps_and_is_not_counted_twice():
     steps = [r for r in lights.rows if "step" in r.name]
     assert len(steps) == 2                               # Lights 1 and Lights 2
     assert all(r.derived_differs and r.state == PC.DERIVED for r in steps)
-    assert (steps[0].vehicle, steps[0].reference) == (200.0, 100.0)
+    assert (steps[0].vehicle, steps[0].reference) == (200.0, 80.0)
     assert [r.name for r in cmp.key_differences] == ["JS_LIGHTS_STEPS"]
 
 

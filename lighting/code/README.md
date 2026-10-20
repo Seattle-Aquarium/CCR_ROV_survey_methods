@@ -8,17 +8,50 @@ Controls 4 [DeepSea Power & Light LED SeaLite](https://www.deepsea.com/portfolio
 
 Note that the SeaSense dimming curve is strongly non-linear — `LOUT` 60 buys only
 15% of full output, and two thirds of the light lives in the top quarter of the
-command range — so the linear PWM mapping in step 3 below is linear in *command
-value*, not in light. See [`../simulation/`](../simulation/) for the measured
-curve and what it means for exposure.
+command range — so the Pico does not map PWM straight onto `LOUT`. It steps
+through a table of `LOUT` values chosen so that each step adds 10% of full light
+output (see [Brightness Steps](#brightness-steps)). See
+[`../simulation/`](../simulation/) for the measured curve and what it means for
+exposure.
 
 ## How It Works
 
 1. The BlueROV sends a standard servo PWM signal (1100-1900 us at ~50 Hz) to GP16 on the Pico
 2. The Pico measures pulse width using pin edge interrupts
-3. Pulse width is linearly mapped to brightness: 1100 us = 0% (off), 1500 us = 50%, 1900 us = 100%
-4. Brightness commands are sent to all 4 lights over UART using the SeaSense protocol
+3. Pulse width is snapped to the nearest of 11 steps, 80 us apart: 1100 us = off, and each step up adds 10% of full light output
+4. The step's `LOUT` is sent to all 4 lights over UART using the SeaSense protocol
 5. If the PWM signal is lost for >1 second, lights turn off automatically
+
+## Brightness Steps
+
+The table is `LOUT_STEPS` in `main.py`. Each `LOUT` is the whole number nearest
+its 10% on the manual's dimming curve
+([`lsl_seasense_dimming.csv`](../simulation/data/lsl_seasense_dimming.csv)).
+`LOUT` only takes whole numbers, and near the top one `LOUT` is worth 3–4% of
+output, so the upper steps land a little off the mark.
+
+| Step | PWM (us) | LOUT | Light output |
+|-----:|---------:|-----:|-------------:|
+| 0  | 1100 | 0   | off  |
+| 1  | 1180 | 39  | 10%  |
+| 2  | 1260 | 67  | 20%  |
+| 3  | 1340 | 74  | 30%  |
+| 4  | 1420 | 80  | 41%  |
+| 5  | 1500 | 84  | 50%  |
+| 6  | 1580 | 88  | 60%  |
+| 7  | 1660 | 92  | 71%  |
+| 8  | 1740 | 95  | 81%  |
+| 9  | 1820 | 97  | 88%  |
+| 10 | 1900 | 100 | 100% |
+
+Light output is a share of full brightness, from the manual. The electrical
+power drawn should roughly follow it but has not been measured step by step;
+`c.read_power()` (the INA238) can do that.
+
+The PWM range is split evenly into one step fewer than there are entries in
+`LOUT_STEPS`, so ArduSub's `JS_LIGHTS_STEPS` has to be 10 for each press of
+lights brighter/dimmer to move exactly one step. Shortening the table (to stop at
+80%, say) means changing `JS_LIGHTS_STEPS` to match.
 
 ## Pin Assignments
 
@@ -35,6 +68,7 @@ curve and what it means for exposure.
 1. In BlueOS, configure a servo output as an actuator function (e.g., Servo 9)
 2. In Cockpit/QGroundControl, map a joystick axis or button to that actuator
 3. See the [Newton Gripper installation guide](https://bluerobotics.com/learn/newton-subsea-gripper-installation/#setup-in-qgroundcontrol) for the general pattern of configuring auxiliary servo outputs
+4. Set `JS_LIGHTS_STEPS` to 10, so each lights brighter/dimmer press moves one [brightness step](#brightness-steps). The reference parameters in [`nereo.params`](../../rov_flight_ops/vehicle_parameters/nereo.params) have it, and the Parameters tab of ROV Flight Operations flags a vehicle that differs
 
 ## Development
 
