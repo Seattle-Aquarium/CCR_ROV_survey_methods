@@ -49,7 +49,6 @@ GAP_MS = 25
 
 
 class Poller:
-
     def __init__(self, bus, addresses, emit, schedule=SCHEDULE, gap_ms=GAP_MS):
         self.bus = bus
         self.addresses = list(addresses)
@@ -80,24 +79,21 @@ class Poller:
         """Ask the next question if one is due. Returns True if one was asked."""
         if not self.due():
             return False
-        
+
         if not self.queue:
             self._refill()
 
         if not self.queue:
             return False
-        
+
         addr, command = self.queue.pop(0)
 
         try:
             ok, raw, err, rtt = self.bus.query(addr, command)
-        except Exception as ex:                  # noqa: BLE001
+        except Exception as ex:  # noqa: BLE001
             ok, raw, err, rtt = 0, "", "error: " + repr(ex), 0
 
-        fields = {"id": addr, 
-                "cmd": command, 
-                "ok": 1 if ok else 0, 
-                "rtt": rtt}
+        fields = {"id": addr, "cmd": command, "ok": 1 if ok else 0, "rtt": rtt}
 
         if raw:
             fields["raw"] = raw

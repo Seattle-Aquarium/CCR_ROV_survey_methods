@@ -41,8 +41,8 @@ documented behaviour, not a fault.
 
 import os
 
-port = None          # the usb.device.cdc.CDCInterface, once started
-error = ""           # why there is no port, in words
+port = None  # the usb.device.cdc.CDCInterface, once started
+error = ""  # why there is no port, in words
 
 OFF_FILE = "datalink.off"
 TRY_FILE = "datalink.try"
@@ -66,8 +66,9 @@ def _write(name, text):
     except OSError:
         pass
 
+
 def _write_error(text):
-    _write(ERROR_FILE,text)
+    _write(ERROR_FILE, text)
 
 
 def _remove(name):
@@ -106,20 +107,23 @@ def start():
         import usb.device
         from usb.device.cdc import CDCInterface
     except ImportError as ex:
-        error = "usb-device-cdc not installed (mpremote mip install usb-device-cdc): " + str(ex)
+        error = (
+            "usb-device-cdc not installed (mpremote mip install usb-device-cdc): "
+            + str(ex)
+        )
         _write_error(error)
         return None
-    
+
     _write(TRY_FILE, "setting up the telemetry port\n")
 
     try:
         cdc = CDCInterface()
-        cdc.init(timeout=0)                      # never block the light loop
+        cdc.init(timeout=0)  # never block the light loop
         usb.device.get().init(cdc, builtin_driver=True)
         port = cdc
         error = ""
         _remove(ERROR_FILE)
-    except Exception as ex:                      # noqa: BLE001 - anything at all
+    except Exception as ex:  # noqa: BLE001 - anything at all
         port = None
         error = "could not start: " + repr(ex)
         _write_error(error)
@@ -134,6 +138,7 @@ def _restore_console():
     """Put the console back as the only USB interface, after a failed start."""
     try:
         import machine
+
         dev = machine.USBDevice()
         dev.active(False)
         dev.builtin_driver = dev.BUILTIN_DEFAULT

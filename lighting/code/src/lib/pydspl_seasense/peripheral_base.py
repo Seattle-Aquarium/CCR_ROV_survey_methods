@@ -32,8 +32,9 @@ class PeripheralBase:
     DSPL_VERB_TEMPERATURE = "temp"
     DSPL_VERB_HUMIDITY = "rhum"
 
-    def __init__(self, address: int, local_echo: bool = False,
-                 expect_response: bool = True) -> None:
+    def __init__(
+        self, address: int, local_echo: bool = False, expect_response: bool = True
+    ) -> None:
         """
         Address is the device ID programmed into the unit
 
@@ -74,7 +75,7 @@ class PeripheralBase:
         """
 
         # Drain any stale data from the RX buffer
-        if hasattr(fp, 'any') and fp.any():
+        if hasattr(fp, "any") and fp.any():
             fp.read(fp.any())
 
         fp.write(seasense.build_packet(self.address, command, "?").encode("ascii"))
@@ -82,7 +83,7 @@ class PeripheralBase:
 
         return self.readline(fp)
 
-    def readline(self,fp):
+    def readline(self, fp):
 
         if self._local_echo:
             result = fp.read_until()
@@ -157,7 +158,7 @@ class PeripheralBase:
 
         \todo{}:  Parse info string to extract meaning?  Only if we need to...
         """
-        result = ( self.do_query(fp, self.DSPL_VERB_STAT),  self.readline(fp))
+        result = (self.do_query(fp, self.DSPL_VERB_STAT), self.readline(fp))
 
         return result
 

@@ -1,7 +1,7 @@
 """
 Telemetry out of the light controller: one JSON object per line.
 
-The format is `ccr.lights/1` as described in ../TELEMETRY.md. 
+The format is `ccr.lights/1` as described in ../TELEMETRY.md.
 
 Every line has
 
@@ -16,10 +16,10 @@ Every line has
 
 Lines go out on the telemetry port when there is one (datalink.py), written
 without waiting: a line that does not fit is dropped and counted, never
-waited for. 
+waited for.
 
 If the telemetry port doesn't exist (if datalink.py failed), telemetry goes to
-the console, prefixed "@L ", so a reader can tell them from anything else 
+the console, prefixed "@L ", so a reader can tell them from anything else
 printed there.
 
 The firmware does as little interpretation as it can.
@@ -74,13 +74,15 @@ class Sink:
         self._print = printer
         self.n = 0
         self.sent = 0
-        self.dropped = 0          # lines that did not go out, for any reason
-        self.unread = 0           # of those, because nobody had the port open
-        self._broken = False      # the last write stopped part way through a line
+        self.dropped = 0  # lines that did not go out, for any reason
+        self.unread = 0  # of those, because nobody had the port open
+        self._broken = False  # the last write stopped part way through a line
 
     @property
     def mode(self):
-        return "data" if self.port is not None else ("console" if self.console else "off")
+        return (
+            "data" if self.port is not None else ("console" if self.console else "off")
+        )
 
     def emit(self, kind, **fields):
         self.n += 1
@@ -90,10 +92,17 @@ class Sink:
 
         try:
             line = json.dumps(_tidy(fields))
-        except Exception as ex:   # an unserialisable value is a bug; say so
-            line = json.dumps({"type": "log", "n": self.n, "ms": fields["ms"],
-                               "lvl": "error", "msg": "unserialisable message " + kind + ": " + repr(ex)})
-            
+        except Exception as ex:  # an unserialisable value is a bug; say so
+            line = json.dumps(
+                {
+                    "type": "log",
+                    "n": self.n,
+                    "ms": fields["ms"],
+                    "lvl": "error",
+                    "msg": "unserialisable message " + kind + ": " + repr(ex),
+                }
+            )
+
         if self.port is not None:
             self._to_port(line)
 

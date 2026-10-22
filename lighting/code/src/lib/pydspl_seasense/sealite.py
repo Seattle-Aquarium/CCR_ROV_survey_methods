@@ -9,7 +9,6 @@ from pydspl_seasense.peripheral_base import PeripheralBase
 #    peripherals (lights, lasers, etc) which we don't currently use.
 #
 class Sealite(PeripheralBase):
-
     # Magic strings for commands supported by DSPL lights
     DSPL_VERB_LIGHT_LEVEL = "lout"
 
@@ -24,10 +23,12 @@ class Sealite(PeripheralBase):
     to allow the "{increment,decrement}_light functions.
     """
 
-    def __init__(self, address, fp=None, max_level=100, local_echo=False,
-                 expect_response=True):
-        super().__init__(address, local_echo=local_echo,
-                         expect_response=expect_response)
+    def __init__(
+        self, address, fp=None, max_level=100, local_echo=False, expect_response=True
+    ):
+        super().__init__(
+            address, local_echo=local_echo, expect_response=expect_response
+        )
 
         self._level = 0
 

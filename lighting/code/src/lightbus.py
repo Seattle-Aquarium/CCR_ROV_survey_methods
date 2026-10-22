@@ -47,23 +47,26 @@ MULTILINE = ("stat", "pset", "boot")
 
 
 class LightBus:
-
-    def __init__(self, uart, 
-                 timeout_ms=TIMEOUT_MS, 
-                 stat_timeout_ms=STAT_TIMEOUT_MS,
-                 idle_ms=IDLE_MS, 
-                 local_echo=False):
+    def __init__(
+        self,
+        uart,
+        timeout_ms=TIMEOUT_MS,
+        stat_timeout_ms=STAT_TIMEOUT_MS,
+        idle_ms=IDLE_MS,
+        local_echo=False,
+    ):
         self.uart = uart
         self.timeout_ms = timeout_ms
         self.stat_timeout_ms = stat_timeout_ms
         self.idle_ms = idle_ms
-
 
         self._expect_local_echo = local_echo
 
         self.asked = 0
         self.answered = 0
         self.failed = 0
+
+        self.send_failed = 0
 
     def _drain(self):
         """Throw away whatever is waiting -- the ACKs to earlier LOUT= writes."""
@@ -74,6 +77,45 @@ class LightBus:
         except Exception:
             pass
 
+    def set_level(self, address, lout):
+
+        lout = int(lout)
+        if lout < 0 or lout > 100:
+            return 0, "", "", 0
+
+        sent_packet = seasense.build_packet(address, "lout", "=", f"{lout}")
+        t0 = time.ticks_ms()
+
+        try:
+            self.uart.write(
+                sent_packet.encode("ascii")
+                if isinstance(sent_packet, str)
+                else sent_packet
+            )
+            self.uart.flush()
+        except Exception:
+            self.send_failed += 1
+            return 0, "", "", 0
+
+        if self._expect_local_echo:
+            _ = self.uart.read_until()
+
+        buf = self.uart.read_until()
+
+        rtt = time.ticks_diff(time.ticks_ms(), t0)
+        text = _decode(buf, sent_packet)
+
+        if not text.strip():
+            self.failed += 1
+            return 0, text, "timeout", rtt
+
+        if text.strip() == "?":
+            self.failed += 1
+            return 0, text, "nak", rtt
+
+        self.answered += 1
+        return 1, text.strip(), "", rtt
+
     def query(self, address, command):
         """
         Ask `address` for `command`. Returns (ok, raw_text, error, rtt_ms).
@@ -83,14 +125,18 @@ class LightBus:
         """
 
         multi = command in MULTILINE
-        limit = self.stat_timeout_ms if multi else self.timeout_ms
+        _limit = self.stat_timeout_ms if multi else self.timeout_ms
         self._drain()
         sent_packet = seasense.build_packet(address, command, "?")
         self.asked += 1
         t0 = time.ticks_ms()
 
         try:
-            self.uart.write(sent_packet.encode("ascii") if isinstance(sent_packet, str) else sent_packet)
+            self.uart.write(
+                sent_packet.encode("ascii")
+                if isinstance(sent_packet, str)
+                else sent_packet
+            )
             self.uart.flush()
         except Exception as ex:
             self.failed += 1
@@ -113,7 +159,7 @@ class LightBus:
         # last_rx = None
 
         # done = False
-        
+
         # while True:
         #     now = time.ticks_ms()
         #     if time.ticks_diff(now, t0) >= limit:
@@ -131,7 +177,7 @@ class LightBus:
         #                 done = True
         #                 break
         #         continue
-            
+
         #     if (last_rx is not None and not multi and buf.endswith(b"\r")
         #             and time.ticks_diff(now, last_rx) >= self.idle_ms):
         #         done = True
@@ -144,11 +190,11 @@ class LightBus:
         if not text.strip():
             self.failed += 1
             return 0, text, "timeout", rtt
-        
+
         if text.strip() == "?":
             self.failed += 1
             return 0, text, "nak", rtt
-        
+
         # if not done and multi and text.count("\n") >= 2:
         #     # Header and values arrived but not the closing blank line: usable.
         #     done = True
@@ -164,7 +210,9 @@ class LightBus:
 def _complete(buf, multi):
     if multi:
         # header CR LF, values CR LF, blank CR LF
-        return buf.count(b"\n") >= 3 or buf.endswith(b"\r\n\r\n") or buf.endswith(b"\n\n")
+        return (
+            buf.count(b"\n") >= 3 or buf.endswith(b"\r\n\r\n") or buf.endswith(b"\n\n")
+        )
     return b"\n" in buf
 
 
@@ -173,7 +221,9 @@ def _decode(data, sent_packet=None):
     try:
         text = data.decode("ascii")
     except Exception:
-        text = "".join(chr(b) if 32 <= b < 127 or b in (9, 10, 13) else "?" for b in data)
+        text = "".join(
+            chr(b) if 32 <= b < 127 or b in (9, 10, 13) else "?" for b in data
+        )
 
     text = text.replace("\x00", "")
 
@@ -183,6 +233,6 @@ def _decode(data, sent_packet=None):
     sent = sent_packet.strip() if isinstance(sent_packet, str) else ""
 
     if sent and text.startswith(sent):
-        text = text[len(sent):].lstrip("\r\n")
+        text = text[len(sent) :].lstrip("\r\n")
 
     return text

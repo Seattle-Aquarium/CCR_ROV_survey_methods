@@ -13,20 +13,20 @@ def build_packet(address, cmd, access, data=None, do_checksum=True):
 
     # Validation
     if address is None:
-        raise ValueError
+        raise ValueError("No address provided")
 
     # Address must be integer between 0 and 999
     address = int(address)
     if address < 0 or address > 999:
-        raise ValueError
+        raise ValueError(f"Bad address {address}")
 
     # cmd must be a four-letter string
     if len(str(cmd)) != 4:
-        raise ValueError
+        raise ValueError(f'Bad cmd "f{cmd}"')
 
     # None is also a valid access code
     if access and access not in "=?+-":  # ['=', '?', '+', '-']:
-        raise ValueError
+        raise ValueError("Bad accessor")
 
     out = "!{:03d}:{:4s}{:1s}{:s}".format(
         address,

@@ -38,8 +38,8 @@ curve and what it means for exposure.
 
 ## Development
 
-> [!IMPORTANT] Adding the second telemetry port adds a USB re-enumeration to the 
-> Circuitpython startup process.  `mpremote` typically does a soft reset 
+> [!IMPORTANT] Adding the second telemetry port adds a USB re-enumeration to the
+> Circuitpython startup process.  `mpremote` typically does a soft reset
 > when it performs new commands, the bus reset interferes with this.
 >
 > When calling `mpremote` commands, use `mpremote resume` which will attempt the

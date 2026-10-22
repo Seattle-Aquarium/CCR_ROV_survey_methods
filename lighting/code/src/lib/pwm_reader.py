@@ -1,6 +1,4 @@
-"""
-
-"""
+""" """
 
 import time
 from machine import Pin
@@ -25,13 +23,13 @@ class PWMReader:
 
         self._pin = Pin(pin_num, Pin.IN, Pin.PULL_DOWN)
         self._pin.irq(
-            trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, 
-            handler=self._irq_handler, 
-            hard=True
+            trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING,
+            handler=self._irq_handler,
+            hard=True,
         )
 
-    # Because a hard ISR interrupts the MicroPython runtime mid-operation, 
-    # you must follow the strict MicroPython ISR Rules to prevent the 
+    # Because a hard ISR interrupts the MicroPython runtime mid-operation,
+    # you must follow the strict MicroPython ISR Rules to prevent the
     # system from crashing
     #
     def _irq_handler(self, pin):

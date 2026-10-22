@@ -40,7 +40,6 @@ from pwm_reader import PWMReader
 FIRMWARE = "lutris-lights 2.0.0-telemetry"
 
 
-
 class LightingController:
     """
     Main controller for the Lutris lighting system.
@@ -49,8 +48,8 @@ class LightingController:
     individually (1-4) via the SeaSense protocol. Light brightness is
     controlled by a PWM input from the BlueROV.
 
-    Pins come from board.py: the Pico (original wiring, Keenan's PCB) and the
-    QT Py RP2040 now on Lutris are both recognised at start-up.
+    Pins come from board.py.  Both the Pico (original wiring, Keenan's PCB) and the
+    QT Py RP2040 now on Lutris are recognised automatically at start-up.
     """
 
     # ArduSub servo PWM range (microseconds)
@@ -134,7 +133,7 @@ class LightingController:
         self._init_power_monitor()
         self._init_pwm_reader()
 
-        self._bus = LightBus(self._uart, local_echo=self.board["local_echo"] )
+        self._bus = LightBus(self._uart, local_echo=self.board["local_echo"])
         self._poller = Poller(self._bus, self.LIGHT_ADDRESSES, self._on_poll)
         self._poller.enabled = self.DO_POLL_LIGHTS
 
@@ -160,7 +159,6 @@ class LightingController:
             "Telemetry:",
             "second USB port" if port is not None else "console (@L lines); " + why,
         )
-
 
     def _emit_hello(self):
         try:
@@ -190,7 +188,7 @@ class LightingController:
     def _on_poll(self, kind, **fields):
         """
         Got data from a light.
-        
+
         Dump it to telemetry, then process it (if it's an "lout")
         """
 
@@ -198,24 +196,23 @@ class LightingController:
 
         if fields.get("cmd") != "lout" or not fields.get("ok"):
             return
-        
+
         addr = fields.get("id")
 
         try:
             said = int(str(fields.get("raw", "")).strip().split()[0])
         except (ValueError, IndexError):
             return
-        
+
         if said == self._current_level:
             self._mismatch[addr] = 0
             return
-        
+
         n = self._mismatch.get(addr, 0) + 1
         self._mismatch[addr] = n
 
         if self.RESYNC_LEVELS and n >= self.RESYNC_AFTER_MISMATCHES:
-            idx = self.LIGHT_ADDRESSES.index(addr)
-            self.set_light_level(idx, self._current_level, why="resync")
+            self.set_light_level(addr, self._current_level, why="resync")
             self._mismatch[addr] = 0
 
     # ------------------------------------------------------------------
@@ -236,7 +233,9 @@ class LightingController:
     def _init_lights(self):
         """Initialize SeaLite objects for each light."""
         for addr in self.LIGHT_ADDRESSES:
-            light = Sealite(address=addr, max_level=100, expect_response=False)
+            light = Sealite(
+                address=addr, max_level=100, expect_response=self.board["local_echo"]
+            )
             self._lights.append(light)
         print(
             f"Initialized {len(self._lights)} SeaLite lights (addresses {self.LIGHT_ADDRESSES})"
@@ -265,7 +264,7 @@ class LightingController:
                 self._monitor_notes.append(f"{label}: first read failed: {repr(e)}")
         print(
             "Power monitors:",
-            [(l, m.chip, hex(m.addr)) for l, m in self._monitors] or "none",
+            [(label, m.chip, hex(m.addr)) for label, m in self._monitors] or "none",
             self._monitor_notes,
         )
 
@@ -300,70 +299,76 @@ class LightingController:
             / (self.PWM_MAX_US - self.PWM_MIN_US)
         )
 
-    def set_light_level(self, light_index, level, why="manual"):
+    def set_light_level(self, addr, level, why="manual"):
         """
         Set brightness level for a specific light.
 
         Args:
-            light_index: Light index (0-3)
+            addr: Light address
             level: Brightness level (0-100)
 
         Returns:
             True on success, False on failure
         """
-        if light_index < 0 or light_index >= len(self._lights):
-            print(f"Invalid light index: {light_index}")
+        if addr not in self.LIGHT_ADDRESSES:
+            print(f"Invalid light address: {addr}")
             return False
 
         try:
-            ok = self._lights[light_index].set_level(self._uart, level)
-            self.tel.emit("set", id=self.LIGHT_ADDRESSES[light_index], lvl=level, why=why)
+            ok, _raw, _err, rtt = self._bus.set_level(addr, level)
+            self.tel.emit("set", id=addr, lvl=level, ok=ok, rtt=rtt)
             return ok
+        except ValueError as e:
+            print(f"Error setting light {addr}: {e}")
+            self.tel.emit(
+                "log", lvl="error", msg=f"set light value error {addr}: {repr(e)}"
+            )
+            return False
         except Exception as e:
-            print(f"Error setting light {light_index}: {e}")
-            self.tel.emit("log", lvl="error", msg=f"set light {light_index + 1}: {repr(e)}")
+            print(f"Error setting light {addr}: {e}")
+            self.tel.emit("log", lvl="error", msg=f"set light {addr}: {repr(e)}")
             return False
 
     def set_all_lights(self, level, why="manual"):
         """Set brightness level for all lights."""
         success = 0
-        for i in range(len(self._lights)):
-            if self.set_light_level(i, level, why=why):
+        for addr in self.LIGHT_ADDRESSES:
+            if self.set_light_level(addr, level, why=why):
                 success += 1
             # Let each light ACK before the next command (PR #43). The pause
             # is arbitrary: it could be tuned to the lights' actual response
             # time, or the code that catches their replies made more robust.
             time.sleep_ms(self.INTER_LIGHT_MS)
+
         # Ask each light what it now thinks, ahead of the rotation.
         for addr in reversed(self.LIGHT_ADDRESSES):
             self._poller.ask_now(addr, "lout")
         return success
 
-
     def all_off(self):
         """Turn off all lights."""
         return self.set_all_lights(0, why="off")
 
-    def get_light_level(self, light_index):
+    def get_light_level(self, addr):
         """Read current brightness level from a light."""
-        if light_index < 0 or light_index >= len(self._lights):
+        if addr not in self.LIGHT_ADDRESSES:
             return None
 
         try:
-            return self._lights[light_index].read_level(self._uart)
+            return self._poller.ask_now(addr, "lout")
         except Exception as e:
-            print(f"Error reading light {light_index}: {e}")
+            print(f"Error reading light {addr}: {e}")
             return None
 
-    def get_light_temperature(self, light_index):
+    def get_light_temperature(self, addr):
         """Read temperature from a light."""
-        if light_index < 0 or light_index >= len(self._lights):
+        if addr not in self.LIGHT_ADDRESSES:
             return None
 
         try:
-            return self._lights[light_index].read_temperature(self._uart)
+            return self._poller.ask_new(addr, "temp")
         except Exception as e:
-            print(f"Error reading temp from light {light_index}: {e}")
+            print(f"Error reading temp from light {addr}: {e}")
             return None
 
     def read_power(self):
@@ -391,9 +396,9 @@ class LightingController:
             },
             "bus": {
                 "asked": self._bus.asked,
-                "answered":  self._bus.answered,
-                "failed": self._bus.failed
-            }
+                "answered": self._bus.answered,
+                "failed": self._bus.failed,
+            },
         }
 
     # ------------------------------------------------------------------
@@ -406,7 +411,9 @@ class LightingController:
                 r = mon.read()
                 self.tel.emit("pwr", ch=label, chip=mon.chip, addr=mon.addr, **r)
             except Exception as e:
-                self.tel.emit("pwr", ch=label, chip=mon.chip, addr=mon.addr, err=repr(e))
+                self.tel.emit(
+                    "pwr", ch=label, chip=mon.chip, addr=mon.addr, err=repr(e)
+                )
 
     def run(self):
         """Main control loop. Reads PWM input and updates light brightness.
@@ -468,7 +475,7 @@ class LightingController:
                     self._emit_power()
                     last_power_ms = now_ms
 
-                # A quiet turn: ask one light one question.
+                # If the light levels weren't changed, ask one light one question.
                 if not changed:
                     self._poller.step()
 
@@ -510,7 +517,9 @@ class LightingController:
         finally:
             self.all_off()
             self._pwm_reader.deinit()
-            self.tel.emit("log", lvl="warn", msg="control loop stopped; lights turned off")
+            self.tel.emit(
+                "log", lvl="warn", msg="control loop stopped; lights turned off"
+            )
             print("Lights off. PWM reader disabled.")
 
 

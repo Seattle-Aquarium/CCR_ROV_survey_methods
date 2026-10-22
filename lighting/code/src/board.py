@@ -25,25 +25,25 @@ import os
 PICO = {
     "name": "pico",
     "uart_id": 0,
-    "uart_tx": 0,        # GP0
-    "uart_rx": 1,        # GP1
-    "pwm_pin": 16,       # GP16
+    "uart_tx": 0,  # GP0
+    "uart_rx": 1,  # GP1
+    "pwm_pin": 16,  # GP16
     "i2c_id": 1,
-    "i2c_sda": 14,       # GP14, J5 on the PCB
-    "i2c_scl": 15,       # GP15, J5 on the PCB
-    "local_echo": False
+    "i2c_sda": 14,  # GP14, J5 on the PCB
+    "i2c_scl": 15,  # GP15, J5 on the PCB
+    "local_echo": False,
 }
 
 QTPY = {
     "name": "qtpy",
     "uart_id": 1,
-    "uart_tx": None,     # None = MicroPython's default for the board (GPIO20)
-    "uart_rx": None,     # (GPIO5)
-    "pwm_pin": 29,       # A0
+    "uart_tx": None,  # None = MicroPython's default for the board (GPIO20)
+    "uart_rx": None,  # (GPIO5)
+    "pwm_pin": 29,  # A0
     "i2c_id": 1,
-    "i2c_sda": 22,       # STEMMA QT
+    "i2c_sda": 22,  # STEMMA QT
     "i2c_scl": 23,
-    "local_echo": True   # The QtPy can't run the RTS signal on the transceiver
+    "local_echo": True,  # The QtPy can't run the RTS signal on the transceiver
 }
 
 
