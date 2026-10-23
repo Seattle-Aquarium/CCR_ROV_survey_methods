@@ -33,11 +33,10 @@ import telemetry
 from ina2xx import find as find_power_monitors
 from lightbus import LightBus
 from poller import Poller
-from pydspl_seasense.sealite import Sealite
 from uart_wrapper import UARTWrapper
 from pwm_reader import PWMReader
 
-FIRMWARE = "lutris-lights 2.0.0-telemetry"
+FIRMWARE = "lutris-lights 2.0.1-telemetry"
 
 
 class LightingController:
@@ -120,16 +119,17 @@ class LightingController:
         """Initialize the lighting controller."""
         self.board = board.detect()
         self._uart = None
-        self._lights = []
+        # self._lights = []
         self._monitors = []
         self._monitor_notes = []
         self._pwm_reader = None
-        self._current_level = 0
+        self._current_cmd = 0
         self._mismatch = {}
+        self._current_level = {}
 
         self._init_telemetry()
         self._init_uart()
-        self._init_lights()
+        # self._init_lights()
         self._init_power_monitor()
         self._init_pwm_reader()
 
@@ -189,7 +189,8 @@ class LightingController:
         """
         Got data from a light.
 
-        Dump it to telemetry, then process it (if it's an "lout")
+        Dump it to telemetry, then process the output
+        (only "lout" is handled right now)
         """
 
         self.tel.emit(kind, **fields)
@@ -204,7 +205,9 @@ class LightingController:
         except (ValueError, IndexError):
             return
 
-        if said == self._current_level:
+        self._current_level[addr] = said
+
+        if said == self._current_cmd:
             self._mismatch[addr] = 0
             return
 
@@ -212,7 +215,7 @@ class LightingController:
         self._mismatch[addr] = n
 
         if self.RESYNC_LEVELS and n >= self.RESYNC_AFTER_MISMATCHES:
-            self.set_light_level(addr, self._current_level, why="resync")
+            self.set_light_level(addr, self._current_cmd, why="resync")
             self._mismatch[addr] = 0
 
     # ------------------------------------------------------------------
@@ -229,17 +232,6 @@ class LightingController:
             uart_id=b["uart_id"], baudrate=self.BAUDRATE, timeout=2000, **kw
         )
         print(f"UART{b['uart_id']} initialized ({b['name']} pins)")
-
-    def _init_lights(self):
-        """Initialize SeaLite objects for each light."""
-        for addr in self.LIGHT_ADDRESSES:
-            light = Sealite(
-                address=addr, max_level=100, expect_response=self.board["local_echo"]
-            )
-            self._lights.append(light)
-        print(
-            f"Initialized {len(self._lights)} SeaLite lights (addresses {self.LIGHT_ADDRESSES})"
-        )
 
     def _init_power_monitor(self):
         """Find any INA226/INA238 on I2C. None fitted is normal (Lutris, Oct 2026)."""
@@ -299,13 +291,13 @@ class LightingController:
             / (self.PWM_MAX_US - self.PWM_MIN_US)
         )
 
-    def set_light_level(self, addr, level, why="manual"):
+    def set_light_level(self, addr: int, level: int, why="manual"):
         """
         Set brightness level for a specific light.
 
         Args:
             addr: Light address
-            level: Brightness level (0-100)
+            level: Brightness level (0-100) as an int
 
         Returns:
             True on success, False on failure
@@ -318,18 +310,12 @@ class LightingController:
             ok, _raw, _err, rtt = self._bus.set_level(addr, level)
             self.tel.emit("set", id=addr, lvl=level, ok=ok, rtt=rtt)
             return ok
-        except ValueError as e:
-            print(f"Error setting light {addr}: {e}")
-            self.tel.emit(
-                "log", lvl="error", msg=f"set light value error {addr}: {repr(e)}"
-            )
-            return False
         except Exception as e:
             print(f"Error setting light {addr}: {e}")
             self.tel.emit("log", lvl="error", msg=f"set light {addr}: {repr(e)}")
             return False
 
-    def set_all_lights(self, level, why="manual"):
+    def set_all_lights(self, level: int, why="manual"):
         """Set brightness level for all lights."""
         success = 0
         for addr in self.LIGHT_ADDRESSES:
@@ -381,26 +367,6 @@ class LightingController:
                 out[label] = {"error": repr(e)}
         return out or None
 
-    def status(self):
-        """Get status of all lights and power consumption."""
-        return {
-            "lights": [
-                {"index": i, "level": self._lights[i].level}
-                for i in range(len(self._lights))
-            ],
-            "power": self.read_power(),
-            "telemetry": {
-                "port": self.tel.mode,
-                "sent": self.tel.sent,
-                "dropped": self.tel.dropped,
-            },
-            "bus": {
-                "asked": self._bus.asked,
-                "answered": self._bus.answered,
-                "failed": self._bus.failed,
-            },
-        }
-
     # ------------------------------------------------------------------
     #  the loop
     # ------------------------------------------------------------------
@@ -447,9 +413,9 @@ class LightingController:
                     target_level = self.pwm_to_level(pw_filtered)
 
                 # Only update lights if level changed beyond deadband
-                changed = abs(target_level - self._current_level) >= self.LEVEL_DEADBAND
+                changed = abs(target_level - self._current_cmd) >= self.LEVEL_DEADBAND
                 if changed:
-                    self._current_level = target_level
+                    self._current_cmd = target_level
                     self.set_all_lights(target_level, why="pwm")
 
                 now_ms = time.ticks_ms()
@@ -462,7 +428,7 @@ class LightingController:
                         pwm=pw_filtered,
                         age=signal_age,
                         sig=0 if signal_lost else 1,
-                        cmd=self._current_level,
+                        cmd=self._current_cmd,
                         tgt=target_level,
                         rej=self._pwm_reader.rejected,
                     )
@@ -502,9 +468,9 @@ class LightingController:
                 # Periodic status output (human-readable, on the console)
                 if time.ticks_diff(now_ms, last_status_ms) >= self.STATUS_INTERVAL_MS:
                     if signal_lost:
-                        print(f"PWM: NO SIGNAL | Level: {self._current_level}%")
+                        print(f"PWM: NO SIGNAL | Level: {self._current_cmd}%")
                     else:
-                        print(f"PWM: {pw_filtered} us | Level: {self._current_level}%")
+                        print(f"PWM: {pw_filtered} us | Level: {self._current_cmd}%")
                     last_status_ms = now_ms
 
                 spent = time.ticks_diff(time.ticks_ms(), t_loop)

@@ -1,3 +1,11 @@
+"""
+This function is extracted from pydspl_seasense:
+
+https://gitlab.com/apl-ocean-engineering/pydspl_seasense
+
+"""
+
+
 def build_packet(address, cmd, access, data=None, do_checksum=True):
     """
     "Assembles" a valid DSPL protocol packet with the requested parameters.

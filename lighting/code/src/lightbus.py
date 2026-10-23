@@ -33,7 +33,7 @@ What comes back is passed on raw, as text. Parsing is the reader's job.
 
 import time
 
-from pydspl_seasense import seasense
+import seasense
 
 #: How long a light gets to answer, from the end of the question.
 TIMEOUT_MS = 250
@@ -78,13 +78,25 @@ class LightBus:
             pass
 
     def set_level(self, address, lout):
+        """
+        Set the current light level
+
+        Args:
+            address (hex): Address of light
+            lout (int): Light level from 0-100
+
+        Returns: 4-tuple
+            ok (int):  0 for "error", 1 for "ok"
+            data (str): Response from light (if any), or empty
+            err (str): Error or empty string
+            rtt (float): response time in ms
+        """
 
         lout = int(lout)
         if lout < 0 or lout > 100:
             return 0, "", "", 0
 
         sent_packet = seasense.build_packet(address, "lout", "=", f"{lout}")
-        t0 = time.ticks_ms()
 
         try:
             self.uart.write(
@@ -97,24 +109,7 @@ class LightBus:
             self.send_failed += 1
             return 0, "", "", 0
 
-        if self._expect_local_echo:
-            _ = self.uart.read_until()
-
-        buf = self.uart.read_until()
-
-        rtt = time.ticks_diff(time.ticks_ms(), t0)
-        text = _decode(buf, sent_packet)
-
-        if not text.strip():
-            self.failed += 1
-            return 0, text, "timeout", rtt
-
-        if text.strip() == "?":
-            self.failed += 1
-            return 0, text, "nak", rtt
-
-        self.answered += 1
-        return 1, text.strip(), "", rtt
+        return self._read_response(sent_packet)
 
     def query(self, address, command):
         """
@@ -125,11 +120,9 @@ class LightBus:
         """
 
         multi = command in MULTILINE
-        _limit = self.stat_timeout_ms if multi else self.timeout_ms
         self._drain()
         sent_packet = seasense.build_packet(address, command, "?")
         self.asked += 1
-        t0 = time.ticks_ms()
 
         try:
             self.uart.write(
@@ -141,6 +134,16 @@ class LightBus:
         except Exception as ex:
             self.failed += 1
             return 0, "", "write: " + repr(ex), 0
+
+        return self._read_response(sent_packet, multi=multi)
+
+    def _read_response(self, sent_packet=None, multi=False):
+
+        _limit = self.stat_timeout_ms if multi else self.timeout_ms
+
+        # With t0 here, it's now "response time" not "round trip time"
+        # but c'est la vie
+        t0 = time.ticks_ms()
 
         # This is very much worse than the existing code, but it works!
         if self._expect_local_echo:
@@ -230,6 +233,9 @@ def _decode(data, sent_packet=None):
     # Some half-duplex transceivers hear their own transmission. Lutris's do
     # not, as far as anyone has seen, but an echo would otherwise be read as
     # the answer.
+    #
+    # n.b. this is currently handled "manually" by specifying self._local_echo
+    # rather than automatically handling both cases
     sent = sent_packet.strip() if isinstance(sent_packet, str) else ""
 
     if sent and text.startswith(sent):
