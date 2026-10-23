@@ -38,11 +38,19 @@ curve and what it means for exposure.
 
 ## Development
 
+> [!IMPORTANT] Adding the second telemetry port adds a USB re-enumeration to the
+> Circuitpython startup process.  `mpremote` typically does a soft reset
+> when it performs new commands, the bus reset interferes with this.
+>
+> When calling `mpremote` commands, use `mpremote resume` which will attempt the
+> command **without** reseting the device first.  You may need to run a command
+> multiple times to get it to stick.
+
 Mount the local directory and test interactively:
 
 ```
 cd lighting/code/src
-mpremote mount . repl
+mpremote resume mount . repl
 ```
 
 Then in the REPL:
@@ -60,9 +68,17 @@ c.status()
 
 ## Deploy to Device
 
+Once to install the CDC library to the device:
+
+```
+mpremote mip install usb-device-cdc
+```
+
+then
+
 ```
 cd lighting/code/src
-mpremote cp -r . :
+mpremote resume cp -r . :
 mpremote reset
 ```
 
