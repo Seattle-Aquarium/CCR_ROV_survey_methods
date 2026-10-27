@@ -216,8 +216,8 @@ emptied each time it starts) and *Browse…* is refused; nothing reaches a
 vehicle. Switching it off puts back the flight folder, the recorder (which kept
 watching underneath), the transects, the survey plan and the banner's versions.
 
-**In a browser.** The simulator also runs as a public web demo, for anyone sent
-the link: see [The web demo](#the-web-demo).
+**In a browser.** The simulator can also run as a web demo, in a container
+that serves it to anyone sent the link: see [The web demo](#the-web-demo).
 
 ---
 
@@ -961,24 +961,25 @@ the tests; each wants one look at the real thing:
 ## The web demo
 
 The [simulator](#the-rov-flight-simulator) in a browser, for anyone with the
-link, as a Hugging Face Docker Space:
-<https://huggingface.co/spaces/zhrandell/rov-flight-ops-simulator> (or the
-app alone, filling the browser tab:
-<https://zhrandell-rov-flight-ops-simulator.hf.space>). It is this program,
-not a web copy of it: the same window, in demo mode, on a virtual display
-(Xvfb) in a Linux container, shared by x11vnc and drawn in the browser by
-noVNC.
+link. It is this program, not a web copy of it: the same window, in demo
+mode, on a virtual display (Xvfb) in a Linux container, shared by x11vnc and
+drawn in the browser by noVNC. The container is plain Docker, so any host
+that runs a container and passes WebSockets through to port 7860 can serve
+it.
 
-**Why it is on a personal account.** Hugging Face runs Docker Spaces only
-for accounts that pay: a **Team or Enterprise plan** for an organisation, or
-**PRO** for a person (static Spaces stay free). On 27 October 2026 it refused
-to create the Space under Seattle-Aquarium, which has no plan, so it was
-created on zhrandell's account, which has PRO. If the organisation takes a
-plan, `python web_demo/deploy.py --space
-Seattle-Aquarium/rov-flight-ops-simulator` puts it there; change `SPACE` in
-`deploy.py` and delete the personal Space afterwards. The container is plain
-Docker, so any host that runs a container and passes WebSockets through to
-port 7860 can serve it instead.
+**Not on Hugging Face: it was paused as abusive.** It was built for a
+Hugging Face Docker Space. Hugging Face runs those only for accounts that pay
+(a Team or Enterprise plan for an organisation, PRO for a person), so on
+27 October 2026 it went to zhrandell's account, which has PRO, rather than
+Seattle-Aquarium, which has no plan:
+`zhrandell/rov-flight-ops-simulator`. It built, passed its self-check and
+served the program to a browser, and within minutes Hugging Face's automated
+checks paused it with "Flagged as abusive". Hugging Face's
+[content policy](https://huggingface.co/content-policy) counts VNC among the
+tools it treats as platform abuse, and this container is built around a VNC
+server, so Hugging Face is not a host for it. Do not redeploy it there:
+`web_demo/deploy.py` still works, but a second flagged Space puts the
+account at risk.
 
 **Demo mode** — `python -m rov_flight_ops --demo`, or `ROV_FLIGHT_OPS_DEMO=1`
 (`rov_flight_ops/demo.py`). It runs on Windows too, for a look before
@@ -1001,12 +1002,9 @@ clicks, tab changes, dialogs. That is fine for sending the link to a few
 people; it is not a training room. Per-visitor sessions would need one
 container (display, program and simulator) per visitor: a small broker that
 starts a container for each new browser on a host that can run many of them,
-hands it its own address, and stops it when the browser goes away. A Space
-cannot do that — one Space is one container — so it would mean a server of our
-own, or a container service that starts one per session. Until then, anyone
-whose Hugging Face account has PRO (or a Team plan) can press *Duplicate this
-Space* to get a private copy. Spaces on the basic CPU also sleep after 48 hours without a visitor; the
-next visit wakes it, which takes about a minute.
+hands it its own address, and stops it when the browser goes away. A single
+always-on container cannot do that, so it would mean a server of our own, or
+a container service that starts one per session.
 
 **What is in `web_demo/`**
 
@@ -1017,47 +1015,32 @@ web_demo/
     web/           noVNC's landing page and settings: connect at once, scale to the window
     montserrat.conf  keeps body text in Montserrat Regular (Tk on X11 asks for Medium)
     selfcheck.py   run during the build: every module imported, every tab photographed
-    deploy.py      assembles the Space repository and uploads it
-    README.md      the Space's card (its front matter is the Space's configuration)
+    deploy.py      assembles the build folder (--stage DIR), or uploads it to a Hugging Face Space
+    README.md      the Hugging Face Space's card (its front matter is the Space's configuration)
 ```
 
 The build fails if any module will not import on Linux or the program opens
 without its simulator. Everything else the check finds — a glyph with no font,
 a callback that raised — and a photograph of each tab are served by the running
-Space at `/selfcheck/` under the app's own address:
-<https://zhrandell-rov-flight-ops-simulator.hf.space/selfcheck/report.txt>.
+container at `/selfcheck/` under the app's own address (`/selfcheck/report.txt`).
 
-**Setting it up (once per laptop).**
-
-1. A Hugging Face account that can write to the Space's owner: today that is
-   zhrandell's own account, on PRO. For an organisation, a member with the
-   *write* role, and the organisation on a Team or Enterprise plan.
-2. A token: <https://huggingface.co/settings/tokens> → *Create new token* →
-   *Fine-grained*, with write access to that account's (or organisation's)
-   repositories (a classic *Write* token also works).
-3. In a terminal, never in a chat or an email:
-
-   ```
-   python -m pip install huggingface_hub
-   hf auth login
-   ```
-
-   and paste the token when it asks.
-
-**Deploying, and redeploying after a change.** From `rov_flight_ops/`, with
-the change committed:
+**What a host builds from.** From `rov_flight_ops/`:
 
 ```
-python web_demo/deploy.py
+python web_demo/deploy.py --stage DIR
 ```
 
-The first run creates the Space — public, basic CPU — and every run uploads the
-program as it is in this folder (the commit message on the Space says which
-commit, and *with local changes* if there were any). The Space then rebuilds,
-about ten minutes the first time and a few after; the *Logs* tab on its page
-shows the build. Anyone connected while it restarts is reconnected to the new
-one. `--space OWNER/NAME` deploys somewhere else; `--stage DIR` only assembles
-the repository, to look at.
+assembles the build folder any container host needs: the Dockerfile at its
+root and the parts of the project the container uses under
+`rov_flight_ops/`, with the shell script and Dockerfile in LF line endings.
+The host builds it and sends its visitors to port 7860. The first build takes
+about ten minutes, later ones a few. Anyone connected while it restarts is
+reconnected to the new one.
+
+Without `--stage`, `deploy.py` uploads that folder to the Hugging Face Space
+it is named after, using a token the laptop was logged in with by
+`hf auth login`. That is how the paused Space was made; see above before
+running it.
 
 **Trying the container locally**, where Docker is installed — from the
 repository root, not `rov_flight_ops/`:
@@ -1090,7 +1073,7 @@ rov_flight_ops/
     assets/                  fonts, logos, icon
     specifications/          design documents: the DVL capture's sources, schema,
                              invariants, diagnosis guide, provenance, bench checklist
-    web_demo/                the Hugging Face Space: see "The web demo"
+    web_demo/                the web demo's container: see "The web demo"
     rov_flight_ops/          the package
         gui/
             app.py           the window and its eight tabs

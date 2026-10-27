@@ -3,8 +3,8 @@ The web demo: the program running its ROV flight simulator for visitors.
 
 ``python -m rov_flight_ops --demo`` (or ``ROV_FLIGHT_OPS_DEMO=1``) opens the
 program with the simulator already on, and keeps it on. It is what the
-Hugging Face Space in ``web_demo/`` runs, on a virtual display in a Linux
-container streamed to a browser, so that somebody can be sent a link and click
+container in ``web_demo/`` runs, on a virtual display in Linux, streamed to a
+browser, so that somebody can be sent a link and click
 through the tabs without a laptop, a vehicle or an install.
 
 What demo mode changes, and nothing else:

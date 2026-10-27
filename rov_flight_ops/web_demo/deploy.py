@@ -31,7 +31,9 @@ import tempfile
 from pathlib import Path
 
 #: On a personal account because the Seattle-Aquarium organisation has no
-#: plan that allows Docker Spaces (see "The web demo" in the README).
+#: plan that allows Docker Spaces. Hugging Face paused it within minutes as
+#: "Flagged as abusive" -- its content policy counts VNC as platform abuse --
+#: so read "The web demo" in the README before uploading anywhere on it.
 SPACE = "zhrandell/rov-flight-ops-simulator"
 
 HERE = Path(__file__).resolve().parent
