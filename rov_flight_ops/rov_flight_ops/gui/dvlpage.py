@@ -46,7 +46,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from .. import brand, diagnostics
+from .. import brand, desktop, diagnostics
 from ..dvl import capture as CAP
 from ..dvl import diagnostic as DIAG
 from ..dvl import protocol as P
@@ -246,7 +246,8 @@ class DvlPage(ctk.CTkFrame):
             return
         folder.mkdir(parents=True, exist_ok=True)
         try:
-            os.startfile(folder)                       # noqa: S606
+            if not desktop.open_path(folder):
+                self.app._log(f"{folder}: {desktop.NO_OPENER}")
         except Exception:
             pass
 

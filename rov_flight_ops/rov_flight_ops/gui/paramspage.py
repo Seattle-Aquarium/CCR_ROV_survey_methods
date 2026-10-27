@@ -23,7 +23,6 @@ write.
 from __future__ import annotations
 
 import logging
-import os
 import sys
 import time
 from pathlib import Path
@@ -32,7 +31,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from .. import board as B
-from .. import diagnostics, paramfile
+from .. import desktop, diagnostics, paramfile
 from .. import paramcheck as PC
 from ..nav import profiles as PR
 from . import theme as T
@@ -51,7 +50,7 @@ KEY_SPLIT = 4
 FONT_VERDICT = (T.FAMILY_SEMIBOLD, 22)
 FONT_GROUP = (T.FAMILY_SEMIBOLD, 12)
 FONT_NAME = (T.MONO, 11)
-FONT_MARK = ("Segoe UI Symbol", 13)
+FONT_MARK = (T.SYMBOL, 13)
 
 #: (glyph, colour) for each state.
 STATE_MARK = {
@@ -661,9 +660,12 @@ class ParamsPage(ctk.CTkFrame):
     def _open_reference(self) -> None:
         path = paramfile.reference_path(VEHICLE)
         try:
-            os.startfile(str(path))                  # noqa: S606 -- the user's own file
+            opened = desktop.open_path(path)
         except Exception as ex:
             messagebox.showinfo("Reference file", f"{path}\n\n{ex}")
+            return
+        if not opened:
+            messagebox.showinfo("Reference file", f"{path}\n\n{desktop.NO_OPENER}")
 
     def _save_vehicle(self) -> None:
         """The vehicle's parameters as they are now, into the flight folder,

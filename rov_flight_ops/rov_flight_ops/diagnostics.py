@@ -495,8 +495,9 @@ def open_folder() -> Path | None:
     """Open the diagnostics folder in Explorer; returns it, or None."""
     where = _folder or default_folder()
     try:
+        from . import desktop
         where.mkdir(parents=True, exist_ok=True)
-        os.startfile(where)                              # noqa: S606
+        desktop.open_path(where)
     except Exception:
         pass
     return where

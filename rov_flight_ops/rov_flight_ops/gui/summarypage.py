@@ -19,13 +19,12 @@ as soon as the scan finishes.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from .. import flightreport, flightscan, tearsheet
+from .. import desktop, flightreport, flightscan, tearsheet
 from . import theme as T
 from .widgets import Card, button, label, output_box
 
@@ -160,9 +159,13 @@ class SummaryPage(ctk.CTkFrame):
         if self._sheet is None:
             return
         try:
-            os.startfile(self._sheet.path)            # noqa: S606
+            opened = desktop.open_path(self._sheet.path)
         except OSError as ex:
             messagebox.showerror("Could not open it", str(ex))
+            return
+        if not opened:
+            messagebox.showerror("Could not open it",
+                                 f"{self._sheet.path}\n\n{desktop.NO_OPENER}")
 
     def refresh(self) -> None:
         folder = self._folder()

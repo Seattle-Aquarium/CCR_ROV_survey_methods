@@ -1,0 +1,4 @@
+# Run by bash and Docker inside a Linux container: a carriage return at the end
+# of each line breaks both, whatever the checkout on Windows prefers.
+*.sh text eol=lf
+Dockerfile text eol=lf

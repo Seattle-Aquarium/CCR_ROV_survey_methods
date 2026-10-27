@@ -1441,8 +1441,9 @@ class NavigationPage(ctk.CTkFrame):
                     "feature_name": grid.name, "lane": want[1],
                     "note": "the simulator's lane"})
 
-    def leave_simulation(self) -> None:
-        """Put back what `enter_simulation` kept, and read the real vehicle."""
+    def leave_simulation(self, *, read_vehicle: bool = True) -> None:
+        """Put back what `enter_simulation` kept, and read the real vehicle --
+        unless `read_vehicle` is False, for a simulator about to start again."""
         saved = getattr(self, "_sim_saved", None)
         if saved is None:
             return
@@ -1471,7 +1472,8 @@ class NavigationPage(ctk.CTkFrame):
         self.plan_panel.refresh()
         self._sync_markers()
         # A live collector against the real vehicle, as when the tab opened.
-        self._start_live()
+        if read_vehicle:
+            self._start_live()
         self.map.draw()
 
     def start_replay(self, frames, label_text: str, *, synthetic: bool = False

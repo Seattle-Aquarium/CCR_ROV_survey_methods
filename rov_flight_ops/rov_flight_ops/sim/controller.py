@@ -20,11 +20,16 @@ transects typed, the survey plan drawn, the versions in the banner.
 **What it never does.** Nothing reaches a vehicle -- every simulated address
 is localhost or a name that cannot resolve -- and nothing is written outside
 the simulator's own folder.
+
+**The web demo** (`rov_flight_ops.demo`) engages it at start-up and keeps it
+on: there is no vehicle to look for, so none is asked, and the simulated
+flight is started again every so often (`restart`).
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from pathlib import Path
@@ -75,12 +80,22 @@ class Simulator:
         self.ugps = None
         self.collector = None
         self._saved: dict = {}
+        #: The note on each post-flight tab, made once and shown while it runs.
+        self._notes: dict = {}
         self._revealed: int | None = None
         self._told: set = set()
         self._probe_at = 0.0
         self._probing = False
         self._found_vehicle = threading.Event()
         self.started_at = 0.0
+        #: Fly the survey again from the start this often; 0 never does. Set
+        #: by the web demo (`rov_flight_ops.demo`).
+        self.restart_every_s = 0.0
+
+    @property
+    def demo(self) -> bool:
+        """Running as the web demo: on for good, with no vehicle to look for."""
+        return bool(getattr(self.app, "demo", False))
 
     # ------------------------------------------------------------------
     #  may it start?
@@ -205,7 +220,13 @@ class Simulator:
     #  off
     # ------------------------------------------------------------------
 
-    def disengage(self, why: str = "") -> None:
+    def disengage(self, why: str = "", *, resume: bool = True) -> None:
+        """Stop the simulated vehicle and put the real program back.
+
+        `resume` False puts back what was kept but starts nothing reading the
+        real vehicle and refreshes no page -- for `restart`, which engages
+        again before the window draws anything.
+        """
         if not self.active:
             return
         app = self.app
@@ -214,7 +235,7 @@ class Simulator:
         nav = app.pages.get("navigation")
         if nav is not None:
             try:
-                nav.leave_simulation()
+                nav.leave_simulation(read_vehicle=resume)
             except Exception:
                 log.exception("restoring the Navigation tab")
         self._stop_parts()
@@ -231,14 +252,18 @@ class Simulator:
         plan = s.get("plan")
         if plan is not None:
             app._apply_plan(plan)
+        self.recorder = self.dvl = self.dvl_device = self.g2 = self.ugps = None
+        self.collector = None
+        if not resume:
+            log.info("ROV flight simulator stopped to start again%s",
+                     f": {why}" if why else "")
+            return
         if app.flight_dir:
             app.refresh_files()
         logs = app.pages.get("logs")
         if logs is not None:
             logs.reset_listing("The simulator is off — search to list the real vehicle.")
         self._show_post_flight_notes(False)
-        self.recorder = self.dvl = self.dvl_device = self.g2 = self.ugps = None
-        self.collector = None
         for key in ("monitor", "dvl", "transects"):
             page = app.pages.get(key)
             if page is not None and hasattr(page, "refresh"):
@@ -248,6 +273,32 @@ class Simulator:
                     log.exception("refreshing %s after the simulator", key)
         log.info("ROV flight simulator off%s", f": {why}" if why else "")
         app._log("ROV flight simulator OFF" + (f" — {why}" if why else "") + ".")
+
+    def restart(self, why: str = "") -> None:
+        """Fly the simulated survey again from the start: a new world, the
+        sandbox emptied, the fault clock from the top.
+
+        Off and on again inside one turn of the window's loop, with the real
+        program never resumed in between: nothing reads for a vehicle, and no
+        page is drawn without the simulator under it.
+
+        The web demo cannot carry on without it -- its tabs would start
+        reading for a vehicle -- so if it will not start again there, the
+        process ends, and the container starts the program afresh.
+        """
+        if not self.active:
+            return
+        self.app._log("ROV flight simulator: starting the simulated flight "
+                      "again" + (f" — {why}" if why else "") + ".")
+        self.disengage(why, resume=False)
+        try:
+            self.engage()
+        except Exception:
+            if not self.demo:
+                raise
+            log.critical("the web demo's simulator would not start again; "
+                         "ending the program", exc_info=True)
+            os._exit(3)
 
     def _stop_parts(self) -> None:
         """Stop every simulated part that was started, off the window's thread:
@@ -280,13 +331,36 @@ class Simulator:
         """Housekeeping while running. Returns a reason it must stop, or ""."""
         if not self.active:
             return ""
+        now = time.monotonic()
+        if (self.restart_every_s and now - self.started_at >= self.restart_every_s
+                and not self.app.busy):
+            self.restart(f"it does so every {self.restart_every_s / 60:g} min")
+        # The web demo has no vehicle to find, and the vehicle's address on
+        # whatever network it runs on belongs to somebody else.
+        if not self.demo:
+            why = self._look_for_vehicle(now)
+            if why:
+                return why
+        nav = self.app.pages.get("navigation")
+        if nav is not None:
+            try:
+                nav.follow_simulated_lane(self.world.vehicle())
+            except Exception:
+                log.debug("following the simulated lane", exc_info=True)
+        return ""
+
+    def _look_for_vehicle(self, now: float) -> str:
+        """A reason to stop if a real vehicle has answered, or "".
+
+        Asks the vehicle's address every `PROBE_EVERY_S`, off the window's
+        thread; the answer is seen on a later tick.
+        """
         if self._found_vehicle.is_set():
             self._found_vehicle.clear()
             return f"a vehicle answered at {self.app.version_host()}"
         real = self._saved.get("recorder")
         if real is not None and getattr(real, "watching", False) and real.status.reachable:
             return f"a vehicle answered at {real.host}"
-        now = time.monotonic()
         if not self._probing and now - self._probe_at >= PROBE_EVERY_S:
             self._probe_at = now
             self._probing = True
@@ -300,12 +374,6 @@ class Simulator:
                     self._probing = False
 
             threading.Thread(target=probe, daemon=True, name="sim-probe").start()
-        nav = self.app.pages.get("navigation")
-        if nav is not None:
-            try:
-                nav.follow_simulated_lane(self.world.vehicle())
-            except Exception:
-                log.debug("following the simulated lane", exc_info=True)
         return ""
 
     # ------------------------------------------------------------------
@@ -368,7 +436,7 @@ class Simulator:
         import customtkinter as ctk
 
         from ..gui import theme as T
-        notes = self._saved.setdefault("_notes", {})
+        notes = self._notes
         for tab in POST_FLIGHT_TABS:
             frame = self.app.nav._page_frames.get(tab)
             if frame is None:

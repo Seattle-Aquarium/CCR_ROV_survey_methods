@@ -13,6 +13,8 @@ require on white) and Salish/Mediterranean for headings and actions.
 
 from __future__ import annotations
 
+import sys
+
 from .. import brand
 
 L, D = brand.LIGHT, brand.DARK
@@ -65,9 +67,17 @@ FAMILY = brand.font_family("regular")
 FAMILY_MEDIUM = brand.font_family("medium")
 FAMILY_SEMIBOLD = brand.font_family("semibold")
 
+WINDOWS = sys.platform == "win32"
+
 #: Consolas is used only for the monospace log pane, where column alignment
-#: matters more than branding.
-MONO = "Consolas"
+#: matters more than branding. Off Windows (the web demo's Linux container),
+#: DejaVu Sans Mono.
+MONO = "Consolas" if WINDOWS else "DejaVu Sans Mono"
+
+#: The lamps, marks and fold arrow -- ● ○ ▲ ▼ ✖ -- are drawn in a symbol face
+#: rather than Montserrat, which has none of them. Off Windows, DejaVu Sans
+#: has every one.
+SYMBOL = "Segoe UI Symbol" if WINDOWS else "DejaVu Sans"
 
 FONT_TITLE = (FAMILY, 22, "bold")        # Title
 FONT_H1 = (FAMILY_MEDIUM, 16)            # Header 1 (primary)

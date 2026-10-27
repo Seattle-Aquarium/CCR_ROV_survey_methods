@@ -84,6 +84,15 @@ Faults wind down in their last few seconds so that readings judged on a mean
 
 `tests/test_simulator.py` holds each of these.
 
+**The web demo** (`--demo`, `rov_flight_ops/demo.py`; the README's *The web
+demo*) is the one place the first two do not apply: it runs in a container
+with no vehicle anywhere, so it engages at start-up without asking, never asks
+the vehicle's address afterwards, and cannot be switched off. The other three
+hold, and more strictly: Browse… is disabled, every file dialog is kept inside
+the simulator's folder, and the simulated flight starts again every hour
+without the real program reading anything in between (`Simulator.restart`).
+`tests/test_demo.py` holds these.
+
 ## The faults
 
 ### Monitoring → CPU

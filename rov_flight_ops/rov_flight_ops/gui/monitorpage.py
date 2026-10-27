@@ -43,7 +43,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from .. import bands, flightlog, laptop, netdiag, nettrace
+from .. import bands, desktop, flightlog, laptop, netdiag, nettrace
 from ..sim.laptop import NOT_ON_FIELD_LAPTOP
 from . import theme as T
 from .widgets import (
@@ -580,8 +580,8 @@ class MonitorPage(ctk.CTkFrame):
         folder = Path(self.app.flight_dir) / "logs"
         folder.mkdir(parents=True, exist_ok=True)
         try:
-            import os
-            os.startfile(folder)                      # noqa: S606
+            if not desktop.open_path(folder):
+                self.app._log(f"{folder}: {desktop.NO_OPENER}")
         except Exception:
             pass
 

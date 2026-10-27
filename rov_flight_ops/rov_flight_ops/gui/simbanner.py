@@ -125,6 +125,14 @@ class SimControls:
         self.sim.toggle_reveal(self.app.nav.current)
         self.tick(False)
 
+    def lock_on(self) -> None:
+        """The web demo's switch: shown on, in its purple, and not to be
+        turned off -- the demo is the simulator."""
+        self.switch.select()
+        self.switch.configure(state="disabled", text="ROV flight simulator (demo)",
+                              text_color_disabled=SIM_COLOR)
+        self.tick(False)
+
     # ------------------------------------------------------------------
 
     def tick(self, connected: bool) -> None:

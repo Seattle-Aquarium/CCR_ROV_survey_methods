@@ -58,7 +58,10 @@ class App(Shell):
     DISPLAY_TITLE = "ROV Flight Operations"
     SLUG = "rov_flight_ops"
 
-    def __init__(self) -> None:
+    def __init__(self, demo: bool = False) -> None:
+        #: The web demo (`rov_flight_ops.demo`): the simulator on from the
+        #: start and for good, no folder to choose, no vehicle looked for.
+        self.demo = demo
         self.cfg = AppConfig()
         self.settings = settings.load()
         self.flight_dir: Path | None = None
@@ -86,9 +89,48 @@ class App(Shell):
         self.simulator = Simulator(self)
         self.sim_controls = None
         super().__init__()
+        if demo:
+            self._start_demo()
 
     def save_settings(self) -> None:
         settings.save(self.settings)
+
+    # ------------------------------------------------------------------
+    #  the web demo
+    # ------------------------------------------------------------------
+
+    def _start_demo(self) -> None:
+        """Engage the simulator for good, before the window's loop starts.
+
+        Before it, because the first turn of the loop is when the tabs start
+        their readers -- the Navigation collector, the DVL view, the G2 -- and
+        in the demo the first thing any of them reads must be the simulator.
+        """
+        from .. import demo
+        from ..sim import sandbox
+
+        root = sandbox.root()
+        demo.confine_file_dialogs(root, lambda chosen: messagebox.showinfo(
+            APP_NAME, f"The web demo reads and writes only inside the "
+                      f"simulator's own folder,\n{root}\n\nso {chosen} was not "
+                      f"used."))
+        self.simulator.restart_every_s = demo.restart_every_s()
+        self._log(demo.WELCOME)
+        self.simulator.engage()
+        if self.sim_controls is not None:
+            self.sim_controls.lock_on()
+        # The flight folder is the simulator's, for good.
+        self.browse_btn.configure(state="disabled")
+        self.after(200, self._fill_screen)
+
+    def _fill_screen(self) -> None:
+        """The whole screen. The demo's virtual display has no window manager
+        to maximise the window, so it is sized to the display itself."""
+        if sys.platform == "win32":
+            self.state("zoomed")
+        else:
+            self.geometry(f"{self.winfo_screenwidth()}x"
+                          f"{self.winfo_screenheight()}+0+0")
 
     # ------------------------------------------------------------------
     #  the ROV flight simulator's switch, in the banner
@@ -442,8 +484,9 @@ class App(Shell):
         self.folder_entry = entry(r, "No folder selected — choose it first",
                                   width=200)
         self.folder_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        button(r, "Browse…", self._pick_folder, "primary", width=100
-               ).grid(row=0, column=1)
+        self.browse_btn = button(r, "Browse…", self._pick_folder, "primary",
+                                 width=100)
+        self.browse_btn.grid(row=0, column=1)
         button(r, "Open", self._open_folder, "ghost", width=60
                ).grid(row=0, column=2, padx=(6, 0))
 
@@ -469,7 +512,13 @@ class App(Shell):
         started in, and only the next flight goes to the new one -- the
         operator is told so and asked first. Transects typed for the previous
         flight are not silently carried over when the new folder has none.
+
+        Never in the web demo, whose flight folder is the simulator's.
         """
+        if self.demo:
+            self._log(f"The web demo keeps the simulator's flight folder; "
+                      f"{path} was not opened.")
+            return
         if self.simulating:
             self.simulator.disengage("a flight folder was chosen")
         new = Path(path)
@@ -839,8 +888,9 @@ def main() -> None:
     # First, so that anything that goes wrong from here on leaves a record.
     diagnostics.setup()
     ctk.set_default_color_theme("blue")
+    from .. import demo
     try:
-        app = App()
+        app = App(demo=demo.requested())
         app.mainloop()
     except BaseException:
         diagnostics.log_exception("the window", *sys.exc_info(),

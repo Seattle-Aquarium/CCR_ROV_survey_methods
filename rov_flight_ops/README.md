@@ -216,6 +216,9 @@ emptied each time it starts) and *Browse…* is refused; nothing reaches a
 vehicle. Switching it off puts back the flight folder, the recorder (which kept
 watching underneath), the transects, the survey plan and the banner's versions.
 
+**In a browser.** The simulator also runs as a public web demo, for anyone sent
+the link: see [The web demo](#the-web-demo).
+
 ---
 
 ## 1  Monitoring
@@ -955,6 +958,113 @@ the tests; each wants one look at the real thing:
 
 ---
 
+## The web demo
+
+**<https://huggingface.co/spaces/Seattle-Aquarium/rov-flight-ops-simulator>**
+— the [simulator](#the-rov-flight-simulator) in a browser, for anyone with the
+link, as a Hugging Face Docker Space in the Seattle-Aquarium organisation. It
+is this program, not a web copy of it: the same window, in demo mode, on a
+virtual display (Xvfb) in a Linux container, shared by x11vnc and drawn in the
+browser by noVNC.
+
+**Demo mode** — `python -m rov_flight_ops --demo`, or `ROV_FLIGHT_OPS_DEMO=1`
+(`rov_flight_ops/demo.py`). It runs on Windows too, for a look before
+deploying.
+
+* The simulator is engaged before the window's loop starts, so nothing reads
+  for a real vehicle first, and its switch is shown on and disabled.
+* No vehicle is ever asked for: the five-second probe that normally switches
+  the simulator off when a vehicle answers is not run.
+* *Browse…* is disabled, and every file dialog opens in the simulator's folder
+  and refuses anything chosen outside it, so nothing is written anywhere else.
+* The simulated flight starts again every `ROV_FLIGHT_OPS_DEMO_RESTART_MIN`
+  minutes (60 by default, 0 for never; put off while a job is running), so a
+  demo left up for days still opens on its first lanes.
+* The window fills the display: there is no window manager to maximise it.
+
+**One shared desktop.** One container is one display, so everyone who opens
+the page at the same time sees and drives the same window — each other's
+clicks, tab changes, dialogs. That is fine for sending the link to a few
+people; it is not a training room. Per-visitor sessions would need one
+container (display, program and simulator) per visitor: a small broker that
+starts a container for each new browser on a host that can run many of them,
+hands it its own address, and stops it when the browser goes away. A free Space
+cannot do that — one Space is one container — so it would mean paid Space
+hardware with a broker inside, or a server of our own. Until then, anyone with
+a Hugging Face account can press *Duplicate this Space* to get a private copy.
+Free Spaces also sleep after 48 hours without a visitor; the next visit wakes
+it, which takes about a minute.
+
+**What is in `web_demo/`**
+
+```
+web_demo/
+    Dockerfile     python:3.13-slim + Tk + Xvfb + x11vnc + noVNC/websockify + fonts
+    start.sh       the container: display, the program (restarted if it exits), VNC, port 7860
+    web/           noVNC's landing page and settings: connect at once, scale to the window
+    montserrat.conf  keeps body text in Montserrat Regular (Tk on X11 asks for Medium)
+    selfcheck.py   run during the build: every module imported, every tab photographed
+    deploy.py      assembles the Space repository and uploads it
+    README.md      the Space's card (its front matter is the Space's configuration)
+```
+
+The build fails if any module will not import on Linux or the program opens
+without its simulator. Everything else the check finds — a glyph with no font,
+a callback that raised — and a photograph of each tab are served by the running
+Space at `/selfcheck/` under the app's own address,
+<https://seattle-aquarium-rov-flight-ops-simulator.hf.space/selfcheck/report.txt>.
+
+**Setting it up (once per laptop).**
+
+1. A Hugging Face account that is a member of the Seattle-Aquarium
+   organisation with the *write* role.
+2. A token: <https://huggingface.co/settings/tokens> → *Create new token* →
+   *Fine-grained*, with write access to the Seattle-Aquarium organisation's
+   repositories (a classic *Write* token also works).
+3. In a terminal, never in a chat or an email:
+
+   ```
+   python -m pip install huggingface_hub
+   hf auth login
+   ```
+
+   and paste the token when it asks.
+
+**Deploying, and redeploying after a change.** From `rov_flight_ops/`, with
+the change committed:
+
+```
+python web_demo/deploy.py
+```
+
+The first run creates the Space — public, free CPU — and every run uploads the
+program as it is in this folder (the commit message on the Space says which
+commit, and *with local changes* if there were any). The Space then rebuilds,
+about ten minutes the first time and a few after; the *Logs* tab on its page
+shows the build. Anyone connected while it restarts is reconnected to the new
+one. `--space OWNER/NAME` deploys somewhere else; `--stage DIR` only assembles
+the repository, to look at.
+
+**Trying the container locally**, where Docker is installed — from the
+repository root, not `rov_flight_ops/`:
+
+```
+docker build -f rov_flight_ops/web_demo/Dockerfile -t rov-flight-ops-demo .
+docker run --rm -p 7860:7860 rov-flight-ops-demo
+```
+
+then open <http://localhost:7860>.
+
+**Off Windows.** The program was written for the field laptops; the Linux the
+demo runs on needed only this: the bundled Montserrat registered through
+fontconfig rather than GDI (`brand.py`), the lamps and marks drawn in DejaVu
+Sans and the log pane in DejaVu Sans Mono where Windows has Segoe UI Symbol and
+Consolas (`gui/theme.py`), and the *Open* buttons going through `desktop.py`,
+which uses `xdg-open` or says there is nothing to open with. The Windows
+performance counters, WMI and the network checks are only ever read by the real
+recorder, which the simulator replaces. Only the simulated paths have been run
+on Linux; flying a real vehicle from Linux has not been tried.
+
 ## Development
 
 ```
@@ -966,6 +1076,7 @@ rov_flight_ops/
     assets/                  fonts, logos, icon
     specifications/          design documents: the DVL capture's sources, schema,
                              invariants, diagnosis guide, provenance, bench checklist
+    web_demo/                the Hugging Face Space: see "The web demo"
     rov_flight_ops/          the package
         gui/
             app.py           the window and its eight tabs
@@ -1019,6 +1130,8 @@ rov_flight_ops/
         tc25.py              TC-25 as the GoPro Labs page shows it, and the clock check
         pifiles.py           Pi files: list, spans, choose, download, delete
         diagnostics.py       app.log, faults.log, stall watchdog (same file as imagery's copy)
+        demo.py              the web demo's mode: simulator on for good, dialogs kept in its folder
+        desktop.py           opening a file or folder, on Windows or off it
         previewsource.py     where the transect preview's depth comes from
         telemetry_cache.py   the telemetry reader (the flight-ops part of UTC's pipeline)
         blueos.py, flightlog.py, laptop.py, netdiag.py, nettrace.py, ...

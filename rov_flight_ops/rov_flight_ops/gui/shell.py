@@ -193,7 +193,7 @@ class Lamp(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent", **kw)
         self._state = self.OFF
         self.dot = ctk.CTkLabel(self, text=self.OFF[0], width=14,
-                                font=("Segoe UI Symbol", 14),
+                                font=(T.SYMBOL, 14),
                                 text_color=T.TEXT_MUTED)
         self.dot.grid(row=0, column=0, padx=(0, 4))
         self.caption = ctk.CTkLabel(self, text=text, font=T.FONT_SMALL,
@@ -576,7 +576,7 @@ class Shell(ctk.CTk):
         self.theme_switch.select()
         self.fold_btn = ctk.CTkButton(
             self.controls, text="▲", width=34, height=28, corner_radius=6,
-            font=("Segoe UI Symbol", 14), fg_color="transparent",
+            font=(T.SYMBOL, 14), fg_color="transparent",
             hover_color=T.SURFACE_ALT,
             text_color=T.TEXT, border_width=1, border_color=T.BORDER,
             bg_color=T.HEADER_BG, command=self.toggle_banner)
@@ -1364,8 +1364,9 @@ class Shell(ctk.CTk):
         if not path:
             return
         try:
-            import os
-            os.startfile(Path(path))          # noqa: S606
+            from .. import desktop
+            if not desktop.open_path(Path(path)):
+                self._log(f"{path}: {desktop.NO_OPENER}")
         except Exception:
             pass
 

@@ -24,7 +24,7 @@ from .widgets import Card
 
 FONT_ROW = T.FONT_BODY
 FONT_DETAIL = T.FONT_SMALL
-FONT_MARK = ("Segoe UI Symbol", 12)
+FONT_MARK = (T.SYMBOL, 12)
 #: Rows per column: the board is two columns of this many.
 COLUMNS = 2
 

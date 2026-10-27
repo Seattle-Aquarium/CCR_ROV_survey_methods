@@ -1,0 +1,5 @@
+{
+  "autoconnect": true,
+  "path": "websockify",
+  "shared": true
+}

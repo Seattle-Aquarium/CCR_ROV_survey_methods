@@ -250,10 +250,13 @@ def register_bundled_fonts() -> int:
     the machine we never get to look at. ``FR_PRIVATE`` registers for this
     process only, so it needs no admin rights and installs nothing permanently.
 
-    Safe to call more than once, and a no-op off Windows.
+    Safe to call more than once. Off Windows -- the web demo's Linux container
+    -- the same is done through fontconfig, which is where Tk looks there.
     """
-    if os.name != "nt" or not _BUNDLED_FONT_DIR.is_dir():
+    if not _BUNDLED_FONT_DIR.is_dir():
         return 0
+    if os.name != "nt":
+        return _register_with_fontconfig()
     try:
         import ctypes
 
@@ -270,6 +273,29 @@ def register_bundled_fonts() -> int:
                 _registered.add(ttf.name)
         except Exception:
             pass
+    return len(_registered)
+
+
+def _register_with_fontconfig() -> int:
+    """`register_bundled_fonts` on Linux: fontconfig's application fonts.
+
+    Tk on X11 resolves families through fontconfig, and fonts added to its
+    current configuration as application fonts are seen by this process only
+    -- the counterpart of ``FR_PRIVATE``. 0 where there is no fontconfig.
+    """
+    try:
+        import ctypes
+        import ctypes.util
+
+        fc = ctypes.CDLL(ctypes.util.find_library("fontconfig")
+                         or "libfontconfig.so.1")
+        fc.FcConfigAppFontAddDir.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+        fc.FcConfigAppFontAddDir.restype = ctypes.c_int
+        if not fc.FcConfigAppFontAddDir(None, os.fsencode(_BUNDLED_FONT_DIR)):
+            return 0
+    except Exception:
+        return 0
+    _registered.update(ttf.name for ttf in _BUNDLED_FONT_DIR.glob("*.ttf"))
     return len(_registered)
 
 

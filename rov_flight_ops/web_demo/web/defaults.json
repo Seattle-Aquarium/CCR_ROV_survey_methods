@@ -1,0 +1,6 @@
+{
+  "resize": "scale",
+  "reconnect": true,
+  "reconnect_delay": 2000,
+  "show_dot": true
+}
