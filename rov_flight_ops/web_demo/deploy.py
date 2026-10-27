@@ -95,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         from huggingface_hub import HfApi
+        from huggingface_hub.errors import HfHubHTTPError
     except ImportError:
         print("Needs huggingface_hub:  python -m pip install huggingface_hub",
               file=sys.stderr)
@@ -102,9 +103,17 @@ def main(argv: list[str] | None = None) -> int:
     api = HfApi()
     who = api.whoami()
     print(f"Logged in to Hugging Face as {who.get('name')}.")
-    api.create_repo(args.space, repo_type="space", space_sdk="docker",
-                    space_hardware="cpu-basic", private=args.private,
-                    exist_ok=True)
+    try:
+        api.create_repo(args.space, repo_type="space", space_sdk="docker",
+                        space_hardware="cpu-basic", private=args.private,
+                        exist_ok=True)
+    except HfHubHTTPError as ex:
+        # 402: Docker Spaces need a paid plan on the account or organisation.
+        if ex.response is None or ex.response.status_code != 402:
+            raise
+        print(f"Hugging Face would not create {args.space}:\n"
+              f"{ex.server_message or ex}", file=sys.stderr)
+        return 1
     made = commit()
     with tempfile.TemporaryDirectory(prefix="rov_space_") as tmp:
         folder = stage(Path(tmp) / "space")
