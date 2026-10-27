@@ -111,9 +111,19 @@ def check_window(out: Path, report: list[str]) -> bool:
         errors.append("".join(traceback.format_exception(exc, val, tb)))
 
     app.report_callback_exception = caught
+    # Tk lists only a font's first family name. The bundled faces are all
+    # "Montserrat" first and "Montserrat Medium" and so on second, which
+    # fontconfig still matches -- so a name Tk does not list is looked up there.
     families = set(tkfont.families(app))
     for name in (T.FAMILY, T.FAMILY_MEDIUM, T.FAMILY_SEMIBOLD, T.SYMBOL, T.MONO):
-        report.append(f"font {name!r}: {'known to Tk' if name in families else 'MISSING'}")
+        if name in families:
+            found = "known to Tk"
+        else:
+            try:
+                found = f"not listed by Tk; fontconfig draws it in {fontconfig_choice(name)}"
+            except Exception as ex:
+                found = f"MISSING ({ex})"
+        report.append(f"font {name!r}: {found}")
     # What Tk asks for: weight 100 ("medium") for ordinary text, 200 for bold.
     for name, weight in ((T.FAMILY, 100), (T.FAMILY, 200), (T.FAMILY_MEDIUM, 100),
                          (T.FAMILY_SEMIBOLD, 100)):

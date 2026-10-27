@@ -1,13 +1,15 @@
 """
 Put the web demo on Hugging Face: assemble the Space repository and upload it.
 
-    python web_demo/deploy.py                    # to Seattle-Aquarium/rov-flight-ops-simulator
+    python web_demo/deploy.py                    # to zhrandell/rov-flight-ops-simulator
     python web_demo/deploy.py --space OWNER/NAME
     python web_demo/deploy.py --stage DIR        # assemble it into DIR, upload nothing
 
 Run from ``rov_flight_ops/``, with ``huggingface_hub`` installed
 (``pip install huggingface_hub``) and this computer logged in to Hugging Face
-with a token that can write to the organisation (``hf auth login``). The
+with a token that can write to the Space's owner (``hf auth login``). The
+owner needs a paid plan -- PRO for a person, Team or Enterprise for an
+organisation -- or Hugging Face refuses to create a Docker Space. The
 Space builds its container from what is uploaded; the build takes several
 minutes and can be watched on the Space's page.
 
@@ -28,7 +30,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-SPACE = "Seattle-Aquarium/rov-flight-ops-simulator"
+#: On a personal account because the Seattle-Aquarium organisation has no
+#: plan that allows Docker Spaces (see "The web demo" in the README).
+SPACE = "zhrandell/rov-flight-ops-simulator"
 
 HERE = Path(__file__).resolve().parent
 PROJECT = HERE.parent

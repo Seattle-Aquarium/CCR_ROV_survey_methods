@@ -961,18 +961,24 @@ the tests; each wants one look at the real thing:
 ## The web demo
 
 The [simulator](#the-rov-flight-simulator) in a browser, for anyone with the
-link, as a Hugging Face Docker Space — planned as
-`Seattle-Aquarium/rov-flight-ops-simulator`. It is this program, not a web
-copy of it: the same window, in demo mode, on a virtual display (Xvfb) in a
-Linux container, shared by x11vnc and drawn in the browser by noVNC.
+link, as a Hugging Face Docker Space:
+<https://huggingface.co/spaces/zhrandell/rov-flight-ops-simulator> (or the
+app alone, filling the browser tab:
+<https://zhrandell-rov-flight-ops-simulator.hf.space>). It is this program,
+not a web copy of it: the same window, in demo mode, on a virtual display
+(Xvfb) in a Linux container, shared by x11vnc and drawn in the browser by
+noVNC.
 
-**Not deployed yet.** On 27 October 2026 Hugging Face refused to create it:
-Docker Spaces on its free CPU need a **Team or Enterprise plan** for an
-organisation, or **PRO** for a personal account (static Spaces stay free).
-Once one of those is in place, `python web_demo/deploy.py` (or `--space
-zhrandell/rov-flight-ops-simulator` for a personal Space) creates and uploads
-it. The container is plain Docker, so any host that runs a container and
-passes WebSockets through to port 7860 can serve it instead.
+**Why it is on a personal account.** Hugging Face runs Docker Spaces only
+for accounts that pay: a **Team or Enterprise plan** for an organisation, or
+**PRO** for a person (static Spaces stay free). On 27 October 2026 it refused
+to create the Space under Seattle-Aquarium, which has no plan, so it was
+created on zhrandell's account, which has PRO. If the organisation takes a
+plan, `python web_demo/deploy.py --space
+Seattle-Aquarium/rov-flight-ops-simulator` puts it there; change `SPACE` in
+`deploy.py` and delete the personal Space afterwards. The container is plain
+Docker, so any host that runs a container and passes WebSockets through to
+port 7860 can serve it instead.
 
 **Demo mode** — `python -m rov_flight_ops --demo`, or `ROV_FLIGHT_OPS_DEMO=1`
 (`rov_flight_ops/demo.py`). It runs on Windows too, for a look before
@@ -998,8 +1004,8 @@ starts a container for each new browser on a host that can run many of them,
 hands it its own address, and stops it when the browser goes away. A Space
 cannot do that — one Space is one container — so it would mean a server of our
 own, or a container service that starts one per session. Until then, anyone
-with a Hugging Face account can press *Duplicate this Space* to get a private
-copy. Spaces on the basic CPU also sleep after 48 hours without a visitor; the
+whose Hugging Face account has PRO (or a Team plan) can press *Duplicate this
+Space* to get a private copy. Spaces on the basic CPU also sleep after 48 hours without a visitor; the
 next visit wakes it, which takes about a minute.
 
 **What is in `web_demo/`**
@@ -1018,16 +1024,16 @@ web_demo/
 The build fails if any module will not import on Linux or the program opens
 without its simulator. Everything else the check finds — a glyph with no font,
 a callback that raised — and a photograph of each tab are served by the running
-Space at `/selfcheck/` under the app's own address (for the planned Space,
-`https://seattle-aquarium-rov-flight-ops-simulator.hf.space/selfcheck/report.txt`).
+Space at `/selfcheck/` under the app's own address:
+<https://zhrandell-rov-flight-ops-simulator.hf.space/selfcheck/report.txt>.
 
 **Setting it up (once per laptop).**
 
-1. A Hugging Face account that is a member of the Seattle-Aquarium
-   organisation with the *write* role — and the organisation on a Team or
-   Enterprise plan (or PRO on the account, for a personal Space).
+1. A Hugging Face account that can write to the Space's owner: today that is
+   zhrandell's own account, on PRO. For an organisation, a member with the
+   *write* role, and the organisation on a Team or Enterprise plan.
 2. A token: <https://huggingface.co/settings/tokens> → *Create new token* →
-   *Fine-grained*, with write access to the Seattle-Aquarium organisation's
+   *Fine-grained*, with write access to that account's (or organisation's)
    repositories (a classic *Write* token also works).
 3. In a terminal, never in a chat or an email:
 
