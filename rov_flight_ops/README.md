@@ -977,8 +977,9 @@ as `web_demo/fly.toml` describes:
   up a shared core's burst allowance within minutes.
 * **Suspended whenever nobody is connected.** A few minutes after the last
   viewer leaves, Fly saves the machine's memory, the program mid-flight
-  included, and stops it. The next visitor's request resumes it in under a
-  second, where it left off. Fly charges for the machine only while it runs
+  included, and stops it. The next visitor's request resumes it where it left
+  off: Fly's proxy logged 391 and 388 ms from request to running machine on
+  the day it went up (28 October 2026). Fly charges for the machine only while it runs
   — about 5.5¢ an hour in San Jose, billed by the second — and for storage
   (about $0.15 a GB a month) while it is suspended. Always on, the same
   machine would cost about $39 a month.
@@ -1063,7 +1064,11 @@ several minutes.
   every change there redeploy the demo. It needs the repository's Actions
   secret `FLY_API_TOKEN`: a Fly organisation token, made on Fly's dashboard
   (the organisation, then *Tokens*) and pasted by the account holder into
-  GitHub's *Settings → Secrets and variables → Actions*.
+  GitHub's *Settings → Secrets and variables → Actions*. Ten minutes after
+  each deploy the same workflow says whether the machine has gone to sleep,
+  and `.github/workflows/web-demo-status.yml` prints the machine's state,
+  its recent suspends and resumes, and the end of its log (addresses masked:
+  the repository's logs are public) without deploying anything.
 * **From a computer with Fly's command-line tool.** Install
   [flyctl](https://fly.io/docs/flyctl/install/) and log it in to the Fly
   account with `fly auth login` (the account holder does this themselves),

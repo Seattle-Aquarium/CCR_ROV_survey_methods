@@ -25,11 +25,14 @@ primary_region = "sjc"
 
   # Counted in connections, so that an open viewer -- one WebSocket for as
   # long as the page is open -- keeps the machine awake, and only an empty
-  # page lets it sleep. web/idle.js closes a viewer nobody is using.
+  # page lets it sleep. web/idle.js closes a viewer nobody is using. The
+  # limits are high because opening the page fetches noVNC's forty-odd
+  # modules at once, each on a connection of its own: a hard limit of 25 was
+  # reached by a single visitor.
   [http_service.concurrency]
     type = "connections"
-    soft_limit = 20
-    hard_limit = 25
+    soft_limit = 150
+    hard_limit = 200
 
 # A whole core, not a shared one: the program redraws continuously whether or
 # not anyone is watching, which spends a shared core's burst allowance within
