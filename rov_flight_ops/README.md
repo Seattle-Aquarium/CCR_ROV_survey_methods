@@ -1148,6 +1148,22 @@ cache lock and the crash log. The GUI tests use
 a temporary `LOCALAPPDATA`, so they never touch this laptop's settings or
 cache, and only skip when there is genuinely no display.
 
+**Run them plugged in, with the laptop awake.** The full suite takes about ten
+minutes and draws real windows. On a field laptop it can stall for good inside
+Windows' own drawing code, with the Python stack sitting in `app.update()`. On
+27 October 2026, four of eight runs here stalled that way in
+`tests/test_simulator.py`, each in a different test. Two were caught spinning
+in GDI's `StrokePath`, one waiting in the endpoint security agent's
+window-creation hook (SentinelOne's `InProcessClient64.dll`), and one was not
+examined. Three of the four were on battery, two stalled as the laptop dropped
+into Modern Standby, and the first was on mains power with no standby, so the
+trigger is not pinned down. It is this laptop, not the tests: they passed every
+run on CI, and every run here on mains power with the laptop awake, both
+before and after the web-demo branch. If a test sits for minutes, pytest prints every
+thread's stack after five (`faulthandler_timeout` in `pyproject.toml`). If that
+stack ends in `update`, it is this stall, not a failing test: stop the run and
+start it again with the laptop plugged in and awake.
+
 CI: `.github/workflows/rov-programs-ci.yml` lints and tests this program (on
 Python 3.11 and 3.13, and again with `constraints.txt`) and ROV Imagery
 Processing, on Windows, whenever either folder or the extractor changes.

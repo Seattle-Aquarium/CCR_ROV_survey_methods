@@ -131,6 +131,10 @@ def test_the_demo_starts_simulating_and_stays_on_through_its_restart(app, monkey
 def test_a_restart_is_put_off_while_a_job_is_running(app, monkeypatch):
     monkeypatch.setattr("rov_flight_ops.sim.controller.vehicle_answers",
                         lambda *a, **k: False)
+    # Switching the simulator off starts the Navigation tab reading the real
+    # vehicle, on threads that outlive this test and would answer to the next
+    # file's fake mavlink2rest (see the `app` fixture).
+    monkeypatch.setattr(app.pages["navigation"], "_start_live", lambda: None)
     sim = app.simulator
     sim.engage()
     try:

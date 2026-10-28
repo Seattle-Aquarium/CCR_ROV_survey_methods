@@ -38,6 +38,10 @@ include = ["rov_flight_ops*"]
 testpaths = ["tests"]
 # -p no:cacheprovider keeps a .pytest_cache out of a Dropbox-synced folder.
 addopts = "-q --strict-markers -p no:cacheprovider"
+# A test still running after five minutes prints every thread's stack: the
+# slowest take under 20 s, and a stall inside Windows' drawing code otherwise
+# sits silent forever (see "Development" in the README).
+faulthandler_timeout = 300
 markers = [
     "live: needs a real flight folder or a display; run with --runlive",
 ]
