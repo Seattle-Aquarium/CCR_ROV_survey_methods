@@ -38,3 +38,32 @@ jobs:
       - run: python3 web_demo/deploy.py
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - name: The machine it made
+        run: |
+          app=$(sed -n 's/^app = "\(.*\)"/\1/p' web_demo/fly.toml)
+          flyctl machine list --app "$app"
+          flyctl ips list --app "$app"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  asleep:
+    # The demo is billed only while its machine runs. Ten minutes after a
+    # deploy, with nobody on the page, it should be suspended; this says so
+    # either way, and warns if it is not -- unless somebody was visiting.
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@1.6
+      - run: |
+          app=$(sed -n 's/^app = "\(.*\)"/\1/p' rov_flight_ops/web_demo/fly.toml)
+          sleep 600
+          flyctl machine list --app "$app"
+          state=$(flyctl machine list --app "$app" --json | jq -r '.[].state' | sort -u | xargs)
+          echo "The demo's machine is: $state"
+          case "$state" in
+            suspended|stopped) ;;
+            *) echo "::warning::The demo's machine is '$state' ten minutes after the deploy. It should be asleep unless somebody had the page open." ;;
+          esac
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

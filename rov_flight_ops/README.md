@@ -986,6 +986,10 @@ as `web_demo/fly.toml` describes:
   away), Fly maintenance, or a move to another host: the program takes
   about half a minute to open its window, and until it does the display shows
   "ROV Flight Operations is starting" (`web_demo/splash.py`) rather than black.
+* **IPv4 only.** `deploy.py` releases the IPv6 address Fly gives a new app.
+  From the first network the demo was opened on, TLS to Fly over IPv6 failed
+  every time and over IPv4 never did, and a browser that opens the page over
+  IPv6 does not fall back when its WebSocket then fails.
 * **A viewer nobody is using is let go.** Fly keeps the machine awake while
   any page holds its connection open, so a tab left open would keep it
   running and billing. After 15 minutes with no mouse, touch or key the page

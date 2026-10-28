@@ -25,6 +25,7 @@ content policy counts VNC as platform abuse: see "The web demo" in the README.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -127,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Logged in to Fly as {who.stdout.strip()}.")
     if subprocess.run([fly, "status", "--app", args.app],
                       capture_output=True).returncode != 0:
-        print(f"Creating the Fly app {args.app} in {args.org}.")
+        print(f"Creating the Fly app {args.app} in {args.org}.", flush=True)
         if subprocess.run([fly, "apps", "create", args.app,
                            "--org", args.org]).returncode != 0:
             print(f"Fly would not create {args.app}; if the name is taken, "
@@ -144,8 +145,39 @@ def main(argv: list[str] | None = None) -> int:
         print(f"The deploy of {made} failed; Fly's output is above.",
               file=sys.stderr)
         return 1
+    ipv4_only(fly, args.app)
     print(f"Deployed {made}. The demo is at https://{args.app}.fly.dev")
     return 0
+
+
+def ipv4_only(fly: str, app: str) -> None:
+    """Give the app no public IPv6 address, so every visitor comes by IPv4.
+
+    Fly gives a new app an IPv6 address beside its shared IPv4 one. From the
+    first network the demo was opened on (a home connection, 28 October
+    2026), every TLS handshake to Fly over IPv6 -- fly.io's own site
+    included -- stalled for five seconds and failed, while IPv4 never did:
+    the page loaded on a lucky connection and its WebSocket then failed.
+    Browsers prefer IPv6 and do not fall back once a connection is open, so
+    any visitor on such a network would see the demo fail to connect.
+    Without the address, the name has no IPv6 record. ``fly ips allocate-v6``
+    puts one back.
+    """
+    listed = subprocess.run([fly, "ips", "list", "--app", app, "--json"],
+                            capture_output=True, text=True)
+    try:
+        ips = json.loads(listed.stdout or "[]")
+    except ValueError:
+        print(f"Could not read the app's addresses: {listed.stderr.strip()}",
+              file=sys.stderr)
+        return
+    for ip in ips:
+        fields = {k.lower(): v for k, v in ip.items()}
+        if fields.get("type") == "v6":
+            print(f"Releasing the public IPv6 address {fields.get('address')}.",
+                  flush=True)
+            subprocess.run([fly, "ips", "release", str(fields.get("address")),
+                            "--app", app])
 
 
 if __name__ == "__main__":
