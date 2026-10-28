@@ -1,14 +1,14 @@
 # ROV Flight Operations running its ROV flight simulator, in a browser.
 #
 # The real CustomTkinter program on a virtual X display (Xvfb), shared by
-# x11vnc and served to the browser by noVNC through websockify on port 7860 --
-# the port a Hugging Face Docker Space exposes. Nothing here is a web rewrite
-# of the GUI; it is the same window an operator sees on the field laptop.
+# x11vnc and served to the browser by noVNC through websockify on port 7860,
+# the port fly.toml sends visitors to. Nothing here is a web rewrite of the
+# GUI; it is the same window an operator sees on the field laptop.
 #
-# Built by Hugging Face from the Space repository that web_demo/deploy.py
-# assembles, whose root holds this file and the rov_flight_ops/ project
-# folder. The same layout is the GitHub repository's root, so it also builds
-# locally from there:
+# Built by Fly.io from the folder web_demo/deploy.py assembles, whose root
+# holds this file, fly.toml and the rov_flight_ops/ project folder. The same
+# layout is the GitHub repository's root, so it also builds locally from
+# there:
 #     docker build -f rov_flight_ops/web_demo/Dockerfile -t rov-flight-ops-demo .
 #     docker run --rm -p 7860:7860 rov-flight-ops-demo
 FROM python:3.13-slim-trixie
@@ -41,13 +41,17 @@ COPY rov_flight_ops/requirements.txt rov_flight_ops/constraints.txt /tmp/req/
 RUN pip install --no-cache-dir -r /tmp/req/requirements.txt -c /tmp/req/constraints.txt \
     && pip install --no-cache-dir websockify==0.13.0
 
-# Hugging Face runs the container as uid 1000. Xvfb run by anyone but root
-# needs the X socket folder to exist already.
+# The container runs as an ordinary user, uid 1000. Xvfb run by anyone but
+# root needs the X socket folder to exist already.
 RUN useradd -m -u 1000 user \
     && mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix \
     && mkdir -p /opt/novnc/selfcheck && chown user /opt/novnc/selfcheck
 
 COPY rov_flight_ops/web_demo/web/ /opt/novnc/
+# idle.js lets go of a viewer nobody is using, so the machine can sleep.
+RUN sed -i 's#</head>#<script type="module" src="idle.js"></script>\n</head>#' \
+        /opt/novnc/vnc.html \
+    && grep -q 'src="idle.js"' /opt/novnc/vnc.html
 COPY rov_flight_ops/web_demo/montserrat.conf /etc/fonts/conf.d/50-montserrat.conf
 
 USER user
@@ -63,7 +67,7 @@ COPY --chown=user rov_flight_ops/ /home/user/app/
 
 # Fails the build if any module will not import here, and runs the program
 # once on a throwaway display: every tab opened and photographed into
-# /opt/novnc/selfcheck/, which the running Space then serves.
+# /opt/novnc/selfcheck/, which the running container then serves.
 RUN xvfb-run -a -s "-screen 0 ${SCREEN} -dpi 96" \
         python web_demo/selfcheck.py /opt/novnc/selfcheck \
     && rm -rf /home/user/.local/share/CCR_ROV

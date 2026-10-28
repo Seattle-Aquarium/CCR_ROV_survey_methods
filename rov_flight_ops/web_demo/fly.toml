@@ -1,0 +1,39 @@
+# The web demo on Fly.io. deploy.py puts this at the root of the build folder,
+# beside the Dockerfile, and runs `fly deploy` there.
+#
+# One machine, suspended whenever nobody is connected: Fly keeps its memory --
+# the program mid-flight -- and resumes it in under a second for the next
+# visitor, charging for storage only while it waits (see "The web demo" in the
+# README for what that costs).
+
+app = "rov-flight-ops-simulator"
+
+# San Jose: Fly has no region in Seattle, and the nearest one keeps the
+# picture's round trip short. Ashburn (iad) is about a sixth cheaper and three
+# times as far away.
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 7860
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  # Counted in connections, so that an open viewer -- one WebSocket for as
+  # long as the page is open -- keeps the machine awake, and only an empty
+  # page lets it sleep. web/idle.js closes a viewer nobody is using.
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 20
+    hard_limit = 25
+
+# A whole core, not a shared one: the program redraws continuously whether or
+# not anyone is watching, which spends a shared core's burst allowance within
+# minutes. Suspend needs 2 GB or less and no swap.
+[[vm]]
+  size = "performance-1x"
+  memory = "2gb"

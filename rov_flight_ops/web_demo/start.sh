@@ -20,6 +20,10 @@ for _ in $(seq 100); do
     sleep 0.1
 done
 
+# "Starting", for whoever connects before the program's window is up. Opened
+# first, so the program's window opens over it.
+python web_demo/splash.py &
+
 (
     while true; do
         python -m rov_flight_ops --demo

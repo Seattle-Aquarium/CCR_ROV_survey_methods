@@ -1,40 +1,35 @@
 """
-Put the web demo on Hugging Face: assemble the Space repository and upload it.
+Put the web demo on Fly.io: assemble the build folder and deploy it.
 
-    python web_demo/deploy.py                    # to zhrandell/rov-flight-ops-simulator
-    python web_demo/deploy.py --space OWNER/NAME
-    python web_demo/deploy.py --stage DIR        # assemble it into DIR, upload nothing
+    python web_demo/deploy.py                  # to the app named in fly.toml
+    python web_demo/deploy.py --app NAME
+    python web_demo/deploy.py --stage DIR      # assemble it into DIR, deploy nothing
 
-Run from ``rov_flight_ops/``, with ``huggingface_hub`` installed
-(``pip install huggingface_hub``) and this computer logged in to Hugging Face
-with a token that can write to the Space's owner (``hf auth login``). The
-owner needs a paid plan -- PRO for a person, Team or Enterprise for an
-organisation -- or Hugging Face refuses to create a Docker Space. The
-Space builds its container from what is uploaded; the build takes several
-minutes and can be watched on the Space's page.
+Run from ``rov_flight_ops/``, with Fly's command-line tool installed
+(``flyctl``, https://fly.io/docs/flyctl/install/) and this computer logged in
+to the Fly account that pays for the demo (``fly auth login``). The first run
+creates the app. Every run builds the container on Fly's own builders --
+nothing is built here, so Docker is not needed -- and replaces the running
+machine with one made from the new build. A build takes several minutes.
 
-What is uploaded: this folder's Dockerfile and README.md (the Space's card) at
-the root, the repository's LICENSE, and the parts of the project the
-container needs under ``rov_flight_ops/`` -- the same layout as the GitHub
-repository, so the Dockerfile builds from either. Files under
-``rov_flight_ops/`` on the Space that are no longer part of the project are
-deleted by the upload.
+What is built: this folder's Dockerfile and fly.toml at the root, the
+repository's LICENSE, and the parts of the project the container needs under
+``rov_flight_ops/`` -- the same layout as the GitHub repository, so the
+Dockerfile builds from either.
+
+The demo was on Hugging Face first, which paused it as abusive because its
+content policy counts VNC as platform abuse: see "The web demo" in the README.
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-
-#: On a personal account because the Seattle-Aquarium organisation has no
-#: plan that allows Docker Spaces. Hugging Face paused it within minutes as
-#: "Flagged as abusive" -- its content policy counts VNC as platform abuse --
-#: so read "The web demo" in the README before uploading anywhere on it.
-SPACE = "zhrandell/rov-flight-ops-simulator"
 
 HERE = Path(__file__).resolve().parent
 PROJECT = HERE.parent
@@ -49,12 +44,12 @@ LF_ONLY = ("*.sh", "Dockerfile")
 
 
 def stage(into: Path) -> Path:
-    """Assemble the Space repository in `into` (emptied first)."""
+    """Assemble the build folder in `into` (emptied first)."""
     if into.exists():
         shutil.rmtree(into)
     into.mkdir(parents=True)
     shutil.copy2(HERE / "Dockerfile", into / "Dockerfile")
-    shutil.copy2(HERE / "README.md", into / "README.md")
+    shutil.copy2(HERE / "fly.toml", into / "fly.toml")
     if (REPO / "LICENSE").is_file():
         shutil.copy2(REPO / "LICENSE", into / "LICENSE")
     project = into / "rov_flight_ops"
@@ -80,55 +75,64 @@ def commit() -> str:
     return head + (" with local changes" if git("status", "--porcelain", ".") else "")
 
 
-def app_url(space: str) -> str:
-    owner, name = space.split("/", 1)
-    host = f"{owner}-{name}".lower().replace("_", "-").replace(".", "-")
-    return f"https://{host}.hf.space"
+def flyctl() -> str | None:
+    """Fly's command-line tool: on the PATH, or where its installer puts it."""
+    found = shutil.which("fly") or shutil.which("flyctl")
+    if found:
+        return found
+    exe = "flyctl.exe" if sys.platform == "win32" else "flyctl"
+    installed = Path.home() / ".fly" / "bin" / exe
+    return str(installed) if installed.is_file() else None
+
+
+def app_in_fly_toml() -> str:
+    """The app fly.toml names (read by hand: tomllib needs Python 3.11)."""
+    text = (HERE / "fly.toml").read_text(encoding="utf-8")
+    return re.search(r'^app\s*=\s*"([^"]+)"', text, re.MULTILINE).group(1)
 
 
 def main(argv: list[str] | None = None) -> int:
+    default_app = app_in_fly_toml()
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--space", default=SPACE, help=f"OWNER/NAME (default {SPACE})")
+    ap.add_argument("--app", default=default_app,
+                    help=f"the Fly app to deploy to (default {default_app})")
     ap.add_argument("--stage", type=Path, metavar="DIR",
-                    help="assemble the Space repository into DIR and stop")
-    ap.add_argument("--private", action="store_true",
-                    help="create the Space private (only when it does not exist yet)")
+                    help="assemble the build folder into DIR and stop")
     args = ap.parse_args(argv)
 
     if args.stage:
-        print(f"Assembled the Space repository in {stage(args.stage)}")
+        print(f"Assembled the build folder in {stage(args.stage)}")
         return 0
 
-    try:
-        from huggingface_hub import HfApi
-        from huggingface_hub.errors import HfHubHTTPError
-    except ImportError:
-        print("Needs huggingface_hub:  python -m pip install huggingface_hub",
-              file=sys.stderr)
+    fly = flyctl()
+    if fly is None:
+        print("Needs Fly's command-line tool, flyctl: "
+              "https://fly.io/docs/flyctl/install/", file=sys.stderr)
         return 2
-    api = HfApi()
-    who = api.whoami()
-    print(f"Logged in to Hugging Face as {who.get('name')}.")
-    try:
-        api.create_repo(args.space, repo_type="space", space_sdk="docker",
-                        space_hardware="cpu-basic", private=args.private,
-                        exist_ok=True)
-    except HfHubHTTPError as ex:
-        # 402: Docker Spaces need a paid plan on the account or organisation.
-        if ex.response is None or ex.response.status_code != 402:
-            raise
-        print(f"Hugging Face would not create {args.space}:\n"
-              f"{ex.server_message or ex}", file=sys.stderr)
-        return 1
+    who = subprocess.run([fly, "auth", "whoami"], capture_output=True, text=True)
+    if who.returncode != 0:
+        print("Not logged in to Fly. Run  fly auth login  first.", file=sys.stderr)
+        return 2
+    print(f"Logged in to Fly as {who.stdout.strip()}.")
+    if subprocess.run([fly, "status", "--app", args.app],
+                      capture_output=True).returncode != 0:
+        print(f"Creating the Fly app {args.app}.")
+        if subprocess.run([fly, "apps", "create", args.app]).returncode != 0:
+            print(f"Fly would not create {args.app}; if the name is taken, "
+                  f"choose another with --app (and in fly.toml).", file=sys.stderr)
+            return 1
     made = commit()
-    with tempfile.TemporaryDirectory(prefix="rov_space_") as tmp:
-        folder = stage(Path(tmp) / "space")
-        api.upload_folder(repo_id=args.space, repo_type="space", folder_path=folder,
-                          commit_message=f"Deploy rov_flight_ops ({made})",
-                          delete_patterns=["rov_flight_ops/**"])
-    print(f"Uploaded {made} to https://huggingface.co/spaces/{args.space}\n"
-          f"It is building now; once it is running the demo is at "
-          f"{app_url(args.space)}")
+    with tempfile.TemporaryDirectory(prefix="rov_fly_") as tmp:
+        folder = stage(Path(tmp) / "build")
+        # One machine: it is one shared desktop, and a second would be a
+        # second, separate demo that Fly bills for as well.
+        done = subprocess.run([fly, "deploy", str(folder), "--app", args.app,
+                               "--remote-only", "--ha=false"])
+    if done.returncode != 0:
+        print(f"The deploy of {made} failed; Fly's output is above.",
+              file=sys.stderr)
+        return 1
+    print(f"Deployed {made}. The demo is at https://{args.app}.fly.dev")
     return 0
 
 

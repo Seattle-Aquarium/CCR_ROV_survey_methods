@@ -967,19 +967,39 @@ drawn in the browser by noVNC. The container is plain Docker, so any host
 that runs a container and passes WebSockets through to port 7860 can serve
 it.
 
-**Not on Hugging Face: it was paused as abusive.** It was built for a
-Hugging Face Docker Space. Hugging Face runs those only for accounts that pay
-(a Team or Enterprise plan for an organisation, PRO for a person), so on
-27 October 2026 it went to zhrandell's account, which has PRO, rather than
-Seattle-Aquarium, which has no plan:
-`zhrandell/rov-flight-ops-simulator`. It built, passed its self-check and
-served the program to a browser, and within minutes Hugging Face's automated
-checks paused it with "Flagged as abusive". Hugging Face's
-[content policy](https://huggingface.co/content-policy) counts VNC among the
-tools it treats as platform abuse, and this container is built around a VNC
-server, so Hugging Face is not a host for it. Do not redeploy it there:
-`web_demo/deploy.py` still works, but a second flagged Space puts the
-account at risk.
+**On Fly.io.** `web_demo/deploy.py` deploys it to the Fly app
+`rov-flight-ops-simulator`, at <https://rov-flight-ops-simulator.fly.dev>,
+as `web_demo/fly.toml` describes:
+
+* **One machine**, a performance-1x (one whole core, 2 GB) in San Jose (`sjc`,
+  the nearest region to Seattle; Fly has none here). A whole core because the
+  program redraws continuously whether anyone is watching or not, which uses
+  up a shared core's burst allowance within minutes.
+* **Suspended whenever nobody is connected.** A few minutes after the last
+  viewer leaves, Fly saves the machine's memory, the program mid-flight
+  included, and stops it. The next visitor's request resumes it in under a
+  second, where it left off. Fly charges for the machine only while it runs
+  — about 5.5¢ an hour in San Jose, billed by the second — and for storage
+  (about $0.15 a GB a month) while it is suspended. Always on, the same
+  machine would cost about $39 a month.
+* **A cold start only after a deploy** (which starts the program straight
+  away), Fly maintenance, or a move to another host: the program takes
+  about half a minute to open its window, and until it does the display shows
+  "ROV Flight Operations is starting" (`web_demo/splash.py`) rather than black.
+* **A viewer nobody is using is let go.** Fly keeps the machine awake while
+  any page holds its connection open, so a tab left open would keep it
+  running and billing. After 15 minutes with no mouse, touch or key the page
+  disconnects, says why, and offers Connect to carry on (`web_demo/web/idle.js`).
+
+**Not on Hugging Face: it was paused as abusive.** It was built first for a
+Hugging Face Docker Space, which needs a paid plan, so on 27 October 2026 it
+went to zhrandell's account (PRO) as `zhrandell/rov-flight-ops-simulator`. It
+built, passed its self-check and served the program to a browser, and within
+minutes Hugging Face's automated checks paused it with "Flagged as abusive".
+Hugging Face's [content policy](https://huggingface.co/content-policy) counts
+VNC among the tools it treats as platform abuse, and this container is built
+around a VNC server. Do not deploy it there again: a second flagged Space
+puts the account at risk.
 
 **Demo mode** — `python -m rov_flight_ops --demo`, or `ROV_FLIGHT_OPS_DEMO=1`
 (`rov_flight_ops/demo.py`). It runs on Windows too, for a look before
@@ -1011,12 +1031,14 @@ a container service that starts one per session.
 ```
 web_demo/
     Dockerfile     python:3.13-slim + Tk + Xvfb + x11vnc + noVNC/websockify + fonts
-    start.sh       the container: display, the program (restarted if it exits), VNC, port 7860
-    web/           noVNC's landing page and settings: connect at once, scale to the window
+    fly.toml       the Fly app: one performance-1x machine in sjc, suspended when nobody is connected
+    start.sh       the container: display, "starting" screen, the program (restarted if it exits), VNC, port 7860
+    splash.py      the "starting" screen the program's window opens over
+    web/           noVNC's landing page and settings: connect at once, scale to the window;
+                   idle.js disconnects a viewer after 15 minutes without input
     montserrat.conf  keeps body text in Montserrat Regular (Tk on X11 asks for Medium)
     selfcheck.py   run during the build: every module imported, every tab photographed
-    deploy.py      assembles the build folder (--stage DIR), or uploads it to a Hugging Face Space
-    README.md      the Hugging Face Space's card (its front matter is the Space's configuration)
+    deploy.py      deploys to Fly, or assembles the build folder (--stage DIR)
 ```
 
 The build fails if any module will not import on Linux or the program opens
@@ -1024,23 +1046,29 @@ without its simulator. Everything else the check finds — a glyph with no font,
 a callback that raised — and a photograph of each tab are served by the running
 container at `/selfcheck/` under the app's own address (`/selfcheck/report.txt`).
 
-**What a host builds from.** From `rov_flight_ops/`:
+**Deploying.** Pushing to GitHub does not change the demo: it is updated
+only when somebody deploys it. Once, on the computer that deploys, install
+Fly's command-line tool, [flyctl](https://fly.io/docs/flyctl/install/), and
+log it in to the Fly account that pays for the demo with `fly auth login`
+(the account holder does this themselves). Then, from `rov_flight_ops/`:
+
+```
+python web_demo/deploy.py
+```
+
+builds the container on Fly's own builders — Docker is not needed here — and
+replaces the running machine with one made from the new build; the first run
+creates the app. The build takes several minutes. It deploys whatever is
+checked out, local changes included, and says which commit that was.
 
 ```
 python web_demo/deploy.py --stage DIR
 ```
 
-assembles the build folder any container host needs: the Dockerfile at its
-root and the parts of the project the container uses under
-`rov_flight_ops/`, with the shell script and Dockerfile in LF line endings.
-The host builds it and sends its visitors to port 7860. The first build takes
-about ten minutes, later ones a few. Anyone connected while it restarts is
-reconnected to the new one.
-
-Without `--stage`, `deploy.py` uploads that folder to the Hugging Face Space
-it is named after, using a token the laptop was logged in with by
-`hf auth login`. That is how the paused Space was made; see above before
-running it.
+only assembles the build folder, for Fly or any other container host: the
+Dockerfile and fly.toml at its root and the parts of the project the
+container uses under `rov_flight_ops/`, with the shell script and Dockerfile
+in LF line endings. A host builds it and sends its visitors to port 7860.
 
 **Trying the container locally**, where Docker is installed — from the
 repository root, not `rov_flight_ops/`:
