@@ -1046,20 +1046,26 @@ without its simulator. Everything else the check finds — a glyph with no font,
 a callback that raised — and a photograph of each tab are served by the running
 container at `/selfcheck/` under the app's own address (`/selfcheck/report.txt`).
 
-**Deploying.** Pushing to GitHub does not change the demo: it is updated
-only when somebody deploys it. Once, on the computer that deploys, install
-Fly's command-line tool, [flyctl](https://fly.io/docs/flyctl/install/), and
-log it in to the Fly account that pays for the demo with `fly auth login`
-(the account holder does this themselves). Then, from `rov_flight_ops/`:
+**Deploying.** The demo changes only when it is deployed, by either of two
+routes to the same `web_demo/deploy.py`. Each builds the container on Fly's
+own builders — Docker is not needed — and replaces the running machine with
+one made from the new build; the first deploy creates the app. A build takes
+several minutes.
 
-```
-python web_demo/deploy.py
-```
-
-builds the container on Fly's own builders — Docker is not needed here — and
-replaces the running machine with one made from the new build; the first run
-creates the app. The build takes several minutes. It deploys whatever is
-checked out, local changes included, and says which commit that was.
+* **From GitHub, with nothing installed anywhere.**
+  `.github/workflows/web-demo.yml` deploys on every push that changes
+  `rov_flight_ops/` on the branches it lists. For now that is only the branch
+  the demo is being tried out on, not `main`; adding `main` to the list makes
+  every change there redeploy the demo. It needs the repository's Actions
+  secret `FLY_API_TOKEN`: a Fly organisation token, made on Fly's dashboard
+  (the organisation, then *Tokens*) and pasted by the account holder into
+  GitHub's *Settings → Secrets and variables → Actions*.
+* **From a computer with Fly's command-line tool.** Install
+  [flyctl](https://fly.io/docs/flyctl/install/) and log it in to the Fly
+  account with `fly auth login` (the account holder does this themselves),
+  then run `python web_demo/deploy.py` from `rov_flight_ops/`. It deploys
+  whatever is checked out, local changes included, and says which commit that
+  was.
 
 ```
 python web_demo/deploy.py --stage DIR

@@ -1,0 +1,40 @@
+name: Web demo
+
+# Deploys the ROV flight simulator's web demo to Fly.io (see "The web demo" in
+# rov_flight_ops/README.md): web_demo/deploy.py assembles the build folder,
+# Fly builds it, and the new machine replaces the old one. Fly's command-line
+# tool is installed here, on GitHub's runner, so the computer the change was
+# made on needs nothing installed.
+#
+# FLY_API_TOKEN is a Fly organisation token, made on Fly's dashboard (the
+# organisation, then Tokens) and kept as this repository's Actions secret.
+on:
+  push:
+    # The branch the demo is being tried out on. Whether every change to main
+    # should redeploy it is still to be decided; listing main here does that.
+    branches: [claude/sim-web-demo-b7601e]
+    paths:
+      - "rov_flight_ops/**"
+      - ".github/workflows/web-demo.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time, and none cut off halfway.
+concurrency:
+  group: web-demo-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rov_flight_ops
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@1.6
+      - run: python3 web_demo/deploy.py
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

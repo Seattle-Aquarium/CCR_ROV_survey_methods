@@ -7,8 +7,9 @@ Put the web demo on Fly.io: assemble the build folder and deploy it.
 
 Run from ``rov_flight_ops/``, with Fly's command-line tool installed
 (``flyctl``, https://fly.io/docs/flyctl/install/) and this computer logged in
-to the Fly account that pays for the demo (``fly auth login``). The first run
-creates the app. Every run builds the container on Fly's own builders --
+to the Fly account that pays for the demo (``fly auth login``) -- or, as
+GitHub runs it (``.github/workflows/web-demo.yml``), with a Fly token in
+``FLY_API_TOKEN`` instead of the login. The first run creates the app. Every run builds the container on Fly's own builders --
 nothing is built here, so Docker is not needed -- and replaces the running
 machine with one made from the new build. A build takes several minutes.
 
@@ -24,6 +25,7 @@ content policy counts VNC as platform abuse: see "The web demo" in the README.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -96,6 +98,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--app", default=default_app,
                     help=f"the Fly app to deploy to (default {default_app})")
+    ap.add_argument("--org", default="personal",
+                    help="the Fly organisation a new app is made in "
+                         "(default personal: the account's own)")
     ap.add_argument("--stage", type=Path, metavar="DIR",
                     help="assemble the build folder into DIR and stop")
     args = ap.parse_args(argv)
@@ -109,15 +114,22 @@ def main(argv: list[str] | None = None) -> int:
         print("Needs Fly's command-line tool, flyctl: "
               "https://fly.io/docs/flyctl/install/", file=sys.stderr)
         return 2
-    who = subprocess.run([fly, "auth", "whoami"], capture_output=True, text=True)
-    if who.returncode != 0:
-        print("Not logged in to Fly. Run  fly auth login  first.", file=sys.stderr)
-        return 2
-    print(f"Logged in to Fly as {who.stdout.strip()}.")
+    # On GitHub (.github/workflows/web-demo.yml) a token stands in for a login,
+    # and a token for an organisation cannot say whose it is.
+    if not os.environ.get("FLY_API_TOKEN"):
+        who = subprocess.run([fly, "auth", "whoami"], capture_output=True,
+                             text=True)
+        if who.returncode != 0:
+            print("Not logged in to Fly. Run  fly auth login  first -- or, on "
+                  "GitHub, give the repository its FLY_API_TOKEN secret.",
+                  file=sys.stderr)
+            return 2
+        print(f"Logged in to Fly as {who.stdout.strip()}.")
     if subprocess.run([fly, "status", "--app", args.app],
                       capture_output=True).returncode != 0:
-        print(f"Creating the Fly app {args.app}.")
-        if subprocess.run([fly, "apps", "create", args.app]).returncode != 0:
+        print(f"Creating the Fly app {args.app} in {args.org}.")
+        if subprocess.run([fly, "apps", "create", args.app,
+                           "--org", args.org]).returncode != 0:
             print(f"Fly would not create {args.app}; if the name is taken, "
                   f"choose another with --app (and in fly.toml).", file=sys.stderr)
             return 1
