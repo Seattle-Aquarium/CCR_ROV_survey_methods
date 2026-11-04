@@ -19,6 +19,7 @@ import gc
 import os
 import sys
 import time
+import math
 
 from machine import I2C, Pin
 
@@ -52,8 +53,8 @@ class LightingController:
     """
 
     # ArduSub servo PWM range (microseconds)
-    PWM_MIN_US = 1105
-    PWM_MAX_US = 1900
+    PWM_MIN_US = 1100
+    PWM_MAX_US = 1890
 
     # Accept-range for raw pulse samples. Pulses outside this are treated
     # as EMI glitches and dropped by the PWM reader's ISR.
@@ -67,9 +68,6 @@ class LightingController:
     # Signal loss timeout - lights off if no PWM edges for this long
     SIGNAL_TIMEOUT_MS = 1000
 
-    # Minimum brightness change (%) before updating lights (deadband)
-    LEVEL_DEADBAND = 5
-
     # Control loop interval
     LOOP_INTERVAL_MS = 50
 
@@ -80,6 +78,27 @@ class LightingController:
 
     # Status print interval (the human-readable console line)
     STATUS_INTERVAL_MS = 2000
+
+    # PWM input must change by at least this much to be recognized as a change
+    PWM_HYSTERESIS_US = 35
+
+    # Minimum PWM value (in normalized PWM space)
+    # Any PWM values below this are clipped to 0 light output
+    # This prevents cases where the the PWM is just about PWM_MIN_US
+    # turning the lights on to 1 - 2% brightness
+    PWM_NORM_FLOOR = 0.05
+
+    # If set to `True` a logarithmic mapping will be used between PWM and LOUT
+    # This will make the output brightness roughly linear.
+    #
+    # If `false`, a direct linear mapping will be used between PWM and LOUT
+    # In this map, the light level increases exponentially (e.g. the lights are
+    # producing about half their rated light at LOUT=80)
+    LINEARIZE_LIGHTING = True
+    #
+    # Coefficient on ln(PWM) for scaling the input to output
+    # Derived from curve fit of LOUT versus light level
+    LINEARIZE_ALPHA = 0.246
 
     # Telemetry intervals, all in ms
     CTL_INTERVAL_MS = 500  # PWM and commanded level
@@ -103,6 +122,7 @@ class LightingController:
     # only. Set to the fitted shunt's resistance to get current and power.
     INA_SHUNT_OHMS = None
     INA_MAX_CURRENT = 20.0
+
     # Latch a bus under-voltage between reads. Chosen from the first reading:
     # a monitor reading > 18 V is on the 24 V light rail, otherwise on the
     # vehicle's ~13 V side.
@@ -126,6 +146,7 @@ class LightingController:
         self._current_cmd = 0
         self._mismatch = {}
         self._current_level = {}
+        self._current_pwm = self.PWM_MIN_US
 
         self._init_telemetry()
         self._init_uart()
@@ -182,7 +203,7 @@ class LightingController:
             power_notes=self._monitor_notes,
             poll=self._poller.enabled if hasattr(self, "_poller") else self.POLL_LIGHTS,
             resync=self.RESYNC_LEVELS,
-            deadband=self.LEVEL_DEADBAND,
+            deadband=self.PWM_HYSTERESIS_US,
         )
 
     def _on_poll(self, kind, **fields):
@@ -281,15 +302,29 @@ class LightingController:
 
     def pwm_to_level(self, pulse_width_us):
         """Map PWM pulse width (us) to light level (0-100)."""
-        if pulse_width_us <= self.PWM_MIN_US:
-            return 0
-        if pulse_width_us >= self.PWM_MAX_US:
-            return 100
-        return int(
-            (pulse_width_us - self.PWM_MIN_US)
-            * 100
-            / (self.PWM_MAX_US - self.PWM_MIN_US)
+
+        # if pulse_width_us <= self.PWM_MIN_US:
+        #     pulse_width_us = self.PWM_MIN_US
+        # if pulse_width_us >= self.PWM_MAX_US:
+        #     pulse_width_us = self.PWM_MAX_US
+
+        norm_pwm = (pulse_width_us - self.PWM_MIN_US) / (
+            self.PWM_MAX_US - self.PWM_MIN_US
         )
+
+        # Create deadband at zero, this also prevents log(x) for x <= 0
+        if norm_pwm < self.PWM_NORM_FLOOR:
+            return 0
+        elif norm_pwm > 1.0:
+            norm_pwm = 1.0
+
+        if self.LINEARIZE_LIGHTING:
+            try:
+                return int(100 * (1 + self.LINEARIZE_ALPHA * math.log(norm_pwm)))
+            except ValueError:
+                return 0
+        else:
+            return int(100 * norm_pwm)
 
     def set_light_level(self, addr: int, level: int, why="manual"):
         """
@@ -412,10 +447,17 @@ class LightingController:
                     pw_filtered = sorted(pw_samples)[len(pw_samples) // 2]
                     target_level = self.pwm_to_level(pw_filtered)
 
+                # Determine change by _change in PWM_ not in LOUT value
+                # to avoid numerical stability issues when calculating
+                changed = abs(pw_filtered - self._current_pwm) >= self.PWM_HYSTERESIS_US
+
+                # This should really be in terms of the PWM input, not the light level
+                #
                 # Only update lights if level changed beyond deadband
-                changed = abs(target_level - self._current_cmd) >= self.LEVEL_DEADBAND
+
                 if changed:
                     self._current_cmd = target_level
+                    self._current_pwm = pw_filtered
                     self.set_all_lights(target_level, why="pwm")
 
                 now_ms = time.ticks_ms()
@@ -468,9 +510,14 @@ class LightingController:
                 # Periodic status output (human-readable, on the console)
                 if time.ticks_diff(now_ms, last_status_ms) >= self.STATUS_INTERVAL_MS:
                     if signal_lost:
-                        print(f"PWM: NO SIGNAL | Level: {self._current_cmd}%")
+                        print(f"PWM: NO SIGNAL | Lout: {self._current_cmd}")
                     else:
-                        print(f"PWM: {pw_filtered} us | Level: {self._current_cmd}%")
+                        norm_pwm = (self._current_pwm - self.PWM_MIN_US) / (
+                            self.PWM_MAX_US - self.PWM_MIN_US
+                        )
+                        print(
+                            f"PWM: {pw_filtered} us | Scaled PWM: {norm_pwm:.2} | Lout: {self._current_cmd}"
+                        )
                     last_status_ms = now_ms
 
                 spent = time.ticks_diff(time.ticks_ms(), t_loop)

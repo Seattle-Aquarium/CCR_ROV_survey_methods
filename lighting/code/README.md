@@ -36,6 +36,28 @@ curve and what it means for exposure.
 2. In Cockpit/QGroundControl, map a joystick axis or button to that actuator
 3. See the [Newton Gripper installation guide](https://bluerobotics.com/learn/newton-subsea-gripper-installation/#setup-in-qgroundcontrol) for the general pattern of configuring auxiliary servo outputs
 
+## Output linearization
+
+Out of the box, the mapping between the LOUT command (between 0 and 100) and
+output luminosity is non-linear, with 50% of the additional brightness
+occuring between LOUT 84 and 100.
+
+By default, we map PWM (1100-1900) linearly to LOUT, so (for example), PWM of 1500ms is LOUT=50 is about 15% luminosity from a light:
+
+```math
+\texttt{LOUT} = 100 * \frac{\texttt{PWM} - 1100}{800}
+```
+
+*(Rounding `LOUT` to the nearest integer value is ommited for clarity)*
+
+If `LINEARIZE_LIGHTING` is set to `True `main.py`, a logarithmic function will be applied when mapping PWM to LOUT:
+
+```math
+\texttt{LOUT} = 100 * \left( 1 + \alpha \ln \left\( \frac{\texttt{PWM} - 1100}{800} \right) \right)
+```
+
+From the DSPL curve, $`\alpha = 0.246`$
+
 ## Development
 
 > [!IMPORTANT] Adding the second telemetry port adds a USB re-enumeration to the
