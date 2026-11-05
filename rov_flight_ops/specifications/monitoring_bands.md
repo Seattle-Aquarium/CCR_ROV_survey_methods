@@ -117,6 +117,7 @@ Elevator on 15 September).
 | `rov_ping_latency_ms` | ▲ ≥ 25 ms  ✖ ≥ 100 ms | 3 s mean | 99.9 % | Round trip to the Pi over the tether: 3-6 ms normally, 19 ms at the 99th percentile. Past 25 ms the link is congested or retrying; past 100 ms control and video both lag. |
 | `rov_packet_loss_pct` | ▲ ≥ 5 %  ✖ ≥ 20 % | each sample | 91.1 % | Lost pings to the Pi, over the last 30. One lost (3.3 %) is common and means nothing; two or more is a link problem, and at 20 % the vehicle is dropping in and out. |
 | `network_packets_discarded` | ✖ climbing (in 10 s) | change over 10 s | 100.0 % | A count since the adapter started, normally flat all day. Any rise during a flight means the laptop is throwing away packets it received -- a driver or buffer problem. |
+| `udp_receive_errors_per_s` | ▲ ≥ 1 datagrams/s  ✖ ≥ 20 datagrams/s | 5 s mean | not yet recorded | Datagrams Windows received and then threw away, usually because a program's buffer was full -- after the adapter, so the network counters never see it. Video arrives as UDP; held above zero, Cockpit is losing picture on the laptop. Not in the September-October logs, so these thresholds are judgement. |
 | `rov_http_ms` | ▲ ≥ 250 ms  ✖ ≥ 1000 ms | 5 s mean | 96.9 % | How long the Pi takes to answer a small request: 40-160 ms normally. Over a second it is overloaded or the tether is struggling, and the recorder's arm checks start to fail. |
 
 ### Cockpit

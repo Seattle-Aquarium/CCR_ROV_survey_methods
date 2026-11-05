@@ -310,6 +310,10 @@ class LaptopModel:
         row["network_errors_received"] = 0
         row["network_errors_sent"] = 0
         row["network_packets_discarded"] = self._discarded
+        # Healthy video is ~700 datagrams a second, every one delivered.
+        row["udp_received_per_s"] = round(rx * 1e6 / 8 / 1400, 1)
+        row["udp_no_port_per_s"] = 0.0
+        row["udp_receive_errors_per_s"] = 0.0
         row["ethernet_connected"] = "TRUE"
         row["ethernet_link_speed_mbps"] = 100
         row["rov_ping_latency_ms"] = None if lost else float(round(ping))

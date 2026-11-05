@@ -103,6 +103,7 @@ SIM_MARK = ("#5B3F8C", "#B9A2E6")
 COUNT_UNITS = {
     "disk_queue_length": "requests",
     "network_packets_discarded": "packets",
+    "udp_receive_errors_per_s": "datagrams/s",
     "cockpit_process_count": "processes",
     "cockpit_handle_count": "handles",
     "cockpit_thread_count": "threads",

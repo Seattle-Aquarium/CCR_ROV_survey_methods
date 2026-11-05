@@ -268,6 +268,13 @@ def build(*, flight_id: str, started: float, ended: float, reason: str,
                 "absent rather than as a vehicle with nothing installed"),
         },
 
+        # At arming and at the close, because a BlueOS restart between them
+        # can come back streaming differently -- or not at all.
+        "video_streams": {
+            "at_start": _streams_or_none(opening),
+            "at_end": _streams_or_none(closing),
+        },
+
         "changes": {
             "compared_with": compared,
             "parameters_by_operator": by_operator,
@@ -282,6 +289,12 @@ def build(*, flight_id: str, started: float, ended: float, reason: str,
         "readings_available_on_this_machine": capabilities,
     }
     return record
+
+
+def _streams_or_none(snapshot) -> dict | None:
+    """A snapshot's video-stream read, or None when none was attempted."""
+    streams = getattr(snapshot, "video_streams", None)
+    return dict(streams) if streams else None
 
 
 def write(folder: Path, record: dict) -> Path:

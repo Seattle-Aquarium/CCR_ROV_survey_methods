@@ -382,6 +382,13 @@ BANDS: dict[str, tuple[Band, ...]] = {
         why="A count since the adapter started, normally flat all day. Any "
             "rise during a flight means the laptop is throwing away packets "
             "it received -- a driver or buffer problem."),),
+    "udp_receive_errors_per_s": (Band(
+        "high", 1, 20, smooth_s=5,
+        why="Datagrams Windows received and then threw away, usually because "
+            "a program's buffer was full -- after the adapter, so the "
+            "network counters never see it. Video arrives as UDP; held above "
+            "zero, Cockpit is losing picture on the laptop. Not in the "
+            "September-October logs, so these thresholds are judgement."),),
     "rov_http_ms": (Band(
         "high", 250, 1000, smooth_s=5,
         why="How long the Pi takes to answer a small request: 40-160 ms "

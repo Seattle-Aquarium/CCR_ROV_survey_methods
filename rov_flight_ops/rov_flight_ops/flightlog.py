@@ -176,6 +176,8 @@ class Snapshot:
     parameters_from: str = ""
     versions: dict = field(default_factory=dict)
     dataflash_log: str = ""
+    #: `blueos.read_video_streams`: what BlueOS was streaming, and to where.
+    video_streams: dict = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -917,6 +919,10 @@ class FlightRecorder:
             pass
         try:
             snap.versions = blueos.read_versions(self.host)
+        except Exception:
+            pass
+        try:
+            snap.video_streams = blueos.read_video_streams(self.host)
         except Exception:
             pass
         return snap

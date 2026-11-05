@@ -110,6 +110,15 @@ SCALARS = {
     "mem_commit_limit_b":  r"\Memory\Commit Limit",
     "mem_pages_per_s":     r"\Memory\Pages/sec",
     "pagefile_pct":        r"\Paging File(_Total)\% Usage",
+    # UDP for the whole laptop, every interface. Cockpit's WebRTC video, the
+    # QGC stream and MAVLink all arrive as UDP, and a datagram Windows throws
+    # away after the adapter has counted it -- a socket whose buffer is full
+    # because the application fell behind, for one -- shows up here and in
+    # none of the adapter's own counters. The first is a running total; the
+    # other two are rates.
+    "udp_rx_errors":       r"\UDPv4\Datagrams Received Errors",
+    "udp_rx_per_s":        r"\UDPv4\Datagrams Received/sec",
+    "udp_no_port_per_s":   r"\UDPv4\Datagrams No Port/sec",
 }
 
 #: Wildcard counters, read as {instance: value}.

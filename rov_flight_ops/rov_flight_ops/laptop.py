@@ -230,6 +230,14 @@ COLUMNS: tuple[str, ...] = (
     # healthy on both hosts while the powerline pair between them is the
     # thing actually losing sync. Blank when the extension is not installed.
     "tether_tx_mbps", "tether_rx_mbps", "tether_remote_seen",
+    # UDP as Windows itself counted it, across every interface. Added after
+    # the 4 November 2026 OTS test, where steady video reached the adapter
+    # and Cockpit still could not show it: a datagram dropped inside Windows
+    # -- after the adapter, before the application -- was the one loss
+    # nothing above could see. Errors are per second, from Windows' running
+    # total; "no port" is video or telemetry arriving for a program that is
+    # not listening, such as the QGC stream with QGC closed.
+    "udp_received_per_s", "udp_no_port_per_s", "udp_receive_errors_per_s",
 )
 
 #: Units, for the header note written beside the CSV. Anything not named here
@@ -254,6 +262,8 @@ UNITS: dict[str, str] = {
     "motherboard_temp_c": "C", "system_uptime_s": "s", "rov_http_ms": "ms",
     "pi_soc_temp_c": "C", "phy_rx_bytes": "bytes", "pi_eth_rx_bytes": "bytes",
     "tether_link_mbps": "Mbps", "tether_tx_mbps": "Mbps", "tether_rx_mbps": "Mbps",
+    "udp_received_per_s": "datagrams/s", "udp_no_port_per_s": "datagrams/s",
+    "udp_receive_errors_per_s": "datagrams/s",
 }
 
 #: The groups the operator asked to be able to look at one at a time,
@@ -279,7 +289,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "Network": ("network_receive_mbps", "network_send_mbps",
                 "network_utilization_pct", "rov_ping_latency_ms",
                 "rov_packet_loss_pct", "network_packets_discarded",
-                "rov_http_ms"),
+                "udp_receive_errors_per_s", "rov_http_ms"),
     "Cockpit": ("cockpit_cpu_pct", "cockpit_ram_mb", "cockpit_gpu_usage_pct",
                 "cockpit_process_count", "cockpit_handle_count",
                 "cockpit_thread_count"),
@@ -304,7 +314,8 @@ GROUP_NOTES: dict[str, str] = {
     "GPU": "Cockpit's video is decoded here.",
     "Storage": "Free space, and a queue that keeps growing.",
     "Network": "Ping and loss are to the vehicle; throughput is the tether "
-               "interface.",
+               "interface; UDP errors are datagrams Windows dropped after "
+               "they arrived.",
     "Cockpit": "Summed across Cockpit's processes. Blank when it is not "
                "running.",
     "Power": "Laptop battery and temperatures; pi_soc_temp_c is the "
@@ -459,6 +470,9 @@ class Sampler:
         self._t0 = time.time()
         self._last_net: tuple[float, object] | None = None
         self._last_disk: tuple[float, object] | None = None
+        #: (monotonic time, Windows' running total of UDP receive errors) at
+        #: the previous row, so each row can say how many arrived since.
+        self._last_udp_errors: tuple[float, float] | None = None
         self._procs: list = []
         self._procs_at = 0.0
         self._cores = (psutil.cpu_count(logical=True) or 1) if psutil else 1
@@ -721,7 +735,8 @@ class Sampler:
         except Exception:
             self._gpu_now = None
         for fn in (self._cpu, self._memory, self._gpu, self._storage,
-                   self._network, self._tether, self._cockpit_columns,
+                   self._network, self._udp, self._tether,
+                   self._cockpit_columns,
                    self._power, self._vehicle_columns):
             try:
                 fn(row)
@@ -848,6 +863,36 @@ class Sampler:
         rtt, loss = self.pinger.read()
         row["rov_ping_latency_ms"] = _f(rtt, 1)
         row["rov_packet_loss_pct"] = _f(loss, 1)
+
+    def _udp(self, row: dict) -> None:
+        """UDP as the Windows stack counted it, after the adapter.
+
+        Laptop-wide rather than per interface: Windows keeps these for the
+        whole IPv4 stack only. On a flight that is almost all video and
+        MAVLink from the vehicle, which is what makes them worth having.
+        """
+        row["udp_received_per_s"] = _f(self.counters.scalar("udp_rx_per_s"), 1)
+        row["udp_no_port_per_s"] = _f(
+            self.counters.scalar("udp_no_port_per_s"), 1)
+        row["udp_receive_errors_per_s"] = self._udp_error_rate(
+            self.counters.scalar("udp_rx_errors"), time.monotonic())
+
+    def _udp_error_rate(self, total: float | None, now: float) -> float | None:
+        """Errors per second since the previous row, from a running total.
+
+        Blank for the first row, when the counter is unreadable, and when the
+        total went down -- a reset is not a negative number of errors.
+        """
+        if total is None:
+            self._last_udp_errors = None
+            return None
+        previous, self._last_udp_errors = self._last_udp_errors, (now, total)
+        if previous is None:
+            return None
+        dt = now - previous[0]
+        if dt <= 0 or total < previous[1]:
+            return None
+        return _f((total - previous[1]) / dt, 2)
 
     def _tether(self, row: dict) -> None:
         """The link itself, from whichever ends will answer.
