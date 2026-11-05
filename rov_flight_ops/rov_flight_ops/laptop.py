@@ -100,6 +100,11 @@ COCKPIT_PROCESSES = ("cockpit.exe",)
 #: window is not blamed for the laptop being busy.
 COCKPIT_BROWSERS = ("chrome.exe", "msedge.exe", "firefox.exe")
 
+#: QGroundControl, recorded apart from Cockpit: on 4 November nothing could
+#: say afterwards whether it was open, and it decodes its own copy of the
+#: video when it is.
+QGC_PROCESSES = ("qgroundcontrol.exe",)
+
 #: An Electron app installed by Squirrel lives in ``…\Cockpit\app-1.19.0\``,
 #: so its version is in its own path. Read first because it needs nothing but
 #: the path -- no COM, no file-version API, no elevation.
@@ -238,6 +243,17 @@ COLUMNS: tuple[str, ...] = (
     # total; "no port" is video or telemetry arriving for a program that is
     # not listening, such as the QGC stream with QGC closed.
     "udp_received_per_s", "udp_no_port_per_s", "udp_receive_errors_per_s",
+    # Added after the same test, for the four things it could not answer
+    # afterwards. Whether QGroundControl was open (it decodes the video too).
+    # The Pi's own load, card space and throttling -- pi_throttling above
+    # was never filled before this. The video streams BlueOS says it is
+    # serving, re-read every 30 s. What this program itself costs the laptop.
+    # And a note typed by the operator at the moment something happened.
+    "qgc_running", "qgc_cpu_pct",
+    "pi_cpu_pct", "pi_disk_free_gb",
+    "video_stream_count", "video_stream_udp", "video_stream_errors",
+    "logger_cpu_pct", "logger_ram_mb",
+    "operator_mark",
 )
 
 #: Units, for the header note written beside the CSV. Anything not named here
@@ -264,6 +280,8 @@ UNITS: dict[str, str] = {
     "tether_link_mbps": "Mbps", "tether_tx_mbps": "Mbps", "tether_rx_mbps": "Mbps",
     "udp_received_per_s": "datagrams/s", "udp_no_port_per_s": "datagrams/s",
     "udp_receive_errors_per_s": "datagrams/s",
+    "qgc_cpu_pct": "%", "pi_cpu_pct": "%", "pi_disk_free_gb": "GB",
+    "logger_cpu_pct": "%", "logger_ram_mb": "MB",
 }
 
 #: The groups the operator asked to be able to look at one at a time,
@@ -292,10 +310,11 @@ GROUPS: dict[str, tuple[str, ...]] = {
                 "udp_receive_errors_per_s", "rov_http_ms"),
     "Cockpit": ("cockpit_cpu_pct", "cockpit_ram_mb", "cockpit_gpu_usage_pct",
                 "cockpit_process_count", "cockpit_handle_count",
-                "cockpit_thread_count"),
+                "cockpit_thread_count", "logger_cpu_pct"),
     "Power": ("battery_charge_pct", "battery_discharge_w",
               "battery_temp_c", "fan_speed_rpm",
-              "motherboard_temp_c", "pi_soc_temp_c", "system_uptime_s"),
+              "motherboard_temp_c", "pi_soc_temp_c", "pi_cpu_pct",
+              "system_uptime_s"),
     "Tether": ("nic_carrier", "phy_carrier", "nic_low_power",
                "phy_rx_bytes", "rov_arp_ok", "pi_eth_rx_bytes",
                "pi_eth_carrier_drops",
@@ -317,8 +336,8 @@ GROUP_NOTES: dict[str, str] = {
                "interface; UDP errors are datagrams Windows dropped after "
                "they arrived.",
     "Cockpit": "Summed across Cockpit's processes. Blank when it is not "
-               "running.",
-    "Power": "Laptop battery and temperatures; pi_soc_temp_c is the "
+               "running. logger_cpu_pct is this program's own share.",
+    "Power": "Laptop battery and temperatures; pi_ readings are the "
              "vehicle's Pi.",
     "Tether": "nic_ is the routed interface, phy_ the adapter under the "
               "bridge, pi_eth_ the Pi's own port, tether_ the Fathom-X pair "
@@ -439,6 +458,15 @@ class VehicleState:
     #: from whatever rate it last negotiated with one. None when the
     #: extension itself could not be reached.
     tether_remote_seen: bool | None = None
+    #: The Pi's CPU use (mean of its cores) and free space on its card, from
+    #: the recorder's health thread.
+    cpu_pct: float | None = None
+    disk_free_gb: float | None = None
+    #: From BlueOS's camera manager, every 30 s: how many streams it serves,
+    #: whether any is pushed to the laptop by UDP, and how many are failing.
+    stream_count: int | None = None
+    stream_udp: bool | None = None
+    stream_errors: int | None = None
 
 
 class Sampler:
@@ -473,6 +501,20 @@ class Sampler:
         #: (monotonic time, Windows' running total of UDP receive errors) at
         #: the previous row, so each row can say how many arrived since.
         self._last_udp_errors: tuple[float, float] | None = None
+        self._qgc: list = []
+        #: This program's own process, so its cost to the laptop is a column
+        #: rather than a guess. All of its threads -- the recorder, the DVL
+        #: and UGPS captures, the window -- live in it.
+        self._me = None
+        if psutil is not None:
+            try:
+                self._me = psutil.Process()
+                self._me.cpu_percent()
+            except Exception:
+                self._me = None
+        #: A note typed by the operator, written into the next row only.
+        self._mark: str | None = None
+        self._mark_lock = threading.Lock()
         self._procs: list = []
         self._procs_at = 0.0
         self._cores = (psutil.cpu_count(logical=True) or 1) if psutil else 1
@@ -644,11 +686,14 @@ class Sampler:
             self._procs = []
             return
         found = []
+        qgc = []
         host = self.rov_host.split(":")[0]
         for p in psutil.process_iter(["name", "pid"]):
             try:
                 name = (p.info["name"] or "").lower()
-                if name in COCKPIT_PROCESSES:
+                if name in QGC_PROCESSES:
+                    qgc.append(p)
+                elif name in COCKPIT_PROCESSES:
                     found.append(p)
                 elif name in COCKPIT_BROWSERS:
                     # Only if this browser was pointed at the vehicle. Reading
@@ -662,12 +707,13 @@ class Sampler:
                         found.append(p)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
-        for p in found:                       # prime each process's CPU delta
+        for p in found + qgc:                 # prime each process's CPU delta
             try:
                 p.cpu_percent()
             except Exception:
                 pass
         self._procs = found
+        self._qgc = qgc
 
     def _pids(self) -> set[int]:
         """The Cockpit group's process ids, for attributing GPU work.
@@ -736,7 +782,8 @@ class Sampler:
             self._gpu_now = None
         for fn in (self._cpu, self._memory, self._gpu, self._storage,
                    self._network, self._udp, self._tether,
-                   self._cockpit_columns,
+                   self._cockpit_columns, self._other_processes,
+                   self._mark_column,
                    self._power, self._vehicle_columns):
             try:
                 fn(row)
@@ -933,6 +980,39 @@ class Sampler:
         row["tether_link_mbps"] = _f(min(pair), 1) if pair else None
         row["tether_remote_seen"] = _b(v.tether_remote_seen)
 
+    def mark(self, text: str) -> None:
+        """Put an operator's note into the next row. Safe from any thread."""
+        with self._mark_lock:
+            self._mark = (text or "mark").replace("\n", " ").strip() or "mark"
+
+    def _mark_column(self, row: dict) -> None:
+        with self._mark_lock:
+            row["operator_mark"], self._mark = self._mark, None
+
+    def _other_processes(self, row: dict) -> None:
+        """QGroundControl, and this program itself."""
+        if psutil is None:
+            return
+        cpu, alive = 0.0, 0
+        for p in list(self._qgc):
+            try:
+                cpu += p.cpu_percent()
+                alive += 1
+            except Exception:
+                continue
+        row["qgc_running"] = _b(alive > 0)
+        if alive:
+            row["qgc_cpu_pct"] = _f(cpu / self._cores, 2)
+        if self._me is not None:
+            try:
+                with self._me.oneshot():
+                    row["logger_cpu_pct"] = _f(
+                        self._me.cpu_percent() / self._cores, 2)
+                    row["logger_ram_mb"] = _f(
+                        self._me.memory_info().rss / 2 ** 20, 1)
+            except Exception:
+                pass
+
     def _cockpit_columns(self, row: dict) -> None:
         c = self._cockpit()
         row["cockpit_running"] = _b(c["running"])
@@ -976,6 +1056,11 @@ class Sampler:
         row["rov_http_ms"] = _f(v.http_ms, 1)
         row["pi_soc_temp_c"] = _f(v.soc_temp_c, 1)
         row["pi_throttling"] = _b(v.throttling)
+        row["pi_cpu_pct"] = _f(v.cpu_pct, 1)
+        row["pi_disk_free_gb"] = _f(v.disk_free_gb, 2)
+        row["video_stream_count"] = v.stream_count
+        row["video_stream_udp"] = _b(v.stream_udp)
+        row["video_stream_errors"] = v.stream_errors
 
 
 # --------------------------------------------------------------------------

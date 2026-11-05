@@ -152,6 +152,70 @@ def test_the_columns_are_in_the_row_and_on_the_page():
     assert "udp_receive_errors_per_s" in L.GROUPS["Network"]
 
 
+def test_the_pi_cpu_is_the_mean_of_its_cores(monkeypatch):
+    import json
+    body = [{"name": "cpu0", "usage": 90.0}, {"name": "cpu1", "usage": 70.0},
+            {"name": "x"}]
+    monkeypatch.setattr(blueos, "_get", lambda url, **kw: _answer(url, json.dumps(body)))
+    assert blueos.read_cpu_usage("192.168.2.2") == 80.0
+    monkeypatch.setattr(blueos, "_get", lambda url, **kw: _answer(url, "", ok=False))
+    assert blueos.read_cpu_usage("192.168.2.2") is None
+
+
+def test_throttling_now_is_true_false_or_unknown(monkeypatch):
+    import json
+
+    def with_occurring(occurring):
+        body = {"raspberry": {"model": "Pi 4",
+                              "events": {"list": [], "occurring": occurring}}}
+        return lambda url, **kw: _answer(url, json.dumps(body))
+
+    monkeypatch.setattr(blueos, "_get", with_occurring(["FrequencyCapping"]))
+    assert blueos.read_throttling("h") is True
+    monkeypatch.setattr(blueos, "_get", with_occurring([]))
+    assert blueos.read_throttling("h") is False
+    monkeypatch.setattr(blueos, "_get", lambda url, **kw: _answer(url, "", ok=False))
+    assert blueos.read_throttling("h") is None
+
+
+def test_stream_flags_say_count_udp_and_failures():
+    streams = {"read": True, "streams": [
+        {"endpoints": ["udp://192.168.2.1:5600"], "running": True},
+        {"endpoints": ["rtsp://192.168.2.2:8554/x"], "running": False}]}
+    assert blueos.stream_flags(streams) == (2, True, 1)
+    assert blueos.stream_flags({"read": False}) == (None, None, None)
+
+
+def test_a_mark_lands_in_the_next_row_only():
+    import threading
+    s = SimpleNamespace(_mark=None, _mark_lock=threading.Lock())
+    L.Sampler.mark(s, "video froze\n")
+    row = {}
+    L.Sampler._mark_column(s, row)
+    assert row["operator_mark"] == "video froze"
+    L.Sampler._mark_column(s, row)
+    assert row["operator_mark"] is None
+
+
+def test_a_mark_is_written_beside_the_logs_between_flights(tmp_path):
+    from rov_flight_ops import flightlog
+    rec = flightlog.FlightRecorder(flight_dir=tmp_path)
+    path = rec.mark("restarted BlueOS")
+    assert path == tmp_path / "logs" / "operator_marks.txt"
+    line = path.read_text(encoding="utf-8").splitlines()[-1]
+    assert line.endswith("\t-\trestarted BlueOS")
+    assert flightlog.FlightRecorder().mark("x") is None   # no folder, no file
+
+
+def test_the_new_readings_are_columns_and_the_charted_ones_have_bands():
+    for c in ("qgc_running", "qgc_cpu_pct", "pi_cpu_pct", "pi_disk_free_gb",
+              "video_stream_count", "video_stream_udp", "video_stream_errors",
+              "logger_cpu_pct", "logger_ram_mb", "operator_mark"):
+        assert c in L.COLUMNS, c
+    for c in ("pi_cpu_pct", "logger_cpu_pct"):
+        assert B.bands_for(c), c
+
+
 def test_a_held_drop_rate_is_bad_and_none_is_normal():
     def rows(values):
         return [{"elapsed_time_s": float(i), "udp_receive_errors_per_s": v}

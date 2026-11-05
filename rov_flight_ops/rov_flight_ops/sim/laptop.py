@@ -389,6 +389,17 @@ class LaptopModel:
             self._held["pi_throttling"] = "TRUE" if pi_now >= 80.0 else "FALSE"
         row["pi_soc_temp_c"] = self._held.get("pi_soc_temp_c", round(pi_now, 1))
         row["pi_throttling"] = self._held.get("pi_throttling", "FALSE")
+        if self._due("pi_health", flightlog.HEALTH_POLL_S, t) and not silent:
+            busy = 88.0 if pi_t >= 80.0 else 35.0
+            self._held["pi_cpu_pct"] = round(busy + rng.gauss(0, 2), 1)
+        row["pi_cpu_pct"] = self._held.get("pi_cpu_pct", 35.0)
+        row["pi_disk_free_gb"] = 18.4
+        row["video_stream_count"] = 1
+        row["video_stream_udp"] = "FALSE"
+        row["video_stream_errors"] = 0
+        row["qgc_running"] = "FALSE"
+        row["logger_cpu_pct"] = round(4.0 + rng.gauss(0, 0.4), 2)
+        row["logger_ram_mb"] = 310.0
 
         # -- tether ------------------------------------------------------------------------
         nic_low = "FALSE"

@@ -399,6 +399,11 @@ BANDS: dict[str, tuple[Band, ...]] = {
         "high", 45, 70, smooth_s=10,
         why="Of the whole CPU. Cockpit uses 15-37 % on L342-D; held above "
             "70 % a renderer is spinning."),),
+    "logger_cpu_pct": (Band(
+        "high", 15, 30, smooth_s=10,
+        why="This program's own share of the CPU, its captures included. It "
+            "is there to watch the flight; past 15 % it is competing with "
+            "Cockpit for a laptop that is already power-limited."),),
     "cockpit_ram_mb": (Band(
         "high", 2500, 4000, smooth_s=5,
         why="Cockpit holds 0.9-1.6 GB on a survey (most ever 2.1 GB). Electron "
@@ -455,6 +460,12 @@ BANDS: dict[str, tuple[Band, ...]] = {
         why="The Raspberry Pi in the vehicle: 55-65 °C on a survey. It slows "
             "its own processor at 80 °C, which starves video and telemetry. "
             "It sat above 70 °C for ten minutes at EBM_W on 17 September."),),
+    "pi_cpu_pct": (Band(
+        "high", 70, 90, smooth_s=10,
+        why="The vehicle's Pi, averaged over its cores. It encodes and serves "
+            "the video and runs ArduSub; Aaron Marburg saw it consistently "
+            "above 80 % on 7 October while video would not stay up. Not in "
+            "the September-October logs, so these thresholds are judgement."),),
     "system_uptime_s": (
         Band("high", 7 * DAY_S, None,
              why="A laptop that has not restarted in a week carries pending "

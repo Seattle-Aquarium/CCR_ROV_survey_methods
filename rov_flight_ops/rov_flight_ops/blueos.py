@@ -1037,6 +1037,71 @@ def clock_skew(host: str) -> float | None:
         return None
 
 
+#: Where the Pi's per-core load is published. linux2rest serves it on its own
+#: port; BlueOS's proxy serves the same service by name.
+CPU_PATHS = ("/system/cpu",)
+
+
+def read_cpu_usage(host: str, timeout: float = 2.5) -> float | None:
+    """The Pi's CPU use in percent, averaged over its cores, or None.
+
+    Added after Aaron Marburg saw the vehicle's CPU "consistently > 80 %" on
+    7 October and nothing recorded it. One small GET to a Rust service.
+    """
+    for url in (_base(host, LINUX2REST_PORT) + CPU_PATHS[0],
+                f"http://{host}/system-information/system/cpu"):
+        a = _get(url, timeout=timeout)
+        if not a.ok:
+            continue
+        try:
+            rows = json.loads(a.body)
+        except Exception:
+            continue
+        if isinstance(rows, dict):
+            rows = rows.get("cpus") or rows.get("cpu") or [rows]
+        usage = [float(r["usage"]) for r in rows
+                 if isinstance(r, dict) and isinstance(r.get("usage"), (int, float))]
+        if usage:
+            return sum(usage) / len(usage)
+    return None
+
+
+def read_throttling(host: str, timeout: float = 2.5) -> bool | None:
+    """Whether the Pi is throttling right now: True, False, or None if unknown.
+
+    The `occurring` half of the throttle log `read_platform` reads, without
+    the memory and model reads that come with it there.
+    """
+    for path in PLATFORM_PROBES:
+        a = _get(f"http://{host}{path}", timeout=timeout)
+        if not a.ok:
+            continue
+        try:
+            data = json.loads(a.body)
+        except Exception:
+            continue
+        body = data.get("Ok") if isinstance(data, dict) and isinstance(
+            data.get("Ok"), dict) else data
+        pi = body.get("raspberry") if isinstance(body, dict) else None
+        if isinstance(pi, dict):
+            events = pi.get("events") or {}
+            return bool(events.get("occurring"))
+    return None
+
+
+def stream_flags(streams: dict) -> tuple[int | None, bool | None, int | None]:
+    """(how many streams, whether any is pushed by UDP, how many are failing)
+    from a `read_video_streams` answer; all None when it did not read."""
+    if not streams or not streams.get("read"):
+        return None, None, None
+    summary = streams.get("streams") or []
+    udp = any(str(e).lower().startswith("udp")
+              for s in summary for e in (s.get("endpoints") or []))
+    failing = sum(1 for s in summary
+                  if s.get("error") or s.get("running") is False)
+    return len(summary), udp, failing
+
+
 def read_temperature(host: str) -> tuple[float | None, float | None]:
     """(now, highest seen) in Celsius for the Pi's SoC.
 
