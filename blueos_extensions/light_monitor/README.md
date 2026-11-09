@@ -32,10 +32,13 @@ rov_flight_ops (tab 5 "Lights", the Navigation row) <- /api/v1/state, /api/v1/re
 
 * **Reads, never writes, the controller.** A Ctrl-C byte on the controller's
   console stops its firmware and turns the lights off; nothing here sends a
-  byte. It prefers the controller's **telemetry port** (`…-if02`, see
-  `lighting/code/TELEMETRY.md`) and falls back to reading the **console**
-  read-only — which is what today's firmware, and Aaron's debug build, print
-  to. Both dialects are understood.
+  byte. It prefers the controller's **telemetry port** (`…-if02`) and falls
+  back to reading the **console** read-only (telemetry there carries an `@L `
+  prefix). It reads the firmware on Lutris (`lutris-lights 2.0.1-telemetry`,
+  which writes `"type"` / `"query"` / `"cmd"`) and the format's first draft in
+  `lighting/code/TELEMETRY.md` (`"k"` / `"q"` / `"c"`) alike;
+  `tests/test_firmware_contract.py` runs the firmware in this repository and
+  checks that every line it writes is read.
 * **Release port.** The page's *Release* button closes the controller's port
   for 5–60 minutes so `mpremote` can use it; it reopens on its own, so it
   cannot be forgotten released before a dive.
@@ -71,28 +74,46 @@ extraction they appear as `NVF.LT4_LVL` and so on.
 
 ## Installing it on a vehicle
 
-1. **Once, on GitHub**: add two repository secrets (Settings → Secrets and
-   variables → Actions): `DOCKER_USERNAME` (`zhrandell`) and `DOCKER_PASSWORD`
-   (a Docker Hub *access token*, from Docker Hub → Account settings →
-   Personal access tokens). The workflow
-   `.github/workflows/blueos-light-monitor.yml` then builds the image for the
-   Pi (arm/v7 and arm64) on GitHub's machines and pushes it:
-   * from any push that changes the extension or the controller code — tag
-     `zhrandell/blueos-light-monitor:<branch>`, e.g. `:zhr_light_telemetry`
-     (how to put a test build on the bench vehicle before merging) or `:main`;
-   * from a git tag `light-monitor-v0.1.0` — `:0.1.0` and `:latest`.
-2. **On the vehicle** (it needs internet once, to pull the image — BlueOS
-   installs extensions from Docker Hub): BlueOS → *Extensions* → *Installed* →
-   **+**:
-   * Extension identifier: `seattleaquarium.lightmonitor`
-   * Extension name: `Light Monitor`
-   * Docker image: `zhrandell/blueos-light-monitor`
-   * Docker tag: the tag from step 1
-   * Custom settings: copy the `permissions` label from the `Dockerfile`
-     (privileged, `/dev`, host networking, the data folder) — BlueOS usually
-     fills this in from the image.
-3. It starts on every boot. Its page is in the BlueOS menu, and at
-   `http://192.168.2.2:9420`.
+**The image.** `.github/workflows/blueos-light-monitor.yml` builds it for the
+Pi (arm/v7 and arm64) on GitHub's machines and pushes it to Docker Hub, using
+the repository secrets `DOCKER_USERNAME` and `DOCKER_PASSWORD` (a Docker Hub
+access token):
+
+* any push that changes the extension or the controller code → tag
+  `zhrandell/blueos-light-monitor:<branch>`, e.g. `:zhr_light_telemetry`;
+* a git tag `light-monitor-v0.2.0` → `:0.2.0` and `:latest`.
+
+**On the vehicle** — the Pi needs internet once, to pull the image:
+
+1. BlueOS → *Extensions* → *Installed* tab → the round **+** button, bottom
+   right.
+2. Click into the *Extension Identifier* box and paste this whole block
+   (Ctrl+V). BlueOS 1.4.6 fills in every field, permissions included; it does
+   **not** take the permissions from the image on its own, and without them
+   the extension cannot see the controller's USB port or mavlink2rest:
+
+   ```json
+   {
+     "identifier": "seattleaquarium.lightmonitor",
+     "name": "Light Monitor",
+     "docker": "zhrandell/blueos-light-monitor",
+     "tag": "zhr_light_telemetry",
+     "permissions": {
+       "HostConfig": {
+         "Privileged": true,
+         "NetworkMode": "host",
+         "Binds": ["/dev:/dev", "/usr/blueos/userdata/light_monitor:/data"]
+       }
+     }
+   }
+   ```
+
+3. **Create**, and wait for the pull to finish (about 50 MB).
+4. It starts on every boot. Its page is *Light Monitor* in the BlueOS menu,
+   and `http://192.168.2.2:9420`.
+
+To update after a new push to the same branch, open the extension's card on
+*Installed*, **Edit**, change nothing, and save — BlueOS pulls the tag again.
 
 Works the same on BlueOS 1.4.x and 1.5.x: it uses mavlink2rest on port 6040
 (`/mavlink` and `/v1/mavlink` paths both tried) and File Browser's
@@ -146,7 +167,12 @@ Written down rather than hidden — see also `lighting/code/TELEMETRY.md`:
 * **Light positions**: 1 front left, 2 rear left, 3 rear right, 4 front right,
   and RS-485 address *n* = light *n*. (Taken as "lower right" = rear right.)
 * **The controller's USB names** contain "MicroPython" (rp2 builds report
-  that manufacturer); the telemetry port is interface 2.
+  that manufacturer, and the runtime USB device keeps the built-in strings):
+  `/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_<serial>-if00` (console)
+  and `…-if02` (telemetry).
+* **`set` lines say `ok: 0`** on the Lutris firmware. A light acknowledges a
+  write with a bare CR LF (DeepSea's spec, section 5), which the firmware
+  reads as no answer. The level each light reports to `LOUT?` is what counts.
 * **mavlink2rest accepts posts** from an extension at `127.0.0.1:6040` with
   host networking on both BlueOS releases, and BlueOS 1.4's tlog keeps
   them — mavlink-router's source says it accepts broadcast messages from any

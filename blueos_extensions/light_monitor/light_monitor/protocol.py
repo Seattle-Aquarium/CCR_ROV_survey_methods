@@ -4,31 +4,48 @@ Reading what the light controller sends.
 Two dialects arrive on the controller's serial ports, and both are read:
 
 **ccr.lights/1** -- one JSON object per line, from the telemetry firmware in
-`lighting/code/src` (documented in `lighting/code/TELEMETRY.md`). On the
-second USB port every line is one of these; on the console they carry an
-"@L " prefix to set them apart from anything else printed there.
+`lighting/code/src`. On the second USB port every line is one of these; on
+the console they carry an "@L " prefix to set them apart from anything else
+printed there. The firmware on Lutris (`lutris-lights 2.0.1-telemetry`,
+CCR_ROV_survey_methods#54, November 2026) names a line's kind in ``"type"``
+and sends each light's answer as a ``"query"`` line with the question in
+``"cmd"``::
 
-**Aaron Marburg's debug build** -- the text the controller printed while the
-telemetry was being worked out (CCR_development#50, 13 October 2026)::
+    {"id": 2, "cmd": "lout", "ok": 1, "rtt": 31, "raw": "87", "type": "query", "n": 812, "ms": 40211}
+
+The format's first draft (`lighting/code/TELEMETRY.md`) used ``"k"``,
+``"q"`` and ``"c"`` for the same three things. Both are read, and every
+record is turned into the draft's names here -- ``k``, ``q``, ``c`` -- so
+the rest of the extension, and recordings made in either dialect, read the
+same. (``"cmd"`` keeps its own meaning, the commanded level, on ``ctl``
+lines; only a query's ``cmd`` is the question.)
+
+**Plain console text** -- what the controller prints for people. The Lutris
+firmware prints a status line every two seconds::
+
+    PWM: 1523 us | Scaled PWM: 0.54 | Lout: 87
+    PWM: NO SIGNAL | Lout: 0
+
+and Aaron Marburg's debug build printed (CCR_development#50, 13 October 2026)::
 
     PWM: 1109 us | Level: 0%
     1609790283245552000   1: Stat:     93.7hr  112  87.0C  0.0C  24.0C  20.6C  0%  0x0000
     1609790283268117000   1: Level:    0
-    1609790283293502000   1: Temp:     0.0
-    1609790283315646000   1: Humidity: 0.0
 
-It is translated into the same records, marked ``legacy``, so the extension
-is useful against the controller as it is today -- reading the console,
-read-only -- before the telemetry firmware is installed.
+These are translated into the same records, marked ``legacy``, so the
+extension still says something useful when it can only read the console of a
+controller without telemetry.
 
 Anything else is kept verbatim in the recording and otherwise ignored.
 
-**STAT? is parsed by its own header.** DeepSea's specification lists five
-columns (RunTime, PrCycle, MaxTemp, Humid, FLAGS); Lutris's LSL-2075s answer
-with eight -- run time, power-on count, maximum temperature, three
-temperatures, humidity and flags, per Aaron. When the header row is present
-its names are used; when it is not (the debug build drops it) the position
-is used, eight columns or five.
+**STAT? is parsed by its header when every name in it is known.** DeepSea's
+specification lists five tab-separated columns (RunTime, PrCycle, MaxTemp,
+Humid, FLAGS); Lutris's LSL-2075s answer with eight -- run time, power-on
+count, maximum temperature, three temperatures, humidity and flags, per
+Aaron, which the units in each value confirm (hr, a count, four in C, %, a
+hex code). A header whose names are all recognised names the columns; any
+other header is kept for display, and the columns are read by position,
+eight or five.
 """
 
 from __future__ import annotations
@@ -39,11 +56,31 @@ import re
 PROTOCOL = "ccr.lights/1"
 CONSOLE_PREFIX = "@L "
 
-_PWM = re.compile(r"^PWM:\s*(?:(\d+)\s*us|NO SIGNAL)\s*\|\s*Level:\s*(-?\d+)\s*%")
+#: The status line, in both the Lutris firmware's form ("| Scaled PWM: 0.54 |
+#: Lout: 87") and the debug build's ("| Level: 0%").
+_PWM = re.compile(r"^PWM:\s*(?:(\d+)\s*us|NO SIGNAL)\s*\|"
+                  r"(?:\s*Scaled PWM:\s*[-+0-9.eE]+\s*\|)?"
+                  r"\s*(?:Level|Lout):\s*(-?\d+)\s*%?")
 _LEGACY = re.compile(r"^\s*(?:\d+\s+)?(\d+):\s*(Stat|Level|Temp|Humidity|Info|Standby):\s*(.*)$",
                      re.IGNORECASE)
 _LEGACY_CMD = {"stat": "stat", "level": "lout", "temp": "temp", "humidity": "rhum",
                "info": "info", "standby": "stby"}
+
+#: The firmware's names for a kind of line -> the names used in here.
+_KINDS = {"query": "q"}
+
+
+def _normalise(rec: dict) -> dict | None:
+    """A ccr.lights/1 record in either dialect, with the draft's names (k, q, c)."""
+    kind = rec.get("type", rec.get("k"))
+    if not isinstance(kind, str) or not kind:
+        return None
+    kind = _KINDS.get(kind, kind)
+    out = dict(rec)
+    out["k"] = kind
+    if kind == "q" and "c" not in out and "cmd" in out:
+        out["c"] = out["cmd"]
+    return out
 
 
 def parse_line(text: str) -> dict | None:
@@ -61,7 +98,7 @@ def parse_line(text: str) -> dict | None:
             rec = json.loads(stripped)
         except ValueError:
             return None
-        return rec if isinstance(rec, dict) and "k" in rec else None
+        return _normalise(rec) if isinstance(rec, dict) else None
     m = _PWM.match(stripped)
     if m:
         pwm = int(m.group(1)) if m.group(1) else 0
@@ -139,21 +176,28 @@ def parse_stat(raw: str | None) -> dict:
         return {}
     header = None
     values = rows[-1].split()
-    if len(rows) >= 2 and not number(rows[-2].split()[0]) is not None:
+    if len(rows) >= 2 and number(rows[-2].split()[0]) is None:
         header = rows[-2].split()
-    if header is None and number(values[0]) is None:
+    if number(values[0]) is None:
         return {}                                   # a header with no values
-    out: dict = {"columns": [], "by": "header" if header else "position"}
-    if header and len(header) == len(values):
-        names = [_STAT_NAMES.get(_key(h), _key(h) or f"col{i}") for i, h in enumerate(header)]
-        out["columns"] = [[h, v] for h, v in zip(header, values, strict=True)]
-    else:
-        names = list(_STAT_8 if len(values) >= 8 else _STAT_5 if len(values) == 5
-                     else [f"col{i}" for i in range(len(values))])
-        out["columns"] = [[n, v] for n, v in zip(names, values, strict=False)]
-        out["by"] = "position"
-    # strict=False: the five-column names may be fewer than a longer row's values.
-    for name, text in zip(names, values, strict=False):
+    if header is not None and len(header) != len(values):
+        header = None                               # not this row's header
+    names = None
+    by = "position"
+    if header:
+        mapped = [_STAT_NAMES.get(_key(h)) for h in header]
+        if all(mapped) and len(set(mapped)) == len(mapped):
+            names, by = mapped, "header"
+    if names is None:
+        if len(values) >= 8:
+            names = list(_STAT_8) + [f"col{i}" for i in range(8, len(values))]
+        elif len(values) == 5:
+            names = list(_STAT_5)
+        else:
+            names = [f"col{i}" for i in range(len(values))]
+    labels = header or names
+    out: dict = {"columns": [[h, v] for h, v in zip(labels, values, strict=True)], "by": by}
+    for name, text in zip(names, values, strict=True):
         if name == "flags":
             n = number(text)
             out["flags"] = int(n) if n is not None else None

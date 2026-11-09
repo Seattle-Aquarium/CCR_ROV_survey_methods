@@ -122,6 +122,25 @@ def test_an_extension_restart_starts_the_ids_again(tmp_path):
     c.shutdown()
 
 
+def test_a_restart_is_seen_even_after_the_new_ids_pass_the_old(tmp_path):
+    """The extension restarted while the tether was down and has already
+    recorded more than the last id copied: its start time gives it away."""
+    first, second = state_doc(), state_doc()
+    first["extension"] = {"started": 1000.0}
+    second["extension"] = {"started": 2000.0}
+    pages = [first, {"records": [{"id": 50, "line": "a"}], "newest": 50}, second,
+             {"records": [{"id": 1, "line": "b"}, {"id": 2, "line": "c"}], "newest": 80}]
+    c = LightsClient("rov", fetch=lambda url: pages.pop(0))
+    c.use_folder(tmp_path)
+    c.poll_state()
+    c.poll_records()
+    c.poll_state()
+    assert c._last_id == 0 and "restarted" in c.snapshot()[1].notes[-1]
+    c.poll_records()
+    assert c._last_id == 2 and c.snapshot()[1].copied == 3
+    c.shutdown()
+
+
 # --------------------------------------------------------------------------
 #  tab 4 and the Navigation row
 # --------------------------------------------------------------------------

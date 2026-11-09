@@ -13,9 +13,11 @@ Two loops on one thread:
   whose Pi files are never downloaded still has them -- the same insurance
   the DVL capture gives. Records missed across a tether drop are fetched when
   it comes back, as long as the extension still holds them (its last 20,000
-  records, roughly half an hour); older ones are only on the Pi, and the gap
-  is written into the copy as a ``"x": "gap"`` record so it cannot pass for
-  continuity.
+  records -- about fifteen minutes at the 20-odd lines a second the firmware
+  on Lutris sends); older ones are only on the Pi, and the gap is written into
+  the copy as a ``"x": "gap"`` record so it cannot pass for continuity. When
+  the extension restarts (its ``started`` time changes) its record ids begin
+  again, and the copy carries on from its first record.
 
 **Read-only towards the vehicle.** GETs only. Releasing the controller's port
 for mpremote is the extension page's job, not this program's.
@@ -87,6 +89,10 @@ class LightsClient:
         self.folder: Path | None = None
         self._copy = None
         self._last_id = 0
+        #: The extension's start time, from its state document: when it
+        #: changes the extension restarted and its record ids began again --
+        #: even if it has already passed the last id copied.
+        self._started: float | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -105,6 +111,7 @@ class LightsClient:
             self.status.url = self.base
             self._state = None
             self._last_id = 0                       # a different extension
+            self._started = None
 
     def use_folder(self, folder: Path | None) -> None:
         """Copy the recording into `folder` from now on (None: stop copying)."""
@@ -156,7 +163,13 @@ class LightsClient:
             state = self._fetch(url)
             if not isinstance(state, dict) or "lights" not in state:
                 raise ValueError("not a Light Monitor state document")
+            started = (state.get("extension") or {}).get("started")
             with self._lock:
+                if isinstance(started, (int, float)):
+                    if self._started is not None and started != self._started and self._last_id:
+                        self._note("the extension restarted; its record ids started again")
+                        self._last_id = 0
+                    self._started = started
                 self._state = state
                 self.status.connected = True
                 self.status.error = ""

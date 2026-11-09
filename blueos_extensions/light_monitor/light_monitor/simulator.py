@@ -1,5 +1,9 @@
 """
-A pretend light controller, speaking ccr.lights/1, for working without Lutris.
+A pretend light controller, speaking ccr.lights/1 exactly as the firmware on
+Lutris writes it (`lutris-lights 2.0.1-telemetry`: ``"type"``, ``"query"``
+lines with the question in ``"cmd"``, answers stripped of their line ends, and
+``"set"`` lines that say ``ok: 0`` because a light acknowledges a write with a
+bare CR LF), for working without Lutris.
 
 `python -m light_monitor --simulate` runs the extension against this instead
 of a USB port: the page, the recording, the MAVLink publishing (pointed at a
@@ -59,7 +63,7 @@ class SimulatedController:
     def _emit(self, kind: str, **fields) -> None:
         self.n += 1
         ms = int((self.clock() - self.t0) * 1000 * self.speed)
-        self.on_line(json.dumps({"k": kind, "n": self.n, "ms": ms, **fields}),
+        self.on_line(json.dumps({**fields, "type": kind, "n": self.n, "ms": ms}),
                      "simulator", self.clock())
 
     def hello(self) -> None:
@@ -69,7 +73,7 @@ class SimulatedController:
                    power=([{"addr": 64, "chip": "INA238", "shunt_ohms": 0.002}]
                           if self.monitor else []),
                    power_notes=[] if self.monitor else ["no power monitor on I2C"],
-                   poll=True, resync=False, deadband=5)
+                   poll=True, resync=False, deadband=35)
 
     # -- the script ------------------------------------------------------
 
@@ -84,24 +88,25 @@ class SimulatedController:
 
     def _answer(self, addr: int, cmd: str, now: float) -> tuple[int, str, str, int]:
         if now < self.dark_until.get(addr, 0.0):
-            return 0, "", "timeout", 150
+            # The firmware waits out the UART's two-second timeout.
+            return 0, "", "timeout", 2000
         rtt = self.rng.randint(18, 40)
         if cmd == "lout":
-            return 1, f"{self.level}\r\n", "", rtt
+            return 1, f"{self.level}", "", rtt
         if cmd == "stat":
             t2 = 22.0 + self.level / 25 + self.rng.random() * 0.4
             t3 = 20.0 + self.level / 40 + self.rng.random() * 0.4
             raw = ("RunTime\tPrCycle\tMaxTemp\tTemp1\tTemp2\tTemp3\tHumid\tFLAGS\r\n"
                    f"{RUNTIME_H[addr]:.1f}hr\t{self.power_on[addr]}\t87.0C\t0.0C\t"
-                   f"{t2:.1f}C\t{t3:.1f}C\t0%\t0x0000\r\n\r\n")
+                   f"{t2:.1f}C\t{t3:.1f}C\t0%\t0x0000")
             return 1, raw, "", rtt + 70
         if cmd in ("temp", "rhum"):
-            return 1, "0.0\r\n", "", rtt
+            return 1, "0.0", "", rtt
         if cmd == "stby":
-            return 1, "0\r\n", "", rtt
+            return 1, "0", "", rtt
         if cmd == "info":
-            return 1, f"{addr:03d},LSL-2075,{SERIALS[addr]},0A,1.1.0,DW00,MED,SER\r\n", "", rtt
-        return 0, "?\r\n", "nak", rtt
+            return 1, f"{addr:03d},LSL-2075,{SERIALS[addr]},0A,1.1.0,DW00,MED,SER", "", rtt
+        return 0, "?", "nak", rtt
 
     def _refill(self) -> None:
         sched = (("lout", 1), ("stat", 3), ("stby", 10), ("temp", 60), ("rhum", 60),
@@ -118,7 +123,7 @@ class SimulatedController:
         if abs(tgt - self.level) >= 5:
             self.level = tgt
             for addr in (1, 2, 3, 4):
-                self._emit("set", id=addr, lvl=tgt, why="pwm")
+                self._emit("set", id=addr, lvl=tgt, ok=0, rtt=self.rng.randint(20, 30))
         # light 4 browns out now and then when driven hard
         if self.level >= 90 and now >= self.dark_until.get(4, 0.0) and self.rng.random() < 0.004:
             self.dark_until[4] = now + 3.0
@@ -127,12 +132,12 @@ class SimulatedController:
             self._refill()
         addr, cmd = self._queue.pop(0)
         ok, raw, err, rtt = self._answer(addr, cmd, now)
-        fields = {"id": addr, "c": cmd, "ok": ok, "rtt": rtt}
+        fields = {"id": addr, "cmd": cmd, "ok": ok, "rtt": rtt}
         if raw:
             fields["raw"] = raw
         if err:
             fields["err"] = err
-        self._emit("q", **fields)
+        self._emit("query", **fields)
 
     def run(self) -> None:
         self.hello()
@@ -155,7 +160,7 @@ class SimulatedController:
                 if last_hello:
                     self.hello()
                 last_hello = now
-            if now - last_stats >= 10.0:
+            if now - last_stats >= 1.0:
                 self._emit("stats", sent=self.n, drop=0, unread=0, asked=self.n, answered=self.n,
                            failed=0, loop_max=180, mem=120000, passes=self._pass)
                 last_stats = now

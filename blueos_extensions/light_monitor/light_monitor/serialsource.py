@@ -11,12 +11,14 @@ The by-id names are used rather than /dev/ttyACM0 and 1, because ACM numbers
 are handed out in the order devices appear and change when one is unplugged.
 
 **Which port.** `auto` (the default) reads the telemetry port when there is
-one, and the console otherwise -- the console is what today's firmware, and
-Aaron's debug build, print to. Reading the console is harmless to the
-controller (nothing is ever written to it), but it does compete with
-`mpremote` for the bytes the controller sends; hence **release**, which closes
-the port for a while so mpremote can have it, and reopens it on its own when
-the time is up, so it cannot be forgotten in the released state before a dive.
+one, and the console otherwise -- a controller that could not start its
+telemetry port (no usb-device-cdc package, or `datalink.off` / `datalink.failed`
+on it) prints its telemetry there, each line prefixed "@L ". Reading the
+console is harmless to the controller (nothing is ever written to it), but it
+does compete with `mpremote` for the bytes the controller sends; hence
+**release**, which closes the port for a while so mpremote can have it, and
+reopens it on its own when the time is up, so it cannot be forgotten in the
+released state before a dive.
 
 **Never writes.** No byte is sent to either port, ever: a Ctrl-C (0x03) on the
 console stops main.py, which turns all four lights off. The port is opened

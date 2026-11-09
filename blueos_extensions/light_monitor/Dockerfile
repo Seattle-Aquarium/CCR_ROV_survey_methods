@@ -33,7 +33,7 @@ COPY light_monitor /app/light_monitor
 #   the data bind           the recording, on the Pi, where BlueOS's File
 #                           Browser shows it (userdata/light_monitor) and where
 #                           it survives updates of the extension.
-LABEL version="0.1.0"
+LABEL version="0.2.0"
 LABEL permissions='{\
   "HostConfig": {\
     "Privileged": true,\

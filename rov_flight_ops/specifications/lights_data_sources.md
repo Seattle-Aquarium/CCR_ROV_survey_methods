@@ -14,7 +14,10 @@ lights --RS-485--> controller (QT Py / Pico) --USB--> BlueOS Light Monitor (Pi)
                                                        '-- MAVLink ---------> tlog / mcap / Cockpit / QGC
 ```
 
-The controller's format is [`ccr.lights/1`](../../lighting/code/TELEMETRY.md).
+The controller's format is [`ccr.lights/1`](../../lighting/code/TELEMETRY.md);
+the firmware on Lutris since 8 November 2026 names each line's kind in `type`
+and sends the lights' answers as `query` lines (the draft's `k` and `q`), and
+the extension reads both.
 The extension turns it into one state document (`light_monitor.state/1`);
 this program draws that document and nothing else, so it cannot disagree with
 the extension's own page.

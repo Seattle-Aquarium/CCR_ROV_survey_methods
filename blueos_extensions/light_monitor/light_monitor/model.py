@@ -24,8 +24,12 @@ mismatch           replies with a level other than the one it was told: a
                    command lost on the bus, or a restart into a stale level
 =================  =========================================================
 
-Thresholds are deliberate: one missed answer on a shared bus is noise, three
-in a row (about three seconds) is a light that has stopped answering.
+Thresholds are deliberate: one missed answer on a shared bus may be noise,
+three in a row is a light that has stopped answering. On the firmware on
+Lutris a silent light costs the UART's two-second timeout for every question
+(`lightbus.py`), so three in a row takes six seconds or more; a flicker of a
+second or two shows as one missed answer -- an info event -- and, if the
+light lost power, as its power-on count going up.
 """
 
 from __future__ import annotations
@@ -149,6 +153,9 @@ class Model:
         self.controller_restarts = 0
         self._quiet = False
         self.legacy = False
+        #: A ccr.lights/1 record has been read: plain status text printed
+        #: beside it on the console says nothing the record did not.
+        self._telemetry_seen = False
         # power
         self.monitors: dict[str, dict] = {}
         self.vehicle: dict | None = None
@@ -213,10 +220,16 @@ class Model:
         with self._lock:
             now = rx if rx is not None else self._clock()
             out: list[Event] = []
+            if rec.get("legacy"):
+                if self._telemetry_seen:
+                    # The firmware's two-second status line on the console,
+                    # printed beside its @L telemetry: nothing new.
+                    return out
+                self.legacy = True
+            else:
+                self._telemetry_seen = True
             self._sequence(rec, now, out)
             kind = rec.get("k")
-            if rec.get("legacy"):
-                self.legacy = True
             if kind == "q":
                 self._answer(rec, now, out)
             elif kind == "ctl":
@@ -290,9 +303,21 @@ class Model:
         lt.asked += 1
         cmd = rec.get("c")
         raw = rec.get("raw")
-        if not rec.get("ok"):
+        # A NAK ("?") is an answer: the light is powered and listening, it
+        # just does not do what was asked (DeepSea's spec, section 5). Only
+        # silence and garbage count towards "not answering".
+        nak = not rec.get("ok") and str(rec.get("err") or "") == "nak"
+        if not rec.get("ok") and not nak:
             lt.fails_in_row += 1
             lt.last_err = str(rec.get("err") or "no answer")
+            if lt.fails_in_row == 1 and lt.answering:
+                # A flicker of a second or two is one missed answer, never
+                # three (see NOT_ANSWERING_AFTER): say it, quietly.
+                e = self._event(now, "info", f"{self._label(lt).capitalize()} missed an "
+                                f"answer ({lt.last_err})",
+                                f"light {lt.id} {lt.short} missed an answer", f"miss{lt.id}")
+                if e:
+                    out.append(e)
             if lt.fails_in_row >= NOT_ANSWERING_AFTER and lt.answering is not False:
                 lt.answering = False
                 e = self._event(now, "warn", f"{self._label(lt).capitalize()} stopped "
@@ -314,6 +339,8 @@ class Model:
         lt.down_said = False
         lt.answering = True
         lt.last_ok = now
+        if nak:
+            return                       # alive, but no value to read
         if cmd == "lout":
             self._level(lt, first_number(raw), now, out)
         elif cmd == "stat":

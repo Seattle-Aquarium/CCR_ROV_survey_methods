@@ -165,9 +165,9 @@ class SimLights:
                      "lines_per_s": 0.0 if line_age > 2 else 12.1,
                      "legacy_firmware": False},
             "controller": {
-                "fw": "ccr.lights/1 0.3.0", "board": "qtpy-rp2040",
-                "machine": "Adafruit QT Py RP2040", "micropython": "1.24.1",
-                "port_mode": "cdc", "datalink_note": "", "reset_cause": "power-on",
+                "fw": "lutris-lights 2.0.1-telemetry", "board": "qtpy",
+                "machine": "Adafruit QT Py RP2040 with RP2040", "micropython": "1.27.0",
+                "port_mode": "data", "datalink_note": "", "reset_cause": "power-on",
                 "poll": 1.0, "resync": 30, "power_notes": "no monitor fitted",
                 "uptime_s": round(t - self.started + 1800.0, 1), "restarts": 0,
                 "pwm_us": pwm, "signal": signal, "commanded_pct": commanded,

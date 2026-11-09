@@ -91,6 +91,34 @@ def test_telemetry_lines_with_or_without_the_console_prefix():
     assert protocol.parse_line('{"not": "ours"}') is None
 
 
+def test_the_lutris_firmwares_lines_become_the_same_records():
+    # As lutris-lights 2.0.1-telemetry writes them (CCR_ROV_survey_methods#54).
+    q = protocol.parse_line('{"id": 2, "cmd": "lout", "ok": 1, "rtt": 31, "raw": "87", '
+                            '"type": "query", "n": 812, "ms": 40211}')
+    assert (q["k"], q["c"], q["id"], q["raw"]) == ("q", "lout", 2, "87")
+    c = protocol.parse_line('@L {"pwm": 1580, "age": 3, "sig": 1, "cmd": 87, "tgt": 87, '
+                            '"rej": 0, "type": "ctl", "n": 9, "ms": 500}')
+    assert (c["k"], c["cmd"], "c" in c) == ("ctl", 87, False)   # ctl's cmd is a level
+    s = protocol.parse_line('{"id": 1, "lvl": 87, "ok": 0, "rtt": 30, "type": "set", '
+                            '"n": 10, "ms": 520}')
+    assert (s["k"], s["lvl"]) == ("set", 87)
+    assert protocol.parse_line('{"id": 1, "n": 3}') is None      # no kind at all
+
+
+def test_the_lutris_firmwares_status_line_is_read():
+    assert protocol.parse_line("PWM: 1523 us | Scaled PWM: 0.54 | Lout: 87") == {
+        "k": "ctl", "pwm": 1523, "sig": 1, "cmd": 87, "legacy": 1}
+    assert protocol.parse_line("PWM: NO SIGNAL | Lout: 0")["sig"] == 0
+
+
+def test_a_stat_header_with_unknown_names_falls_back_to_position():
+    st = protocol.parse_stat("RunTime\tPwrCnt\tMaxT\tT1\tT2\tT3\tRH\tFLAGS\r\n"
+                             "93.7hr\t112\t87.0C\t0.0C\t24.0C\t20.6C\t0%\t0x0000")
+    assert st["by"] == "position"
+    assert (st["power_cycles"], st["temp2_c"], st["flags"]) == (112, 24.0, 0)
+    assert st["columns"][1] == ["PwrCnt", "112"]                 # the header, shown
+
+
 def test_info_is_split_into_its_fields():
     info = protocol.parse_info("004,LSL-2075,12-049-7628,0A,1.1.0,DW00,MED,SER")
     assert (info["model"], info["serial"], info["firmware"]) == ("LSL-2075", "12-049-7628", "1.1.0")
@@ -113,7 +141,8 @@ def test_not_answering_then_back_then_restarted():
     for _ in range(NOT_ANSWERING_AFTER):
         n += 1
         events += feed(m, "q", n, t, id=4, c="lout", ok=0, err="timeout")
-    assert [e.short for e in events] == ["light 4 FR not answering"]
+    assert [e.short for e in events] == ["light 4 FR missed an answer",
+                                         "light 4 FR not answering"]
     n += 1
     events = feed(m, "q", n, t + 3, id=4, c="lout", ok=1, raw="100\r\n")
     assert [e.short for e in events] == ["light 4 FR answering again"]
@@ -149,6 +178,26 @@ def test_a_level_mismatch_is_reported_at_the_threshold():
     assert [e.short for e in events] == ["light 2 at 0%, told 90%"]
     snap = m.snapshot(5.0)
     assert snap["lights"][1]["state"] == "mismatch"
+
+
+def test_a_nak_is_an_answer_not_a_light_gone_quiet():
+    """DeepSea's spec: "?" means the light heard and declined. Three in a row
+    (STBY?, TEMP?, RHUM? on the first pass) must not read as 'not answering'."""
+    m = Model(clock=lambda: 0.0)
+    feed(m, "q", 1, 0.0, id=3, c="lout", ok=1, raw="87")
+    events = []
+    for i, c in enumerate(("stby", "temp", "rhum", "info")):
+        events += feed(m, "q", 2 + i, 0.1 * i, id=3, c=c, ok=0, raw="?", err="nak")
+    assert events == []
+    lt = m.lights[3]
+    assert (lt.answering, lt.fails_in_row, lt.level) == (True, 0, 87.0)
+
+
+def test_console_status_text_beside_telemetry_changes_nothing():
+    m = Model(clock=lambda: 0.0)
+    feed(m, "ctl", 1, 0.0, pwm=1580, sig=1, cmd=87)
+    m.ingest(protocol.parse_line("PWM: 1100 us | Scaled PWM: 0.0 | Lout: 0"), rx=1.0)
+    assert m.ctl["cmd"] == 87 and not m.legacy
 
 
 def test_controller_restart_and_lost_lines_come_from_the_sequence():
