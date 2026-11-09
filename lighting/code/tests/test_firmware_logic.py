@@ -61,14 +61,20 @@ class ScriptedUART:
         return out
 
 
-STAT = (b"RunTime\tPrCycle\tMaxTemp\tTemp1\tTemp2\tTemp3\tHumid\tFLAGS\r\n"
-        b"92.9hr\t30\t87.0C\t0.0C\t24.0C\t21.1C\t0%\t0x0000\r\n\r\n")
+STAT = (
+    b"RunTime\tPrCycle\tMaxTemp\tTemp1\tTemp2\tTemp3\tHumid\tFLAGS\r\n"
+    b"92.9hr\t30\t87.0C\t0.0C\t24.0C\t21.1C\t0%\t0x0000\r\n\r\n"
+)
 
 
 def bus_for(replies, **kw) -> tuple[LightBus, ScriptedUART]:
     uart = ScriptedUART(replies, **kw)
-    return LightBus(uart, ticks_ms=CLOCK.ticks_ms, ticks_diff=CLOCK.ticks_diff,
-                    sleep_ms=CLOCK.sleep_ms), uart
+    return LightBus(
+        uart,
+        ticks_ms=CLOCK.ticks_ms,
+        ticks_diff=CLOCK.ticks_diff,
+        sleep_ms=CLOCK.sleep_ms,
+    ), uart
 
 
 # --------------------------------------------------------------------------
@@ -118,9 +124,14 @@ def test_an_echo_of_our_own_question_is_not_the_answer():
             n = super().write(data)
             self._pending = data + self._pending
             return n
+
     uart = Echoing({(1, "lout"): b"40\r\n"})
-    bus = LightBus(uart, ticks_ms=CLOCK.ticks_ms, ticks_diff=CLOCK.ticks_diff,
-                   sleep_ms=CLOCK.sleep_ms)
+    bus = LightBus(
+        uart,
+        ticks_ms=CLOCK.ticks_ms,
+        ticks_diff=CLOCK.ticks_diff,
+        sleep_ms=CLOCK.sleep_ms,
+    )
     ok, raw, _, _ = bus.query(1, "lout")
     assert ok and raw.strip() == "40"
 
@@ -138,14 +149,20 @@ def test_the_first_pass_asks_everything_then_the_schedule_thins_out():
             asked.append((addr, cmd))
             return 1, "0\r\n", "", 5
 
-    p = Poller(Bus(), [1, 2], lambda *a, **k: None, gap_ms=0,
-               ticks_ms=CLOCK.ticks_ms, ticks_diff=CLOCK.ticks_diff)
+    p = Poller(
+        Bus(),
+        [1, 2],
+        lambda *a, **k: None,
+        gap_ms=0,
+        ticks_ms=CLOCK.ticks_ms,
+        ticks_diff=CLOCK.ticks_diff,
+    )
     while p.passes < 2 or p.queue:
         p.step()
     first = asked[:12]
     assert {c for _a, c in first} == {"lout", "stat", "stby", "temp", "rhum", "info"}
     second = asked[12:]
-    assert {c for _a, c in second} == {"lout"}       # pass 1: lout only
+    assert {c for _a, c in second} == {"lout"}  # pass 1: lout only
 
 
 def test_ask_now_jumps_the_queue():
@@ -156,8 +173,14 @@ def test_ask_now_jumps_the_queue():
             asked.append((addr, cmd))
             return 1, "", "", 1
 
-    p = Poller(Bus(), [1, 2, 3, 4], lambda *a, **k: None, gap_ms=0,
-               ticks_ms=CLOCK.ticks_ms, ticks_diff=CLOCK.ticks_diff)
+    p = Poller(
+        Bus(),
+        [1, 2, 3, 4],
+        lambda *a, **k: None,
+        gap_ms=0,
+        ticks_ms=CLOCK.ticks_ms,
+        ticks_diff=CLOCK.ticks_diff,
+    )
     p.step()
     p.ask_now(4, "lout")
     p.step()
@@ -168,8 +191,15 @@ def test_the_poller_waits_its_gap_between_questions():
     class Bus:
         def query(self, addr, cmd):
             return 1, "", "", 1
-    p = Poller(Bus(), [1], lambda *a, **k: None, gap_ms=25,
-               ticks_ms=CLOCK.ticks_ms, ticks_diff=CLOCK.ticks_diff)
+
+    p = Poller(
+        Bus(),
+        [1],
+        lambda *a, **k: None,
+        gap_ms=25,
+        ticks_ms=CLOCK.ticks_ms,
+        ticks_diff=CLOCK.ticks_diff,
+    )
     assert p.step() is True
     assert p.step() is False
     CLOCK.now += 25
@@ -183,13 +213,14 @@ def test_the_poller_waits_its_gap_between_questions():
 
 def test_lines_are_numbered_json_with_kind_and_uptime():
     out = []
-    sink = telemetry.Sink(printer=out.append,
-                          clock=telemetry.Clock(CLOCK.ticks_ms, CLOCK.ticks_diff))
+    sink = telemetry.Sink(
+        printer=out.append, clock=telemetry.Clock(CLOCK.ticks_ms, CLOCK.ticks_diff)
+    )
     sink.emit("ctl", pwm=1820, cmd=90)
     CLOCK.now += 500
     sink.emit("q", id=4, c="lout", ok=1, raw="90\r\n")
     assert all(line.startswith(telemetry.CONSOLE_PREFIX) for line in out)
-    a, b = (json.loads(line[len(telemetry.CONSOLE_PREFIX):]) for line in out)
+    a, b = (json.loads(line[len(telemetry.CONSOLE_PREFIX) :]) for line in out)
     assert (a["k"], a["n"], b["n"]) == ("ctl", 1, 2)
     assert b["ms"] - a["ms"] == 500
     assert b["raw"] == "90\r\n"
@@ -212,7 +243,9 @@ class StalledPort:
 
 def test_a_stalled_reader_costs_lines_not_time():
     port = StalledPort(room=60)
-    sink = telemetry.Sink(port=port, clock=telemetry.Clock(CLOCK.ticks_ms, CLOCK.ticks_diff))
+    sink = telemetry.Sink(
+        port=port, clock=telemetry.Clock(CLOCK.ticks_ms, CLOCK.ticks_diff)
+    )
     for _ in range(5):
         sink.emit("ctl", pwm=1500, cmd=50)
     assert sink.dropped >= 4 and sink.sent <= 1
@@ -220,7 +253,9 @@ def test_a_stalled_reader_costs_lines_not_time():
 
 def test_after_a_partial_line_the_next_starts_on_a_new_line():
     port = StalledPort(room=10)
-    sink = telemetry.Sink(port=port, clock=telemetry.Clock(CLOCK.ticks_ms, CLOCK.ticks_diff))
+    sink = telemetry.Sink(
+        port=port, clock=telemetry.Clock(CLOCK.ticks_ms, CLOCK.ticks_diff)
+    )
     sink.emit("ctl", pwm=1500)
     port.room = 10_000
     sink.emit("ctl", pwm=1600)
@@ -232,7 +267,10 @@ def test_nobody_listening_is_counted_separately():
     class Closed(StalledPort):
         def is_open(self):
             return False
-    sink = telemetry.Sink(port=Closed(100), clock=telemetry.Clock(CLOCK.ticks_ms, CLOCK.ticks_diff))
+
+    sink = telemetry.Sink(
+        port=Closed(100), clock=telemetry.Clock(CLOCK.ticks_ms, CLOCK.ticks_diff)
+    )
     sink.emit("ctl")
     assert sink.unread == 1 and sink.mode == "data"
 
@@ -242,12 +280,15 @@ def test_nobody_listening_is_counted_separately():
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name, expected", [
-    ("Adafruit QT Py RP2040 with RP2040", "qtpy"),
-    ("Raspberry Pi Pico 2 with RP2350", "pico"),
-    ("Raspberry Pi Pico with RP2040", "pico"),
-    ("", "pico"),
-])
+@pytest.mark.parametrize(
+    "name, expected",
+    [
+        ("Adafruit QT Py RP2040 with RP2040", "qtpy"),
+        ("Raspberry Pi Pico 2 with RP2350", "pico"),
+        ("Raspberry Pi Pico with RP2040", "pico"),
+        ("", "pico"),
+    ],
+)
 def test_the_board_is_recognised_from_its_name(name, expected):
     assert board.detect(name)["name"] == expected
 
@@ -283,13 +324,28 @@ class FakeI2C:
 
 
 def ina238(vbus_v=24.0, temp_c=30.0):
-    return {0x3E: 0x5449, 0x3F: 0x2381, 0x05: int(vbus_v / 3.125e-3),
-            0x04: 100, 0x06: int(temp_c / 0.125) << 4, 0x07: 1000, 0x08: 5000, 0x0B: 1 << 3}
+    return {
+        0x3E: 0x5449,
+        0x3F: 0x2381,
+        0x05: int(vbus_v / 3.125e-3),
+        0x04: 100,
+        0x06: int(temp_c / 0.125) << 4,
+        0x07: 1000,
+        0x08: 5000,
+        0x0B: 1 << 3,
+    }
 
 
 def ina226(vbus_v=13.2):
-    return {0xFE: 0x5449, 0xFF: 0x2260, 0x02: int(vbus_v / 1.25e-3), 0x01: 400,
-            0x03: 200, 0x04: 1500, 0x06: 1 << 4}
+    return {
+        0xFE: 0x5449,
+        0xFF: 0x2260,
+        0x02: int(vbus_v / 1.25e-3),
+        0x01: 400,
+        0x03: 200,
+        0x04: 1500,
+        0x06: 1 << 4,
+    }
 
 
 def test_chips_are_identified_by_their_id_registers():
@@ -302,7 +358,7 @@ def test_chips_are_identified_by_their_id_registers():
 def test_without_a_shunt_value_only_voltage_is_reported():
     i2c = FakeI2C({0x40: ina238(vbus_v=24.1)})
     mons, notes = ina2xx.find(i2c)
-    (label, mon), = mons
+    ((label, mon),) = mons
     r = mon.read()
     assert label == "bus" and mon.chip == "INA238"
     assert r["v"] == pytest.approx(24.1, abs=0.01)
@@ -312,15 +368,15 @@ def test_without_a_shunt_value_only_voltage_is_reported():
 
 def test_with_a_shunt_value_current_and_power_follow():
     i2c = FakeI2C({0x41: ina226()})
-    (_l, mon), = ina2xx.find(i2c, shunt_ohms=0.002, max_current=32.768)[0]
+    ((_l, mon),) = ina2xx.find(i2c, shunt_ohms=0.002, max_current=32.768)[0]
     r = mon.read()
-    assert r["a"] == pytest.approx(1.5, abs=1e-6)          # 1500 x 1 mA
-    assert r["w"] == pytest.approx(5.0, abs=1e-6)          # 200 x 25 mW
+    assert r["a"] == pytest.approx(1.5, abs=1e-6)  # 1500 x 1 mA
+    assert r["w"] == pytest.approx(5.0, abs=1e-6)  # 200 x 25 mW
 
 
 def test_the_under_voltage_latch_is_reported_when_armed():
     i2c = FakeI2C({0x40: ina238()})
-    (_l, mon), = ina2xx.find(i2c, uv_volts=20.0)[0]
+    ((_l, mon),) = ina2xx.find(i2c, uv_volts=20.0)[0]
     assert mon.read()["uv"] == 1
     # BUVL written in 3.125 mV steps, and the latch enabled.
     assert (0x40, 0x0F, int(20.0 / 3.125e-3).to_bytes(2, "big")) in i2c.writes

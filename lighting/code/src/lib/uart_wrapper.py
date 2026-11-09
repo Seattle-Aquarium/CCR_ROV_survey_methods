@@ -3,7 +3,7 @@ MicroPython UART wrapper that provides a pyserial-compatible interface.
 This allows the pydspl_seasense library to work with MicroPython's machine.UART.
 """
 
-from machine import UART
+from machine import UART, Pin
 
 
 class UARTWrapper:
@@ -15,7 +15,9 @@ class UARTWrapper:
     - read_until() -> bytes (reads until newline or timeout)
     """
 
-    def __init__(self, uart_id, baudrate=9600, tx=None, rx=None, timeout=1000):
+    def __init__(
+        self, uart_id, baudrate=9600, tx=None, rx=None, timeout=100, tx_control_pin=None
+    ):
         """
         Initialize UART wrapper.
 
@@ -28,6 +30,11 @@ class UARTWrapper:
         """
         self._timeout = timeout
 
+        self.tx_control = None
+        if tx_control_pin:
+            self.tx_control = Pin(tx_control_pin, Pin.OUT)
+            self.tx_control.value(0)
+
         if tx is not None and rx is not None:
             self._uart = UART(uart_id, baudrate=baudrate, tx=tx, rx=rx, timeout=timeout)
         else:
@@ -36,10 +43,19 @@ class UARTWrapper:
     def write(self, data):
         """Write data to UART. Accepts bytes or string."""
         if isinstance(data, str):
-            data = data.encode('ascii')
-        return self._uart.write(data)
+            data = data.encode("ascii")
 
-    def read_until(self, terminator=b'\n', size=None):
+        if self.tx_control:
+            self.tx_control.value(1)
+        val = self._uart.write(data)
+        self._uart.flush()
+
+        if self.tx_control:
+            self.tx_control.value(0)
+
+        return val
+
+    def read_until(self, terminator=b"\n", size=None):
         """
         Read until terminator character or timeout.
 

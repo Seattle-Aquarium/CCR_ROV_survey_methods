@@ -310,6 +310,10 @@ class LaptopModel:
         row["network_errors_received"] = 0
         row["network_errors_sent"] = 0
         row["network_packets_discarded"] = self._discarded
+        # Healthy video is ~700 datagrams a second, every one delivered.
+        row["udp_received_per_s"] = round(rx * 1e6 / 8 / 1400, 1)
+        row["udp_no_port_per_s"] = 0.0
+        row["udp_receive_errors_per_s"] = 0.0
         row["ethernet_connected"] = "TRUE"
         row["ethernet_link_speed_mbps"] = 100
         row["rov_ping_latency_ms"] = None if lost else float(round(ping))
@@ -385,6 +389,17 @@ class LaptopModel:
             self._held["pi_throttling"] = "TRUE" if pi_now >= 80.0 else "FALSE"
         row["pi_soc_temp_c"] = self._held.get("pi_soc_temp_c", round(pi_now, 1))
         row["pi_throttling"] = self._held.get("pi_throttling", "FALSE")
+        if self._due("pi_health", flightlog.HEALTH_POLL_S, t) and not silent:
+            busy = 88.0 if pi_t >= 80.0 else 35.0
+            self._held["pi_cpu_pct"] = round(busy + rng.gauss(0, 2), 1)
+        row["pi_cpu_pct"] = self._held.get("pi_cpu_pct", 35.0)
+        row["pi_disk_free_gb"] = 18.4
+        row["video_stream_count"] = 1
+        row["video_stream_udp"] = "FALSE"
+        row["video_stream_errors"] = 0
+        row["qgc_running"] = "FALSE"
+        row["logger_cpu_pct"] = round(4.0 + rng.gauss(0, 0.4), 2)
+        row["logger_ram_mb"] = 310.0
 
         # -- tether ------------------------------------------------------------------------
         nic_low = "FALSE"

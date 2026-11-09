@@ -1,21 +1,17 @@
 """
-A second USB serial port, for telemetry only.
+Creates a second USB serial port for telemetry.
 
-The USB cable to the Pi already carries one serial port: the MicroPython
-console (the REPL), which `mpremote` uses to copy files and which anything can
-type into. Telemetry sent there is mixed with console text, and a program that
-writes a Ctrl-C (0x03) to it stops `main.py` -- whose clean-up turns all four
-lights off. So telemetry goes out on a port of its own:
+The usb-device-cdc module can be configured to create a second
+virtual serial port for telemetry.  This separates the read-only telemetry
+streaam from the primary Micropython REPL and prevents us from accidentally
+interrupting the REPL and stopping the program.
 
-    /dev/ttyACM0 (interface 0)   the console, for maintenance and mpremote
-    /dev/ttyACM1 (interface 2)   telemetry, written by main.py, read by the
-                                 BlueOS Light Monitor extension
+The Micropython port will typically appear as /dev/ttyACM0
+The telemetry port will typically appear as   /dev/ttyACM1
 
-Nothing the extension does can reach the console through the second port, and
-the second port is written without waiting (`timeout=0`), so a reader that
+The second port is written without waiting (`timeout=0`), so a reader that
 stops reading costs telemetry lines -- counted -- instead of stalling the
-light control loop the way a stalled reader on the console port can (up to
-~0.5 s per print, MicroPython's USB send timeout).
+light control loop.
 
 Needs MicroPython 1.23 or newer (`machine.USBDevice`) and the micropython-lib
 package, installed once with the controller on the bench::
@@ -45,12 +41,14 @@ documented behaviour, not a fault.
 
 import os
 
-port = None          # the usb.device.cdc.CDCInterface, once started
-error = ""           # why there is no port, in words
+port = None  # the usb.device.cdc.CDCInterface, once started
+error = ""  # why there is no port, in words
 
 OFF_FILE = "datalink.off"
 TRY_FILE = "datalink.try"
 FAILED_FILE = "datalink.failed"
+
+ERROR_FILE = "datalink_error.txt"
 
 
 def _exists(name):
@@ -69,6 +67,10 @@ def _write(name, text):
         pass
 
 
+def _write_error(text):
+    _write(ERROR_FILE, text)
+
+
 def _remove(name):
     try:
         os.remove(name)
@@ -79,39 +81,56 @@ def _remove(name):
 def start():
     """Bring up the telemetry port. Never raises."""
     global port, error
+
     if port is not None:
         return port
+
     if _exists(OFF_FILE):
         error = "turned off (datalink.off is present)"
+        _write_error(error)
         return None
+
     if _exists(FAILED_FILE):
         error = "left off: an earlier attempt never finished (delete datalink.failed to retry)"
+        _write_error(error)
         return None
+
     if _exists(TRY_FILE):
         try:
             os.rename(TRY_FILE, FAILED_FILE)
         except OSError:
             pass
         error = "left off: the previous attempt never finished"
+        _write_error(error)
         return None
     try:
         import usb.device
         from usb.device.cdc import CDCInterface
     except ImportError as ex:
-        error = "usb-device-cdc not installed (mpremote mip install usb-device-cdc): " + str(ex)
+        error = (
+            "usb-device-cdc not installed (mpremote mip install usb-device-cdc): "
+            + str(ex)
+        )
+        _write_error(error)
         return None
+
     _write(TRY_FILE, "setting up the telemetry port\n")
+
     try:
         cdc = CDCInterface()
-        cdc.init(timeout=0)                      # never block the light loop
+        cdc.init(timeout=0)  # never block the light loop
         usb.device.get().init(cdc, builtin_driver=True)
         port = cdc
         error = ""
-    except Exception as ex:                      # noqa: BLE001 - anything at all
+        _remove(ERROR_FILE)
+    except Exception as ex:  # noqa: BLE001 - anything at all
         port = None
         error = "could not start: " + repr(ex)
+        _write_error(error)
         _restore_console()
+
     _remove(TRY_FILE)
+
     return port
 
 
@@ -119,6 +138,7 @@ def _restore_console():
     """Put the console back as the only USB interface, after a failed start."""
     try:
         import machine
+
         dev = machine.USBDevice()
         dev.active(False)
         dev.builtin_driver = dev.BUILTIN_DEFAULT

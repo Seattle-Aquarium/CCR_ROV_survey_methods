@@ -868,7 +868,7 @@ vehicle's SD card.
         network_fast_*.csv       adapter counters, 10 Hz  } flight recorder
         network_pings_*.csv      pings, 5 Hz              } during each flight
         network_topside_*.txt    the network at arming    }
-        flight_*.json            parameters, versions and what changed
+        flight_*.json            parameters, versions, video streams and what changed
         pi_downloads.jsonl       every download: source, size, time, SHA-256
         pi_cleanup_*.txt         what Clean the Pi approved, deleted and kept
         dvl/

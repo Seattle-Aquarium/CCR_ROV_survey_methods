@@ -117,6 +117,7 @@ Elevator on 15 September).
 | `rov_ping_latency_ms` | ▲ ≥ 25 ms  ✖ ≥ 100 ms | 3 s mean | 99.9 % | Round trip to the Pi over the tether: 3-6 ms normally, 19 ms at the 99th percentile. Past 25 ms the link is congested or retrying; past 100 ms control and video both lag. |
 | `rov_packet_loss_pct` | ▲ ≥ 5 %  ✖ ≥ 20 % | each sample | 91.1 % | Lost pings to the Pi, over the last 30. One lost (3.3 %) is common and means nothing; two or more is a link problem, and at 20 % the vehicle is dropping in and out. |
 | `network_packets_discarded` | ✖ climbing (in 10 s) | change over 10 s | 100.0 % | A count since the adapter started, normally flat all day. Any rise during a flight means the laptop is throwing away packets it received -- a driver or buffer problem. |
+| `udp_receive_errors_per_s` | ▲ ≥ 1 datagrams/s  ✖ ≥ 20 datagrams/s | 5 s mean | not yet recorded | Datagrams Windows received and then threw away, usually because a program's buffer was full -- after the adapter, so the network counters never see it. Video arrives as UDP; held above zero, Cockpit is losing picture on the laptop. Not in the September-October logs, so these thresholds are judgement. |
 | `rov_http_ms` | ▲ ≥ 250 ms  ✖ ≥ 1000 ms | 5 s mean | 96.9 % | How long the Pi takes to answer a small request: 40-160 ms normally. Over a second it is overloaded or the tether is struggling, and the recorder's arm checks start to fail. |
 
 ### Cockpit
@@ -124,6 +125,7 @@ Elevator on 15 September).
 | reading | thresholds (▲ unusual, ✖ bad) | judged on | normal on real flights | why |
 |---|---|---|---|---|
 | `cockpit_cpu_pct` | ▲ ≥ 45 %  ✖ ≥ 70 % | 10 s mean | 100.0 % | Of the whole CPU. Cockpit uses 15-37 % on L342-D; held above 70 % a renderer is spinning. |
+| `logger_cpu_pct` | ▲ ≥ 15 %  ✖ ≥ 30 % | 10 s mean | not yet recorded | This program's own share of the CPU, its captures included. It is there to watch the flight; past 15 % it is competing with Cockpit for a laptop that is already power-limited. |
 | `cockpit_ram_mb` | ▲ ≥ 2500 MB  ✖ ≥ 4000 MB | 5 s mean | 100.0 % | Cockpit holds 0.9-1.6 GB on a survey (most ever 2.1 GB). Electron apps leak; past 4 GB a restart between transects is cheaper than a crash during one. |
 | `cockpit_gpu_usage_pct` | ▲ ≥ 60 %  ✖ ≥ 85 % | 5 s mean | 98.6 % | Cockpit's share of the GPU, normally 15-45 %. |
 | `cockpit_process_count` | ▲ ≤ 3  ✖ ≤ 2 while running · ▲ ≥ 10 | in context | 99.9 % | Cockpit runs as four processes. One fewer usually means its GPU or renderer process crashed, which freezes or blanks the video while the window stays open. More than ten means extra windows or a respawning renderer. |
@@ -140,6 +142,7 @@ Elevator on 15 September).
 | `fan_speed_rpm` | ▲ ≥ 4500 rpm  ✖ ≥ 5800 rpm | 10 s mean | not published on L342-D | A fan held at its maximum is cooling at its limit; the next step is throttling. |
 | `motherboard_temp_c` | ▲ ≥ 55 C  ✖ ≥ 70 C | 10 s mean | 100.0 % | The chassis zone. It rises with the sun on the case. (On L342-D this sensor reads a constant 25.1 °C.) |
 | `pi_soc_temp_c` | ▲ ≥ 70 C  ✖ ≥ 80 C | 10 s mean | 98.2 % | The Raspberry Pi in the vehicle: 55-65 °C on a survey. It slows its own processor at 80 °C, which starves video and telemetry. It sat above 70 °C for ten minutes at EBM_W on 17 September. |
+| `pi_cpu_pct` | ▲ ≥ 70 %  ✖ ≥ 90 % | 10 s mean | not yet recorded | The vehicle's Pi, averaged over its cores. It encodes and serves the video and runs ArduSub; Aaron Marburg saw it consistently above 80 % on 7 October while video would not stay up. Not in the September-October logs, so these thresholds are judgement. |
 | `system_uptime_s` | ▲ ≥ 7 days · ▲ < 10 min | each sample | 51.9 % | A laptop that has not restarted in a week carries pending updates and slowly leaking drivers into the field. Worth a restart the evening before; never an emergency. L342-D has run 28 days without one. Up for less than ten minutes in the middle of a day means it restarted -- planned or not. |
 
 ### Tether

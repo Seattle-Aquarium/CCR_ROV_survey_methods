@@ -10,6 +10,7 @@ import machine  # noqa: F401  (kept from the original boot.py)
 
 try:
     import datalink
+
     datalink.start()
 except Exception:
     # Telemetry falls back to the console; nothing here may stop the lights.

@@ -22,8 +22,9 @@ class PWMReader:
         self._last_rise_us = 0
 
         self._pin = Pin(pin_num, Pin.IN, Pin.PULL_DOWN)
-        self._pin.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING,
-                       handler=self._irq_handler)
+        self._pin.irq(
+            trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=self._irq_handler
+        )
 
     def _irq_handler(self, pin):
         now = time.ticks_us()
@@ -83,10 +84,12 @@ def main():
             freq = reader.frequency_hz
 
             if pw > 0:
-                print(f"Pulse: {pw:6d} µs | "
-                      f"Period: {period:6d} µs | "
-                      f"Duty: {duty:5.1f}% | "
-                      f"Freq: {freq:.1f} Hz")
+                print(
+                    f"Pulse: {pw:6d} µs | "
+                    f"Period: {period:6d} µs | "
+                    f"Duty: {duty:5.1f}% | "
+                    f"Freq: {freq:.1f} Hz"
+                )
             else:
                 print("No signal detected")
 

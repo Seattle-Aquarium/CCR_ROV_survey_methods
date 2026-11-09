@@ -66,6 +66,7 @@ EXTRACTOR_PORT = 9150           # the recorder extension's own API
 LINUX2REST_PORT = 6030          # CPU, memory, temperature, throttle events
 MAVLINK2REST_PORT = 6040        # live telemetry, one message type per URL
 KRAKEN_PORT = 9134              # extensions and their versions
+CAMERA_MANAGER_PORT = 6020      # mavlink-camera-manager: the video streams
 
 #: Where the recordings live, as File Browser addresses them. Its root is not
 #: the filesystem root: `system_root` is a mount point it publishes, and the
@@ -1036,6 +1037,71 @@ def clock_skew(host: str) -> float | None:
         return None
 
 
+#: Where the Pi's per-core load is published. linux2rest serves it on its own
+#: port; BlueOS's proxy serves the same service by name.
+CPU_PATHS = ("/system/cpu",)
+
+
+def read_cpu_usage(host: str, timeout: float = 2.5) -> float | None:
+    """The Pi's CPU use in percent, averaged over its cores, or None.
+
+    Added after Aaron Marburg saw the vehicle's CPU "consistently > 80 %" on
+    7 October and nothing recorded it. One small GET to a Rust service.
+    """
+    for url in (_base(host, LINUX2REST_PORT) + CPU_PATHS[0],
+                f"http://{host}/system-information/system/cpu"):
+        a = _get(url, timeout=timeout)
+        if not a.ok:
+            continue
+        try:
+            rows = json.loads(a.body)
+        except Exception:
+            continue
+        if isinstance(rows, dict):
+            rows = rows.get("cpus") or rows.get("cpu") or [rows]
+        usage = [float(r["usage"]) for r in rows
+                 if isinstance(r, dict) and isinstance(r.get("usage"), (int, float))]
+        if usage:
+            return sum(usage) / len(usage)
+    return None
+
+
+def read_throttling(host: str, timeout: float = 2.5) -> bool | None:
+    """Whether the Pi is throttling right now: True, False, or None if unknown.
+
+    The `occurring` half of the throttle log `read_platform` reads, without
+    the memory and model reads that come with it there.
+    """
+    for path in PLATFORM_PROBES:
+        a = _get(f"http://{host}{path}", timeout=timeout)
+        if not a.ok:
+            continue
+        try:
+            data = json.loads(a.body)
+        except Exception:
+            continue
+        body = data.get("Ok") if isinstance(data, dict) and isinstance(
+            data.get("Ok"), dict) else data
+        pi = body.get("raspberry") if isinstance(body, dict) else None
+        if isinstance(pi, dict):
+            events = pi.get("events") or {}
+            return bool(events.get("occurring"))
+    return None
+
+
+def stream_flags(streams: dict) -> tuple[int | None, bool | None, int | None]:
+    """(how many streams, whether any is pushed by UDP, how many are failing)
+    from a `read_video_streams` answer; all None when it did not read."""
+    if not streams or not streams.get("read"):
+        return None, None, None
+    summary = streams.get("streams") or []
+    udp = any(str(e).lower().startswith("udp")
+              for s in summary for e in (s.get("endpoints") or []))
+    failing = sum(1 for s in summary
+                  if s.get("error") or s.get("running") is False)
+    return len(summary), udp, failing
+
+
 def read_temperature(host: str) -> tuple[float | None, float | None]:
     """(now, highest seen) in Celsius for the Pi's SoC.
 
@@ -1330,6 +1396,75 @@ def read_versions(host: str) -> dict:
         except Exception:
             pass
     return out
+
+
+def read_video_streams(host: str, timeout: float = 4.0) -> dict:
+    """The video streams BlueOS is serving, as its camera manager lists them.
+
+    {"read", "source", "count", "streams", "raw"}. Added after the 4 November
+    2026 test, where the bitrate arriving at the laptop said more copies of
+    the video were being sent than anybody had asked for, and nothing
+    recorded what BlueOS thought it was streaming, or to where.
+
+    `streams` is a summary -- name, running, error, encoding, size, frame
+    rate, endpoints -- picked out tolerantly, because the camera manager's
+    JSON has changed shape between releases. `raw` is the answer as it came,
+    so a field the summary does not know about is still in the record.
+    A read that failed is `read: False`, never an empty list: "no streams"
+    and "did not answer" are different findings.
+
+    Four seconds a try, two tries: it runs inside the closing snapshot, which
+    `read_versions` can already take most of the 90 s budget for when the
+    vehicle is slow, and a snapshot that overruns is thrown away whole.
+    """
+    out: dict = {"read": False, "source": "", "count": None, "streams": [],
+                 "raw": None}
+    for url in (_base(host, CAMERA_MANAGER_PORT) + "/streams",
+                f"http://{host}/mavlink-camera-manager/streams"):
+        a = _get(url, timeout=timeout, limit=400_000)
+        if not a.ok:
+            continue
+        try:
+            body = json.loads(a.body)
+        except Exception:
+            continue
+        if not isinstance(body, list):
+            continue
+        out.update(read=True, source=url, count=len(body), raw=body,
+                   streams=[_stream_summary(s) for s in body])
+        return out
+    return out
+
+
+def _stream_summary(entry) -> dict:
+    """The parts of one camera-manager stream a reader of the record needs."""
+    if not isinstance(entry, dict):
+        return {}
+    vs = entry.get("video_and_stream") or entry
+    info = vs.get("stream_information") or {}
+    config = info.get("configuration") or {}
+    interval = config.get("frame_interval") or {}
+    fps = None
+    try:
+        if interval.get("numerator"):
+            fps = round(interval["denominator"] / interval["numerator"], 2)
+    except Exception:
+        fps = None
+    source = vs.get("video_source") or {}
+    if isinstance(source, dict) and len(source) == 1:
+        source = next(iter(source.values()))     # {"Local": {...}} -> {...}
+    return {
+        "name": vs.get("name") or entry.get("name") or "",
+        "running": entry.get("running"),
+        "error": entry.get("error"),
+        "encode": config.get("encode"),
+        "width": config.get("width"),
+        "height": config.get("height"),
+        "fps": fps,
+        "endpoints": list(info.get("endpoints") or []),
+        "source": (source.get("name") or source.get("device_path") or ""
+                   ) if isinstance(source, dict) else str(source),
+    }
 
 
 #: What the banner asks each service to answer in. Short, because this runs

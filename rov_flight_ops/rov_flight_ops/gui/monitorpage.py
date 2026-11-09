@@ -103,6 +103,7 @@ SIM_MARK = ("#5B3F8C", "#B9A2E6")
 COUNT_UNITS = {
     "disk_queue_length": "requests",
     "network_packets_discarded": "packets",
+    "udp_receive_errors_per_s": "datagrams/s",
     "cockpit_process_count": "processes",
     "cockpit_handle_count": "handles",
     "cockpit_thread_count": "threads",
@@ -164,6 +165,7 @@ SLOWER_THAN_ROW = {
     "rov_reachable": flightlog.ARM_POLL_S,
     "rov_http_ms": flightlog.ARM_POLL_S,
     "pi_soc_temp_c": flightlog.PI_POLL_S,
+    "pi_cpu_pct": flightlog.HEALTH_POLL_S,
     "pi_eth_rx_bytes": flightlog.TETHER_POLL_S,
     "pi_eth_rx_errors": flightlog.TETHER_POLL_S,
     "pi_eth_carrier": flightlog.TETHER_POLL_S,
@@ -305,7 +307,7 @@ class MonitorPage(ctk.CTkFrame):
         c.grid(row=row, column=0, sticky="nsew", pady=(0, 12))
         b = c.body
         b.grid_columnconfigure(1, weight=1)
-        for r, text in enumerate(("Folder", "Recording", "Vehicle")):
+        for r, text in enumerate(("Folder", "Recording", "Vehicle", "Note")):
             label(b, text, muted=True).grid(row=r, column=0, sticky="w",
                                            padx=(0, 12), pady=3)
 
@@ -347,8 +349,34 @@ class MonitorPage(ctk.CTkFrame):
                ).grid(row=0, column=2, padx=(6, 0))
         button(hr, "Save", self._save_network, "ghost", width=60
                ).grid(row=0, column=3, padx=(6, 0))
+        # What just happened, typed as it happens -- "video froze", "restarted
+        # BlueOS" -- so the logs say it rather than someone's memory.
+        mr = ctk.CTkFrame(b, fg_color="transparent")
+        mr.grid(row=3, column=1, sticky="ew", pady=3)
+        mr.grid_columnconfigure(0, weight=1)
+        self.mark_entry = entry(mr, "What just happened? (Enter to mark)",
+                                width=260)
+        self.mark_entry.grid(row=0, column=0, sticky="ew")
+        self.mark_entry.bind("<Return>", lambda _e: self._mark())
+        button(mr, "Mark", self._mark, "ghost", width=60
+               ).grid(row=0, column=1, padx=(6, 0))
+
         self._net_text = ""
         self._capabilities_said: tuple = ()
+
+    def _mark(self) -> None:
+        """Stamp the moment into the logs, with whatever was typed."""
+        text = self.mark_entry.get().strip() or "mark"
+        rec = self.recorder
+        path = rec.mark(text) if rec is not None else None
+        self.mark_entry.delete(0, "end")
+        from datetime import datetime
+        when = f"{datetime.now():%H:%M:%S}"
+        if path is None:
+            self._say(f"{when} noted: {text} -- not saved: choose a flight "
+                      f"folder first.")
+        else:
+            self._say(f"{when} marked: {text}")
 
     def _say(self, text: str) -> None:
         """To the log at the foot of the window, where every message goes."""

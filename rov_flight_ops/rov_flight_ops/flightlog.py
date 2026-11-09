@@ -97,6 +97,15 @@ PI_POLL_S = 5.0
 #: is not a reading lost, it is a larger step in the next one.
 TETHER_POLL_S = 5.0
 
+#: How often the Pi's CPU use and throttle state are read, how often the free
+#: space on its card is, and how often the video streams BlueOS is serving.
+#: All three only while a flight is being recorded, on their own thread, and
+#: each is one small GET -- the Pi this watches was already working hard on
+#: 4 November, and the logging must not be what pushes it over.
+HEALTH_POLL_S = 5.0
+DISK_POLL_S = 60.0
+STREAM_POLL_S = 30.0
+
 #: How long a disarm must stand before the flight is considered over.
 #: Ninety seconds covers a surface interval between transects and a failsafe
 #: that clears, and is short enough that the closing snapshot is taken while
@@ -176,6 +185,8 @@ class Snapshot:
     parameters_from: str = ""
     versions: dict = field(default_factory=dict)
     dataflash_log: str = ""
+    #: `blueos.read_video_streams`: what BlueOS was streaming, and to where.
+    video_streams: dict = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -490,7 +501,8 @@ class FlightRecorder:
             if self._watch is not watch:
                 return                     # stopped while the counters opened
             for target, name in ((self._watch_loop, "utc-arm-watch"),
-                                 (self._tether_loop, "utc-tether")):
+                                 (self._tether_loop, "utc-tether"),
+                                 (self._health_loop, "utc-pi-health")):
                 thread = threading.Thread(target=target, args=(watch,),
                                           daemon=True, name=name)
                 watch.threads.append(thread)
@@ -532,6 +544,39 @@ class FlightRecorder:
     @property
     def watching(self) -> bool:
         return self._watch is not None
+
+    def mark(self, text: str) -> Path | None:
+        """Note the moment: "video froze", "restarted BlueOS", "switched to QGC".
+
+        Appended to `operator_marks.txt` in the logs folder, recording or not,
+        with the time in UTC and local; and, during a flight, written into
+        that flight's next 1 Hz row as `operator_mark`. On 4 November, which
+        BlueOS restarts were deliberate had to be asked afterwards.
+        Returns the file written, or None when there is no flight folder.
+        """
+        text = (text or "mark").replace("\n", " ").strip() or "mark"
+        session = self._session
+        if session is not None:
+            try:
+                session.sampler.mark(text)
+            except Exception:
+                pass
+        folder = (session.folder if session is not None
+                  else Path(self.flight_dir) / "logs" if self.flight_dir else None)
+        if folder is None:
+            return None
+        now = datetime.now(timezone.utc)
+        flight = session.flight_id if session is not None else "-"
+        line = (f"{now.isoformat(timespec='seconds')}\t"
+                f"{now.astimezone():%Y-%m-%d %H:%M:%S %Z}\t{flight}\t{text}\n")
+        path = Path(folder) / "operator_marks.txt"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(line)
+        except OSError:
+            return None
+        return path
 
     def _changed(self) -> None:
         if self.on_change is not None:
@@ -592,6 +637,36 @@ class FlightRecorder:
             vehicle.soc_temp_c = soc
         except Exception:
             pass
+
+    def _health_loop(self, watch: _Watch) -> None:
+        """The Pi's load, throttling, card space and video streams.
+
+        Its own thread, so a slow answer delays none of the arm watch or the
+        tether reads. Nothing is asked between flights.
+        """
+        last_disk = last_streams = 0.0
+        while not watch.stop.wait(HEALTH_POLL_S):
+            vehicle = self._vehicle()
+            if vehicle is None:
+                last_disk = last_streams = 0.0
+                continue
+            try:
+                vehicle.cpu_pct = blueos.read_cpu_usage(self.host)
+                vehicle.throttling = blueos.read_throttling(self.host)
+                now = time.monotonic()
+                if now - last_disk >= DISK_POLL_S:
+                    last_disk = now
+                    space = blueos.read_space(self.host)
+                    vehicle.disk_free_gb = (space.free_bytes / 2 ** 30
+                                            if space.found else None)
+                if now - last_streams >= STREAM_POLL_S:
+                    last_streams = now
+                    streams = blueos.read_video_streams(self.host, timeout=2.0)
+                    (vehicle.stream_count, vehicle.stream_udp,
+                     vehicle.stream_errors) = blueos.stream_flags(streams)
+            except Exception:
+                diagnostics.log_exception("Pi health reader", *sys.exc_info(),
+                                          level=logging.WARNING)
 
     def _tether_loop(self, watch: _Watch) -> None:
         """The vehicle's end of the tether, on a thread that may block.
@@ -917,6 +992,10 @@ class FlightRecorder:
             pass
         try:
             snap.versions = blueos.read_versions(self.host)
+        except Exception:
+            pass
+        try:
+            snap.video_streams = blueos.read_video_streams(self.host)
         except Exception:
             pass
         return snap

@@ -88,14 +88,18 @@ class _Monitor:
         self.configure()
 
     def describe(self):
-        return {"addr": self.addr, "chip": self.chip, "shunt_ohms": self.shunt_ohms,
-                "uv_volts": self.uv_volts}
+        return {
+            "addr": self.addr,
+            "chip": self.chip,
+            "shunt_ohms": self.shunt_ohms,
+            "uv_volts": self.uv_volts,
+        }
 
 
 class INA226(_Monitor):
     chip = "INA226"
-    BUS_LSB = 1.25e-3           # V
-    SHUNT_LSB = 2.5e-6          # V
+    BUS_LSB = 1.25e-3  # V
+    SHUNT_LSB = 2.5e-6  # V
 
     def configure(self):
         # AVG 16, VBUSCT 1.1 ms, VSHCT 1.1 ms, continuous shunt and bus:
@@ -106,11 +110,13 @@ class INA226(_Monitor):
             _w16(self.i2c, self.addr, 0x05, min(cal, 0x7FFF))
         if self.uv_volts:
             _w16(self.i2c, self.addr, 0x07, int(self.uv_volts / self.BUS_LSB) & 0xFFFF)
-            _w16(self.i2c, self.addr, 0x06, (1 << 12) | 1)     # BUL, latched
+            _w16(self.i2c, self.addr, 0x06, (1 << 12) | 1)  # BUL, latched
 
     def read(self):
-        out = {"v": _u16(self.i2c, self.addr, 0x02) * self.BUS_LSB,
-               "shunt_mv": _s16(self.i2c, self.addr, 0x01) * self.SHUNT_LSB * 1000.0}
+        out = {
+            "v": _u16(self.i2c, self.addr, 0x02) * self.BUS_LSB,
+            "shunt_mv": _s16(self.i2c, self.addr, 0x01) * self.SHUNT_LSB * 1000.0,
+        }
         if self.current_lsb:
             out["a"] = _s16(self.i2c, self.addr, 0x04) * self.current_lsb
             out["w"] = _u16(self.i2c, self.addr, 0x03) * 25.0 * self.current_lsb
@@ -122,11 +128,11 @@ class INA226(_Monitor):
 
 class INA238(_Monitor):
     chip = "INA238"
-    BUS_LSB = 3.125e-3          # V
-    SHUNT_LSB = 5e-6            # V, ADCRANGE = 0 (+/-163.84 mV)
+    BUS_LSB = 3.125e-3  # V
+    SHUNT_LSB = 5e-6  # V, ADCRANGE = 0 (+/-163.84 mV)
 
     def configure(self):
-        _w16(self.i2c, self.addr, 0x00, 0x0000)                # ADCRANGE 0
+        _w16(self.i2c, self.addr, 0x00, 0x0000)  # ADCRANGE 0
         # Continuous bus, shunt and temperature; 540 us each; 16 averages:
         # a fresh average every ~26 ms.
         _w16(self.i2c, self.addr, 0x01, 0xF922)
@@ -135,12 +141,14 @@ class INA238(_Monitor):
             _w16(self.i2c, self.addr, 0x02, min(cal, 0x7FFF))
         if self.uv_volts:
             _w16(self.i2c, self.addr, 0x0F, int(self.uv_volts / self.BUS_LSB) & 0x7FFF)
-            _w16(self.i2c, self.addr, 0x0B, 1 << 15)           # ALATCH
+            _w16(self.i2c, self.addr, 0x0B, 1 << 15)  # ALATCH
 
     def read(self):
-        out = {"v": _u16(self.i2c, self.addr, 0x05) * self.BUS_LSB,
-               "shunt_mv": _s16(self.i2c, self.addr, 0x04) * self.SHUNT_LSB * 1000.0,
-               "t": (_s16(self.i2c, self.addr, 0x06) >> 4) * 0.125}
+        out = {
+            "v": _u16(self.i2c, self.addr, 0x05) * self.BUS_LSB,
+            "shunt_mv": _s16(self.i2c, self.addr, 0x04) * self.SHUNT_LSB * 1000.0,
+            "t": (_s16(self.i2c, self.addr, 0x06) >> 4) * 0.125,
+        }
         if self.current_lsb:
             out["a"] = _s16(self.i2c, self.addr, 0x07) * self.current_lsb
             # POWER is 24 bits on the INA238 (the old driver read 16).
@@ -176,12 +184,19 @@ def find(i2c, shunt_ohms=None, max_current=20.0, uv_volts=None, labels=None):
             notes.append("0x%02X answers but is not an INA226 or INA238" % addr)
             continue
         try:
-            mon = DRIVERS[chip](i2c, addr, shunt_ohms=shunt_ohms,
-                                max_current=max_current, uv_volts=uv_volts)
+            mon = DRIVERS[chip](
+                i2c,
+                addr,
+                shunt_ohms=shunt_ohms,
+                max_current=max_current,
+                uv_volts=uv_volts,
+            )
         except Exception as ex:
             notes.append("0x%02X %s could not be configured: %r" % (addr, chip, ex))
             continue
-        found.append((labels.get(addr, "bus" if addr == 0x40 else "ina_0x%02x" % addr), mon))
+        found.append(
+            (labels.get(addr, "bus" if addr == 0x40 else "ina_0x%02x" % addr), mon)
+        )
     if not present:
         notes.append("no power monitor on I2C")
     return found, notes

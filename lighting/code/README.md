@@ -1,18 +1,10 @@
 # Lutris Lighting System
 
-MicroPython code for the ROV lighting control subsystem. Runs on a Raspberry Pi Pico 2
-(RP2350) — Keenan Johnson's light-control PCB — or the Adafruit QT Py RP2040 that Lutris
-carries until the PCB is fitted (#47). The board is recognised at start-up (`board.py`).
-
-It also reports what the lights say about themselves — level, power-on count,
-temperatures, faults — as JSON lines over USB to the Pi, where the BlueOS Light Monitor
-extension records them and puts a summary into MAVLink (so into the tlog on BlueOS 1.4
-and the mcap on 1.5). **See [TELEMETRY.md](TELEMETRY.md)** for the format, how it gets
-off the vehicle, the second USB port, and the bench checklist.
+MicroPython code for the ROV lighting control subsystem. Runs on a Raspberry Pi Pico 2 (RP2350) or other RP2040 / RP2350-based microcontroller boards.
 
 ## Overview
 
-Controls 4 [DeepSea Power & Light LED SeaLite](https://www.deepsea.com/portfolio-items/led-sealite/) lamps via a shared UART bus using the DSPL SeaSense protocol. Light brightness is controlled by a PWM signal from the BlueROV's servo output, allowing the pilot to dim lights with a joystick axis in Cockpit/QGroundControl.
+Controls four [DeepSea Power & Light LED SeaLite](https://www.deepsea.com/portfolio-items/led-sealite/) lamps via a shared RS485 bus using the DSPL SeaSense protocol.  Light brightness is controlled by a PWM signal from the BlueROV's servo output, allowing the pilot to dim lights with a joystick axis in Cockpit/QGroundControl.
 
 Note that the SeaSense dimming curve is strongly non-linear — `LOUT` 60 buys only
 15% of full output, and two thirds of the light lives in the top quarter of the
@@ -25,24 +17,18 @@ curve and what it means for exposure.
 1. The BlueROV sends a standard servo PWM signal (1100-1900 us at ~50 Hz) to GP16 on the Pico
 2. The Pico measures pulse width using pin edge interrupts
 3. Pulse width is linearly mapped to brightness: 1100 us = 0% (off), 1500 us = 50%, 1900 us = 100%
-4. Brightness commands are sent to all 4 lights over UART using the SeaSense protocol,
-   50 ms apart so each light's ACK clears the bus (#43)
+4. Brightness commands are sent to all 4 lights over UART using the SeaSense protocol
 5. If the PWM signal is lost for >1 second, lights turn off automatically
-6. On loop turns where the level did not change, the controller asks one light one
-   question (`LOUT?`, `STAT?`, …) and sends the answer on as telemetry (`poller.py`)
 
 ## Pin Assignments
 
-| Function | Pico / Pico 2 (PCB) | QT Py RP2040 (Lutris now) |
-|---|---|---|
-| UART TX to the RS-485 transceiver | GP0 (UART0) | TX pad, GPIO20 (UART1) |
-| UART RX from it | GP1 | RX pad, GPIO5 |
-| PWM input from the Navigator (servo 15) | GP16 | A0, GPIO29 |
-| I2C SDA, power monitor | GP14 (J5 on the PCB) | STEMMA QT, GPIO22 |
-| I2C SCL, power monitor | GP15 | STEMMA QT, GPIO23 |
-
-Lutris has **no power monitor fitted** (October 2026). `lib/ina2xx.py` drives an INA226
-or INA238 if one appears, telling them apart by their ID registers.
+| Pin  | Function                    |
+|------|-----------------------------|
+| GP0  | UART TX to SeaLite lights   |
+| GP1  | UART RX from SeaLite lights |
+| GP14 | I2C SDA (INA238 power monitor) |
+| GP15 | I2C SCL (INA238 power monitor) |
+| GP16 | PWM input from BlueROV servo output |
 
 ## BlueROV Setup
 
@@ -50,13 +36,46 @@ or INA238 if one appears, telling them apart by their ID registers.
 2. In Cockpit/QGroundControl, map a joystick axis or button to that actuator
 3. See the [Newton Gripper installation guide](https://bluerobotics.com/learn/newton-subsea-gripper-installation/#setup-in-qgroundcontrol) for the general pattern of configuring auxiliary servo outputs
 
+## Output linearization
+
+Out of the box, the mapping between the LOUT command (between 0 and 100) and
+output luminosity is non-linear, with 50% of the additional brightness
+occuring between LOUT 84 and 100.
+
+By default, we map PWM (1100-1900) linearly to LOUT, so (for example), PWM of 1500ms is LOUT=50 is about 15% luminosity from a light:
+
+```math
+\texttt{LOUT} = 100 * \frac{\texttt{PWM} - 1100}{800}
+```
+
+*(Rounding `LOUT` to the nearest integer value is ommited for clarity)*
+
+If `LINEARIZE_LIGHTING` is set to `True `main.py`, a logarithmic function will be applied when mapping PWM to LOUT:
+
+```math
+\texttt{LOUT} = 100 * \left( 1 + \alpha \ln \left\( \frac{\texttt{PWM} - 1100}{800} \right) \right)
+```
+From the published DSPL light curves, $`\alpha = 0.246`$
+
 ## Development
+
+> [!IMPORTANT] Adding the second telemetry port adds a USB re-enumeration to the
+> Circuitpython startup process.  `mpremote` typically does a soft reset
+> when it performs new commands, the bus reset interferes with this.
+>
+> When calling `mpremote` commands, use `mpremote resume` which will attempt the
+> command **without** reseting the device first.  You may need to run a command
+> multiple times to get it to stick.
+
+Also note, the Pico is now connected to **the Raspberry Pi in the ROV.**  The development steps detailed below should be run **on the Pi.**   As of 11/26, the `mpremote` package and a copy of this repo have been installed on the Pi.
+
+As a side note, as Lutris currently runs a 32-bit kernel, it can't be accessed using the standard VSCode remote extension.   I (Aaron) was able to develop remotely on the Pi using the [SSHFS](https://marketplace.visualstudio.com/items?itemName=Kelvin.vscode-sshfs) extension.
 
 Mount the local directory and test interactively:
 
 ```
 cd lighting/code/src
-mpremote mount . repl
+mpremote resume mount . repl
 ```
 
 Then in the REPL:
@@ -74,45 +93,32 @@ c.status()
 
 ## Deploy to Device
 
+Once to install the CDC library to the device:
+
+```
+mpremote mip install usb-device-cdc
+```
+
+then
+
 ```
 cd lighting/code/src
-mpremote mip install usb-device-cdc     # once: the second USB port for telemetry
-mpremote cp -r . :
+mpremote resume cp -r . :
 mpremote reset
 ```
 
 Once deployed, the system starts automatically on boot and requires no manual intervention.
-
-**On the vehicle, mpremote stops the lights.** Its commands that touch files or run code
-interrupt `main.py`, which turns all four lights off until a reset. Do it on deck, never
-mid-dive — and press *Release port* on the Light Monitor's page first if it is reading
-the console. Telemetry without `usb-device-cdc` (or on MicroPython < 1.23) falls back to
-the console, prefixed `@L `.
-
-## Tests
-
-The telemetry logic runs under CPython against scripted hardware:
-
-```
-python -m pytest lighting/code/tests
-```
 
 ## File Structure
 
 ```
 src/
   main.py          - LightingController and PWMReader (main application)
-  boot.py          - Boot configuration; brings up the telemetry USB port
-  board.py         - which board this is, and its pins
-  datalink.py      - the second USB serial port, with its safety valve
-  telemetry.py     - ccr.lights/1 lines, numbered, never blocking
-  lightbus.py      - one question to one light, with a hard deadline
-  poller.py        - what to ask each light, and when
+  boot.py          - Boot configuration
   pwm_test.py      - Standalone PWM input test utility
   lib/
     uart_wrapper.py              - pyserial-compatible UART wrapper for MicroPython
-    ina2xx.py                    - INA226 / INA238 power monitors, identified by ID
-    ina238.py                    - the original INA238 driver (no longer used by main.py)
+    ina238.py                    - INA238 current/voltage sensor driver
     pydspl_seasense/             - DSPL SeaSense protocol library
       sealite.py                 - SeaLite light control
       seasense.py                - Base protocol implementation
