@@ -78,6 +78,72 @@ FONT_MONO = (MONO, 11)
 
 RADIUS = 8
 PAD = 12
+#: The space between one section and the next, stacked.
+GAP = 12
+
+# --------------------------------------------------------------------------
+#  Density
+# --------------------------------------------------------------------------
+#
+# The program was laid out on a 4K laptop at 250 %: 1536 x 960 logical pixels.
+# The field laptops are Dell Rugged machines at 1920 x 1080 and 150 %: 1280 x
+# 720, of which 672 is above the taskbar -- a quarter less height, and height is
+# what every tab ran out of. Maximized, the banner, the tab row and the log took
+# 433 of the window's 974 physical pixels and left the Navigation map 37.
+#
+# So the layout has two densities, chosen once at start-up from the work area
+# of the screen the window opens on (`set_density`). **Comfortable** is the
+# layout as it was. **Compact** keeps every font a reading size -- body copy is
+# unchanged -- and takes the room from chrome: headings a step smaller, the
+# padding inside and between sections two-thirds as deep, card subtitles beside
+# their titles instead of under them, a tab row and a footer one line each. The
+# banner starts folded on a compact screen (`Shell`), and remembers being opened.
+
+DENSITY = "comfortable"
+DENSITIES = ("comfortable", "compact")
+
+#: Below this many logical pixels of work-area height, a screen is compact.
+COMPACT_BELOW_H = 860
+
+#: The program's tabs, and how tall their buttons are.
+FONT_TAB = (FAMILY_MEDIUM, 15)
+FONT_TAB_ON = (FAMILY_SEMIBOLD, 15)
+TAB_H = 36
+
+
+def compact() -> bool:
+    return DENSITY == "compact"
+
+
+def set_density(density: str) -> str:
+    """Choose the layout density. Call before any widget is built: the values
+    are read as widgets are made, and a widget already made keeps its own."""
+    global DENSITY, PAD, GAP, FONT_H1, FONT_TAB, FONT_TAB_ON, TAB_H
+    density = density if density in DENSITIES else "comfortable"
+    DENSITY = density
+    if density == "compact":
+        PAD, GAP = 8, 8
+        FONT_H1 = (FAMILY_MEDIUM, 14)
+        FONT_TAB = (FAMILY_MEDIUM, 13)
+        FONT_TAB_ON = (FAMILY_SEMIBOLD, 13)
+        TAB_H = 30
+    else:
+        PAD, GAP = 12, 12
+        FONT_H1 = (FAMILY_MEDIUM, 16)
+        FONT_TAB = (FAMILY_MEDIUM, 15)
+        FONT_TAB_ON = (FAMILY_SEMIBOLD, 15)
+        TAB_H = 36
+    return density
+
+
+def density_for(work_height_logical: float | None, choice: str = "auto") -> str:
+    """The density for a screen whose work area is this tall, or the one
+    chosen in the settings file (`ui_density`) if that is not "auto"."""
+    if choice in DENSITIES:
+        return choice
+    if work_height_logical is None:
+        return "comfortable"
+    return "compact" if work_height_logical < COMPACT_BELOW_H else "comfortable"
 
 # --------------------------------------------------------------------------
 #  Chrome: the banner and the rail
@@ -131,10 +197,9 @@ FONT_RAIL_NUM = (FAMILY, 12)
 FONT_SECTION = (FAMILY_MEDIUM, 13)
 FONT_SECTION_ON = (FAMILY_SEMIBOLD, 14)
 
-#: The program's tabs. They are the navigation now that there is no chapter
-#: rail, so a step larger than the section strip they replace.
-FONT_TAB = (FAMILY_MEDIUM, 15)
-FONT_TAB_ON = (FAMILY_SEMIBOLD, 15)
+#: The program's tabs (`FONT_TAB`, `FONT_TAB_ON`, defined with the density
+#: above) are the navigation now that there is no chapter rail, so a step
+#: larger than the section strip they replace -- two steps on a roomy screen.
 
 # --------------------------------------------------------------------------
 #  Chapter buttons
@@ -228,6 +293,8 @@ def chapter_btn_radius(base: int, height: int, shape: str = "") -> int:
 
 FONT_BANNER = (FAMILY, 23, "bold")
 FONT_BANNER_SUB = (FAMILY, 11)
+#: The program's name in the folded banner, beside a small logo.
+FONT_FOLDED_TITLE = (FAMILY_SEMIBOLD, 14)
 
 # --------------------------------------------------------------------------
 #  The banner

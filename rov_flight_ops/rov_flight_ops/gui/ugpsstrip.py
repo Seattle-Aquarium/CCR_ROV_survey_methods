@@ -18,6 +18,7 @@ import customtkinter as ctk
 
 from ..ugps import health as H
 from . import theme as T
+from .widgets import Label, fit_wrap
 
 
 def _set(widget, **kw) -> None:
@@ -52,12 +53,15 @@ class ReceiversStrip(ctk.CTkFrame):
         f.grid(row=0, column=0, sticky="nsew", padx=8, pady=5)
         f.grid_columnconfigure(0, weight=1)
         self._frames.append(f)
-        self.title = ctk.CTkLabel(f, text="UGPS receivers", font=T.FONT_SMALL,
+        self.title = Label(f, text="UGPS receivers", font=T.FONT_SMALL,
                                   text_color=T.TEXT_MUTED, anchor="w", height=16)
         self.title.grid(row=0, column=0, sticky="ew")
-        self.verdict = ctk.CTkLabel(f, text="—", font=T.FONT_BODY, text_color=T.TEXT,
-                                    anchor="w", justify="left", height=18, wraplength=260)
+        self.verdict = Label(f, text="—", font=T.FONT_BODY, text_color=T.TEXT,
+                             anchor="w", justify="left", wraplength=260)
         self.verdict.grid(row=1, column=0, sticky="ew")
+        # Wrapped to its own column, which on the field laptop is narrower
+        # than the fixed 260 it had, so the end of the sentence was cut off.
+        fit_wrap(f, self.verdict, margin=4)
 
         self.cells = []
         for i in range(n):
@@ -65,10 +69,10 @@ class ReceiversStrip(ctk.CTkFrame):
             c.grid(row=0, column=i + 1, sticky="nsew", padx=6, pady=5)
             c.grid_columnconfigure(0, weight=1)
             self._frames.append(c)
-            head = ctk.CTkLabel(c, text=f"Rx {i}", font=T.FONT_SMALL,
+            head = Label(c, text=f"Rx {i}", font=T.FONT_SMALL,
                                 text_color=T.TEXT_MUTED, anchor="w", height=16)
             head.grid(row=0, column=0, sticky="ew")
-            value = ctk.CTkLabel(c, text="—", font=T.FONT_BODY, text_color=T.TEXT,
+            value = Label(c, text="—", font=T.FONT_BODY, text_color=T.TEXT,
                                  anchor="w", height=18)
             value.grid(row=1, column=0, sticky="ew")
             # A plain Tk canvas is not scaled with the rest of the window, so
@@ -78,7 +82,7 @@ class ReceiversStrip(ctk.CTkFrame):
                               background=self._apply_appearance_mode(T.SURFACE))
             spark.grid(row=2, column=0, sticky="ew", pady=(2, 0))
             self.cells.append((head, value, spark))
-        self.message = ctk.CTkLabel(self, text="", font=T.FONT_SMALL,
+        self.message = Label(self, text="", font=T.FONT_SMALL,
                                     text_color=T.TEXT_MUTED, anchor="w")
 
     # ------------------------------------------------------------------

@@ -6,7 +6,10 @@ test people learn to ignore. What they pin down is the *structure* the
 measurements led to, so that a later change that quietly undoes one of them
 fails here instead of on a boat:
 
-* only the open tab is in the grid, so a resize lays out one tab and not five;
+* only the open tab is in view and follows the window's size; the others are
+  parked off-screen at the size they had, so a resize lays out one tab and a
+  tab change maps nothing (November 2026, measured on the field laptop);
+* a parked tab does not count as shown, so its refresh timers stand down;
 * repaints driven by ``<Configure>`` are coalesced rather than run per event;
 * the banner moves what a width change moves instead of redrawing itself;
 * a report box works its scrollbars out from its text, not from what is on
@@ -34,121 +37,176 @@ from rov_flight_ops.gui.widgets import OutputBox, Repaint  # noqa: E402
 # --------------------------------------------------------------------------
 
 
-def test_only_the_open_tab_is_in_the_grid(app):
-    """Five tabs share one cell. Laying out all five to show one was where
-    most of the resize cost went."""
+def _x_of(page) -> int:
+    return int(float(page.place_info().get("x", 0)))
+
+
+def _in_view(app) -> list[str]:
+    """The tabs placed where they can be seen."""
+    return [name for name, page in app.nav._page_frames.items()
+            if page.place_info() and _x_of(page) >= 0]
+
+
+def test_only_the_open_tab_is_in_view(app):
+    """Every page shares one holder; all but the open one are parked off its
+    left edge, mapped but out of sight."""
     app.update_idletasks()
-    gridded = [name for name, page in app.nav._page_frames.items()
-               if page.grid_info()]
-    assert gridded == [app.nav.current]
+    assert _in_view(app) == [app.nav.current]
+    for name, page in app.nav._page_frames.items():
+        if name != app.nav.current:
+            info = page.place_info()
+            assert info, f"{name} is not placed at all"
+            assert _x_of(page) + int(info["width"]) < 0, f"{name} is not parked"
 
 
-def test_changing_tabs_swaps_which_one_is_laid_out(app):
+def test_changing_tabs_swaps_which_one_is_in_view(app):
     was = app.nav.current
     others = [n for n in app.nav.sections if n != was]
     try:
         app.nav.select(others[0])
         app.update_idletasks()
-        gridded = [name for name, page in app.nav._page_frames.items()
-                   if page.grid_info()]
-        assert gridded == [others[0]]
+        assert _in_view(app) == [others[0]]
     finally:
         app.nav.select(was)
 
 
-def test_a_tab_keeps_its_place_when_it_comes_back(app):
-    """grid_remove, not grid_forget: the options have to survive."""
+def test_the_open_tab_fills_the_holder(app):
     was = app.nav.current
-    page = app.nav._page_frames[was]
-    before = dict(page.grid_info())
     others = [n for n in app.nav.sections if n != was]
     try:
         app.nav.select(others[0])
         app.nav.select(was)
         app.update_idletasks()
-        after = dict(page.grid_info())
-        for key in ("row", "column", "sticky"):
-            assert str(after[key]) == str(before[key])
+        page = app.nav._page_frames[was]
+        info = page.place_info()
+        w, h = app.nav._holder_px
+        assert (int(info["width"]), int(info["height"])) == (w, h)
+        assert (_x_of(page), int(float(info["y"]))) == (0, 0)
     finally:
         app.nav.select(was)
 
 
-def _run_warm(app, seconds: float = 4.0) -> list[str]:
-    """Run a warm-up to completion, returning the tabs it opened, in order."""
+def test_a_resize_lays_out_only_the_open_tab(app):
+    """What parking is for: a parked page keeps the size it had, so dragging
+    a window edge re-lays-out one page, not eight."""
+    nav = app.nav
+    was = nav.current
+    parked = next(n for n in nav.sections if n != was)
+    before = dict(nav._sized)
+    old = nav._holder_px
+
+    class _Event:
+        # Absolute: the test window is withdrawn, so its holder may be 1 px.
+        width, height = 903, 611
+
+    try:
+        nav._configured_at = 0.0               # a quiet spell: applied at once
+        nav._holder_configured(_Event)
+        assert nav._sized[was] == (903, 611)
+        assert nav._sized[parked] == before[parked]
+        info = nav._page_frames[parked].place_info()
+        assert (int(info["width"]), int(info["height"])) == before[parked]
+    finally:
+        class _Back:
+            width, height = old
+        nav._configured_at = 0.0
+        nav._holder_configured(_Back)
+        app.update_idletasks()
+
+
+def test_a_drag_lays_the_page_out_a_few_times_a_second_not_at_every_step(app):
+    """A window manager sends a size for every few pixels the pointer moves,
+    and each re-layout of a busy page is a few hundred milliseconds on the
+    field laptop. A burst is folded into one pass, at the newest size."""
+    nav = app.nav
+    was = nav.current
+    old = nav._holder_px
+    shown_at = []
+    real_show = nav._show
+    nav._show = lambda name: (shown_at.append(nav._holder_px), real_show(name))
+
+    def step(w, h):
+        class _E:
+            width, height = w, h
+        nav._holder_configured(_E)
+
+    try:
+        nav._configured_at = 0.0
+        step(900, 600)                      # after a quiet spell: at once
+        for w in range(901, 921):           # then a drag
+            step(w, 600)
+        assert shown_at == [(900, 600)], "every step of the drag was laid out"
+        assert nav._resize_after is not None, "nothing is waiting for the drag"
+        deadline = time.monotonic() + 3.0
+        while nav._resize_after is not None and time.monotonic() < deadline:
+            app.update()
+            time.sleep(0.01)
+        assert shown_at[-1] == (920, 600), "the last pass is at the size it ended"
+        assert nav._sized[was] == (920, 600)
+        assert len(shown_at) == 2
+    finally:
+        nav._show = real_show
+        class _Back:
+            width, height = old
+        nav._configured_at = 0.0
+        nav._holder_configured(_Back)
+        app.update_idletasks()
+
+
+def test_a_parked_tab_is_not_shown_though_tk_says_it_is_mapped(app):
+    """Tk calls everything on a parked page mapped and viewable, so the pages'
+    refresh timers ask the window instead -- or every tab would be redrawn
+    whichever one was open."""
+    from rov_flight_ops.gui.widgets import shown
+
+    was = app.nav.current
+    try:
+        app.nav.select("Monitoring")
+        app.update_idletasks()
+        nav_page = app.pages["navigation"]
+        assert not app.is_shown(nav_page.numbers)
+        assert not shown(nav_page.map.canvas)
+        assert not nav_page.on_screen()
+        app.nav.select("Navigation")
+        app.update_idletasks()
+        assert nav_page.on_screen()
+        assert not shown(app.pages["monitor"].canvas)
+    finally:
+        app.nav.select(was)
+
+
+def test_warming_lays_out_every_parked_tab_without_opening_any(app):
+    """Each page's first layout is its most expensive. Parked pages are laid
+    out where nobody can see them, one per turn of the event loop -- without
+    going through `select`, so the open tab never changes and nothing on
+    screen flickers past (as the version before parking did)."""
+    nav = app.nav
+    was = nav.current
     opened: list[str] = []
-    real = app.nav.select
+    real = nav.select
 
     def watched(name, notify=True, *, by_user=True):
         opened.append(name)
         return real(name, notify, by_user=by_user)
 
-    app.nav.select = watched                      # type: ignore[method-assign]
+    nav.select = watched                          # type: ignore[method-assign]
     try:
-        # Let any warm-up already under way -- the one start-up begins --
-        # finish, so two are never going round at once.
-        deadline = time.monotonic() + seconds
-        while app.nav._warm_home is not None and time.monotonic() < deadline:
+        for name in nav.sections:
+            if name != was:
+                nav._sized[name] = (1, 1)         # as if never laid out
+        nav.warm()
+        deadline = time.monotonic() + 10.0
+        while nav.warming and time.monotonic() < deadline:
             app.update()
             time.sleep(0.005)
-        opened.clear()
-        # The warm-up stands down once anybody has chosen a tab, and this test
-        # -- or an earlier one on the shared window -- did exactly that. A
-        # fresh start-up is what is being simulated here.
-        app.nav._chosen = False
-        app.nav.warm()
-        want = set(app.nav.sections)
-        deadline = time.monotonic() + seconds
-        while not want <= set(opened) and time.monotonic() < deadline:
-            app.update()
-            time.sleep(0.005)
-        # ... and the pass back to where it started.
-        deadline = time.monotonic() + seconds
-        while app.nav._warm_home is not None and time.monotonic() < deadline:
-            app.update()
-            time.sleep(0.005)
-        app.update()
+        assert not nav.warming
+        assert opened == [], "warming must not open a tab"
+        assert nav.current == was
+        for name in nav.sections:
+            assert nav._sized[name] == nav._holder_px, f"{name} was not laid out"
+        assert _in_view(app) == [was]
     finally:
-        app.nav.select = real                     # type: ignore[method-assign]
-    return opened
-
-
-def test_warming_opens_every_tab_and_comes_back(app):
-    """Otherwise the first visit to each tab pays for its whole layout at the
-    moment somebody clicks it -- 242 ms against 43 ms, measured."""
-    was = app.nav.current
-    try:
-        app.nav.select(app.nav.sections[0])
-        home = app.nav.current
-        opened = _run_warm(app)
-        assert set(opened) >= set(app.nav.sections), "every tab has to be warmed"
-        assert app.nav.current == home, "and it has to put the tab back"
-        gridded = [name for name, page in app.nav._page_frames.items()
-                   if page.grid_info()]
-        assert gridded == [home]
-    finally:
-        app.nav.select(was)
-
-
-def test_warming_goes_through_select_rather_than_gridding_by_hand(app):
-    """The lesson from the version of this that shipped blank tabs.
-
-    Gridding a page, laying it out and taking it straight back out never lets
-    it finish *mapping*, and every widget inside a canvas-embedded frame --
-    which is every card on every tab, because each tab scrolls -- is then
-    left believing it was never shown. The tab opened, its geometry was right
-    to the pixel, `winfo_ismapped` and `winfo_viewable` both said yes, and it
-    drew nothing at all. No property of the widget tree gave it away; only a
-    screenshot did.
-
-    So the rule is that warming uses the same path a click uses, and this is
-    what holds it there. Every tab it warms has to arrive through `select`.
-    """
-    was = app.nav.current
-    try:
-        opened = _run_warm(app)
-        assert set(opened) >= set(app.nav.sections)
-    finally:
-        app.nav.select(was)
+        nav.select = real                         # type: ignore[method-assign]
 
 
 # --------------------------------------------------------------------------

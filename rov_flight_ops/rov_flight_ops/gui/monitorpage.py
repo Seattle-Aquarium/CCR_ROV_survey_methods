@@ -48,11 +48,14 @@ from ..sim.laptop import NOT_ON_FIELD_LAPTOP
 from . import theme as T
 from .widgets import (
     Card,
+    Label,
     Repaint,
     button,
+    elide,
     entry,
     fit_wrap,
     label,
+    shown,
 )
 
 #: How far back the charts look. A survey transect is a few minutes, so the
@@ -69,6 +72,9 @@ DEFAULT_WINDOW = "10 min"
 #: Tall enough for a name, its unit and rate, its thresholds, a value and a
 #: line that can be read at arm's length on a laptop in daylight.
 ROW_H = 86
+#: The same on a compact screen: the rate and the thresholds share a line,
+#: so seven strips are a screen's height rather than a screen and a half.
+ROW_H_COMPACT = 66
 #: Room at the left for the reading's name and thresholds, and for its value.
 NAME_W = 236
 VALUE_W = 136
@@ -150,6 +156,9 @@ MIN_SPAN_SHARE = 0.06
 #: How much history before the window a band can need: the longest smoothing
 #: or counting window in `bands`.
 BAND_MEMORY_S = 70.0
+
+#: Logical pixels of strip per point drawn. See `_plot` for why it is not one.
+PLOT_PX_PER_POINT = 3.0
 
 #: How much coarser the lines are drawn while the window is being resized.
 #: The shape is what these charts are for and the shape survives it; the
@@ -260,6 +269,7 @@ class MonitorPage(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
         self._recorder = None
+        self._row_h = ROW_H_COMPACT if T.compact() else ROW_H
         self._group = next(iter(laptop.GROUPS))
         self._window = DEFAULT_WINDOW
         self._ticking = False
@@ -292,7 +302,7 @@ class MonitorPage(ctk.CTkFrame):
         board_parent, flight_parent, chart_parent = parents
         from .goboard import GoBoard
         self.board = GoBoard(board_parent)
-        self.board.grid(row=rows[0], column=0, sticky="nsew", pady=(0, 12))
+        self.board.grid(row=rows[0], column=0, sticky="nsew", pady=(0, T.GAP))
         self._build_flight_card(flight_parent, rows[1])
         self._build_chart_card(chart_parent, rows[2])
 
@@ -304,8 +314,13 @@ class MonitorPage(ctk.CTkFrame):
         """Three lines, one per thing done here: choose the folder, start or
         stop the recording, check the path to the vehicle."""
         c = Card(parent, "2.  Flight")
-        c.grid(row=row, column=0, sticky="nsew", pady=(0, 12))
+        c.grid(row=row, column=0, sticky="nsew", pady=(0, T.GAP))
         b = c.body
+        # The card gives its body's first column a weight, for one-column
+        # cards. Here that column is the row names, and with a weight it took
+        # half of any shortfall in width: on a narrow screen "Folder" and
+        # "Recording" were cut to "Folde" and "Reco". Only the rows stretch.
+        b.grid_columnconfigure(0, weight=0)
         b.grid_columnconfigure(1, weight=1)
         for r, text in enumerate(("Folder", "Recording", "Vehicle", "Note")):
             label(b, text, muted=True).grid(row=r, column=0, sticky="w",
@@ -328,7 +343,7 @@ class MonitorPage(ctk.CTkFrame):
                ).grid(row=0, column=2, padx=(6, 0))
         # One line: what the recorder is doing. Everything longer goes to the
         # log at the foot of the window.
-        self.state_label = ctk.CTkLabel(r, text="Not watching.", font=T.FONT_SMALL,
+        self.state_label = Label(r, text="Not watching.", font=T.FONT_SMALL,
                                         text_color=T.TEXT_MUTED, anchor="w")
         self.state_label.grid(row=0, column=3, sticky="ew", padx=(10, 0))
 
@@ -490,7 +505,7 @@ class MonitorPage(ctk.CTkFrame):
         self.window_pick.set(self._window)
         self.window_pick.grid(row=0, column=1, sticky="e", padx=(18, 0))
 
-        self.group_note = ctk.CTkLabel(
+        self.group_note = Label(
             c.body, text=laptop.GROUP_NOTES.get(self._group, ""),
             font=T.FONT_SMALL, text_color=T.TEXT_MUTED, anchor="w",
             justify="left", wraplength=880)
@@ -500,7 +515,7 @@ class MonitorPage(ctk.CTkFrame):
 
         self.canvas = tkinter.Canvas(
             c.body, highlightthickness=1, borderwidth=0,
-            height=int(ROW_H * 7 * (T.scale_of(c.body) or 1.0)),
+            height=int(self._row_h * 7 * (T.scale_of(c.body) or 1.0)),
             background=self._apply_appearance_mode(T.FIELD_BG),
             highlightbackground=self._apply_appearance_mode(T.BORDER))
         self.canvas.grid(row=2, column=0, sticky="ew")
@@ -593,7 +608,7 @@ class MonitorPage(ctk.CTkFrame):
         rec = getattr(self.app, "recorder", None)
         try:
             self._sync_buttons()
-            if self.canvas.winfo_ismapped():
+            if shown(self.canvas):
                 self._update_state()
         except Exception:
             pass
@@ -661,10 +676,10 @@ class MonitorPage(ctk.CTkFrame):
         try:
             # The canvas, not this frame: on the Monitoring tab the cards are
             # built into the tab's own column and this frame is never shown.
-            if self.canvas.winfo_ismapped():
+            if shown(self.canvas):
                 self._update_state()
                 self._redraw()
-            if self.board.winfo_ismapped():
+            if shown(self.board):
                 self._update_board()
         except Exception:
             import logging
@@ -824,12 +839,7 @@ class MonitorPage(ctk.CTkFrame):
 
     def _fit(self, text: str, font: tuple, s: float, room: float) -> str:
         """`text` cut to `room` pixels in `font`, with an ellipsis if it was."""
-        f = self._font(font, s)
-        if f.measure(text) <= room:
-            return text
-        while text and f.measure(text + "…") > room:
-            text = text[:-1]
-        return text + "…"
+        return elide(self._font(font, s), text, room)
 
     def _colors(self) -> dict:
         m = self._apply_appearance_mode
@@ -852,7 +862,7 @@ class MonitorPage(ctk.CTkFrame):
             return
         rec = getattr(self.app, "recorder", None)
         columns = laptop.GROUPS.get(self._group, ())
-        total = int((ROW_H * max(1, len(columns)) + TIME_H) * s)
+        total = int((self._row_h * max(1, len(columns)) + TIME_H) * s)
         if int(cv.cget("height")) != total:
             cv.configure(height=total)
 
@@ -873,7 +883,7 @@ class MonitorPage(ctk.CTkFrame):
         c = self._colors()
         x0 = (NAME_W + VALUE_W) * s
         x1 = width - (AXIS_W + 8) * s
-        plot_bottom = ROW_H * len(columns) * s
+        plot_bottom = self._row_h * len(columns) * s
         self._geom = {"s": s, "width": width, "columns": columns,
                       "x0": x0, "x1": x1}
 
@@ -905,8 +915,8 @@ class MonitorPage(ctk.CTkFrame):
     def _strip(self, cv, rec, i, column, latest, now, span, c, s, width,
                x0, x1, simulated) -> None:
         """One reading: its name and thresholds, its value and level, its line."""
-        top = i * ROW_H * s
-        bottom = top + ROW_H * s
+        top = i * self._row_h * s
+        bottom = top + self._row_h * s
         inset = STRIP_GAP / 2 * s
         cv.create_rectangle(2 * s, top + inset, width - 2 * s, bottom - inset,
                             fill=c["strip"], outline=c["edge"])
@@ -926,27 +936,35 @@ class MonitorPage(ctk.CTkFrame):
         name_room = (NAME_W - 22) * s
         f_name = T.scale_font(FONT_NAME, s)
         f_note = T.scale_font(FONT_NOTE, s)
-        cv.create_text(14 * s, top + 17 * s, anchor="w", fill=c["text"], font=f_name,
-                       text=self._fit(column, FONT_NAME, s, name_room))
         unit = laptop.UNITS.get(column, "")
-        cv.create_text(14 * s, top + 36 * s, anchor="w", fill=c["muted"],
-                       font=f_note, text=hz_text(refresh_hz(column)))
         limits = bands.threshold_text(column, unit)
-        if limits:
-            cv.create_text(14 * s, top + 53 * s, anchor="w", fill=c["muted"],
-                           font=f_note, text=self._fit(limits, FONT_NOTE, s, name_room))
+        rate = hz_text(refresh_hz(column))
+        if self._row_h < ROW_H:
+            # Compact: the rate and the thresholds on one line under the name.
+            lines = [(column, FONT_NAME, f_name, c["text"]),
+                     (f"{rate}   {limits}" if limits else rate, FONT_NOTE, f_note,
+                      c["muted"])]
+            offsets = (15, 33, 50)
+        else:
+            lines = [(column, FONT_NAME, f_name, c["text"]),
+                     (rate, FONT_NOTE, f_note, c["muted"])]
+            if limits:
+                lines.append((limits, FONT_NOTE, f_note, c["muted"]))
+            offsets = (17, 36, 53, 70)
         if simulated and column in NOT_ON_FIELD_LAPTOP:
-            cv.create_text(14 * s, top + 70 * s, anchor="w", fill=c["sim"],
-                           font=f_note,
-                           text=self._fit("◇ simulated (blank on L342-D)",
-                                          FONT_NOTE, s, name_room))
+            lines.append(("◇ simulated (blank on L342-D)", FONT_NOTE, f_note, c["sim"]))
+        for (text, spec, font, fill), dy in zip(lines, offsets, strict=False):
+            cv.create_text(14 * s, top + dy * s, anchor="w", fill=fill, font=font,
+                           text=self._fit(text, spec, s, name_room))
 
         value = latest.get(column)
-        cv.create_text(x0 - 14 * s, top + ROW_H * s / 2 - 9 * s, anchor="e",
+        mid = top + self._row_h * s / 2
+        lift = 8 if self._row_h < ROW_H else 9
+        cv.create_text(x0 - 14 * s, mid - lift * s, anchor="e",
                        text=_pretty(value, column), fill=c["text"],
                        font=T.scale_font(FONT_VALUE, s))
         if level is not None:
-            cv.create_text(x0 - 14 * s, top + ROW_H * s / 2 + 15 * s, anchor="e",
+            cv.create_text(x0 - 14 * s, mid + (lift + 5) * s, anchor="e",
                            fill=c[level], font=T.scale_font(FONT_LEVEL, s),
                            text=f"{bands.LEVEL_GLYPHS[level]} {bands.LEVEL_WORDS[level]}")
 
@@ -956,11 +974,11 @@ class MonitorPage(ctk.CTkFrame):
     def _plot(self, cv, times, values, levels, column, top, c, s,
               x0, x1, now, span) -> None:
         """The line, coloured by level, on its own scale with its own axis."""
-        y0, y1 = top + PAD_Y * s, top + (ROW_H - PAD_Y) * s
+        y0, y1 = top + PAD_Y * s, top + (self._row_h - PAD_Y) * s
         if x1 - x0 < 30 * s:
             return
         f_axis = T.scale_font(FONT_AXIS, s)
-        box_top, box_bottom = top + (STRIP_GAP / 2 + 3) * s, top + (ROW_H - STRIP_GAP / 2 - 3) * s
+        box_top, box_bottom = top + (STRIP_GAP / 2 + 3) * s, top + (self._row_h - STRIP_GAP / 2 - 3) * s
         cv.create_rectangle(x0, box_top, x1, box_bottom, fill=c["plot"],
                             outline=c["edge"])
         for ago in getattr(self, "_ticks", ()):
@@ -1026,24 +1044,46 @@ class MonitorPage(ctk.CTkFrame):
                     y = y_of(val)
                     cv.create_line(x0, y, x1, y, fill=c[lv], dash=(5, 4))
 
-        # Decimated to the pixel width -- coarser still while a window edge is
-        # being dragged -- with each bucket coloured by the worst level in it,
-        # so a one-second spike into red is never decimated away.
-        pixels = max(1, int(x1 - x0))
+        # Decimated to one point every few pixels -- coarser still while a
+        # window edge is being dragged -- with each bucket coloured by the
+        # worst level in it, so a one-second spike into red is never
+        # decimated away, and drawn at the bucket's most outstanding sample
+        # (its highest or lowest, whichever stands further from the line so
+        # far), so the spike's height is not lost either.
+        #
+        # Why so few points: Tk on Windows draws a line wider than one pixel
+        # through GDI's geometric pens, and their cost climbs much faster
+        # than the number of points. Measured on the field laptop, seven
+        # strips of 600 points took 55 ms to draw and of 1,800 points 640 ms
+        # -- every second, on a 30-minute window with half an hour of history
+        # in it. Bevelled rather than rounded joins draw the same line at a
+        # third of that; a point every few pixels is still finer than the eye
+        # can follow on a strip a hand's width tall.
+        pixels = max(1, int((x1 - x0) / (PLOT_PX_PER_POINT * s)))
         if self._repaint.busy:
             pixels = max(1, pixels // DRAG_DECIMATION)
         n = len(values)
-        step = max(1, n // pixels)
+        step = max(1, -(-n // pixels))
         gap = max(3.0, 2.5 * SLOWER_THAN_ROW.get(column, laptop.DEFAULT_PERIOD_S))
         lw = max(1, int(round(2 * s)))
         runs: list[tuple[str, list]] = []
         color, coords, last = None, [], None
+        prev_v = values[0] if values else 0.0
         for k in range(0, n, step):
-            bucket = [lv for lv in levels[k:k + step] if lv is not None]
+            end = min(n, k + step)
+            bucket = [lv for lv in levels[k:end] if lv is not None]
             lv = max(bucket) if bucket else None
             pt_color = c[lv] if lv is not None else c["plain"]
-            x, y = x_of(times[k]), y_of(values[k])
-            if last is not None and times[k] - last[2] > gap * step:
+            j = k
+            if end - k > 1:
+                window = values[k:end]
+                hi_i = max(range(end - k), key=window.__getitem__)
+                lo_i = min(range(end - k), key=window.__getitem__)
+                j = k + (hi_i if window[hi_i] - prev_v >= prev_v - window[lo_i]
+                         else lo_i)
+            prev_v = values[j]
+            x, y = x_of(times[j]), y_of(values[j])
+            if last is not None and times[j] - last[2] > gap * step:
                 runs.append((color, coords))           # a blank stretch: no line
                 color, coords = pt_color, [x, y]
             elif color is None:
@@ -1053,18 +1093,18 @@ class MonitorPage(ctk.CTkFrame):
             else:
                 runs.append((color, coords))
                 color, coords = pt_color, [last[0], last[1], x, y]
-            last = (x, y, times[k])
+            last = (x, y, times[j])
         runs.append((color, coords))
         for col, pts in runs:
             if len(pts) >= 4:
-                cv.create_line(*pts, fill=col, width=lw)
+                cv.create_line(*pts, fill=col, width=lw, joinstyle="bevel")
             elif len(pts) == 2:
                 cv.create_oval(pts[0] - lw, pts[1] - lw, pts[0] + lw, pts[1] + lw,
                                fill=col, outline="")
 
     def _placeholder(self, cv, width, s, message: str) -> None:
-        cv.configure(height=int(ROW_H * 3 * s))
-        cv.create_text(width / 2, ROW_H * 1.5 * s, text=message,
+        cv.configure(height=int(self._row_h * 3 * s))
+        cv.create_text(width / 2, self._row_h * 1.5 * s, text=message,
                        fill=self._apply_appearance_mode(T.TEXT_MUTED),
                        font=T.scale_font(T.FONT_BODY, s))
 
@@ -1077,7 +1117,7 @@ class MonitorPage(ctk.CTkFrame):
         if not geom:
             return
         s = geom["s"]
-        i = int(event.y // (ROW_H * s))
+        i = int(event.y // (self._row_h * s))
         over = event.x < geom["x0"] and 0 <= i < len(geom["columns"])
         want = (geom["columns"][i], event.x, event.y) if over else None
         if (want and self._hover and want[0] == self._hover[0]

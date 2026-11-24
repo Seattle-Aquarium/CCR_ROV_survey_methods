@@ -33,6 +33,15 @@ DEFAULTS = {
     "monitor_pair_share": None,
     "dvl_pair_share": None,
     "logs_pair_share": None,
+    #: The window. `banner_open` is None until the fold button is first
+    #: pressed -- folded on a small screen, open on a large one -- and then
+    #: what it was left as; likewise `window_zoomed` for maximized.
+    "banner_open": None,
+    "window_zoomed": None,
+    #: "auto" chooses from the screen: "compact" when its work area is under
+    #: 860 logical pixels tall (the field laptops), else "comfortable". Set
+    #: either by hand to override.
+    "ui_density": "auto",
 }
 
 

@@ -11,9 +11,316 @@ import customtkinter as ctk
 from ..survey import Pause, Site, Transect
 from . import theme as T
 
+# --------------------------------------------------------------------------
+#  A label in one native window
+# --------------------------------------------------------------------------
+
+#: A transparent 1x1 image. A Tk label showing an image measures its width
+#: and height in pixels rather than in characters, which is the only way to
+#: give a text label a width in pixels.
+_BLANKS: dict = {}
+
+
+def _blank(master):
+    root = master._root()
+    img = _BLANKS.get(str(root))
+    if img is None:
+        img = _BLANKS[str(root)] = tkinter.PhotoImage(master=root, width=1, height=1)
+    return img
+
+
+def _scaling_of(widget) -> float:
+    try:
+        return float(ctk.ScalingTracker.get_widget_scaling(widget)) or 1.0
+    except Exception:
+        return 1.0
+
+
+def _mode_index() -> int:
+    try:
+        return 1 if ctk.AppearanceModeTracker.get_mode() == 1 else 0
+    except Exception:
+        return 1
+
+
+def _pick(color, mode: int):
+    if isinstance(color, (tuple, list)):
+        return color[mode]
+    return color
+
+
+def tk_font(font, scaling: float):
+    """A (family, size[, style...]) font as Tk takes it, sized as CustomTkinter
+    sizes its own: the size in pixels, times the display's scaling."""
+    if not isinstance(font, (tuple, list)) or len(font) < 2:
+        return font
+    px = -abs(round(font[1] * scaling))
+    return (font[0], px, *font[2:])
+
+
+class Label(tkinter.Label):
+    """Text in one native window, where a CTkLabel takes three.
+
+    CustomTkinter draws every label as a Tk label on a canvas of its own, in
+    a Tk frame: three native windows for one line of text, a rounded rectangle
+    nobody sees redrawn whenever the label changes size, and a floor of 28
+    pixels of height whatever the text needs. On Windows every Tk widget is a
+    real child window, to be mapped, moved and painted; measured on the field
+    laptop, showing a page costs about a quarter of a millisecond per window,
+    and this program had some 330 of these labels -- 40 % of every window in
+    it. A page of three hundred labels opened in 245 ms as CTkLabels and in
+    88 ms as plain ones, and resized in 266 ms against 120.
+
+    This takes the options the program gives a CTkLabel -- `text`, `font` as a
+    (family, size[, "bold"]) tuple, `text_color` and `fg_color` as (light,
+    dark) pairs, `anchor`, `justify`, `wraplength` and `width` in logical
+    pixels, `cursor` -- and follows the appearance mode and the display's
+    scaling as CustomTkinter's widgets do. With no `fg_color` its background
+    is whatever it sits on, found the way CustomTkinter finds a transparent
+    widget's. `height` is accepted and ignored: a label is as tall as its
+    text, which is the point. Setting an option to the value it already has
+    costs nothing, so callers need not keep their own caches.
+    """
+
+    def __init__(self, master, text: str = "", font=None, text_color=None,
+                 fg_color=None, bg_color="transparent", anchor: str = "center",
+                 justify: str = "center", wraplength: int = 0, width: int = 0,
+                 height: int = 0, cursor: str = "", **kw):
+        self._lb_scaling = _scaling_of(master)
+        self._lb_mode = _mode_index()
+        self._lb_font = font if font is not None else T.FONT_BODY
+        self._lb_text_color = text_color if text_color is not None else T.TEXT
+        self._lb_fg_color = fg_color if fg_color not in (None, "transparent") else None
+        self._lb_bg_color = self._own_bg(master) if bg_color == "transparent" else bg_color
+        self._lb_wraplength = int(wraplength or 0)
+        self._lb_width = int(width or 0)
+        self._lb_blank_root = master
+        self._lb_shown: dict = {"text": text, "anchor": anchor, "justify": justify,
+                                "cursor": cursor}
+        for key in ("corner_radius", "text_color_disabled", "state", "compound"):
+            kw.pop(key, None)
+        opts = dict(text=text, anchor=anchor, justify=justify, cursor=cursor,
+                    bd=0, padx=0, pady=0, highlightthickness=0,
+                    **self._tk_colors(), **self._tk_sizes())
+        opts.update(kw)
+        super().__init__(master, **opts)
+        try:
+            ctk.AppearanceModeTracker.add(self._set_appearance_mode, self)
+            ctk.ScalingTracker.add_widget(self._set_scaling, self)
+        except Exception:
+            pass
+
+    # ---- what Tk is given ------------------------------------------------
+
+    def _own_bg(self, master):
+        """The colour behind a transparent widget, as CustomTkinter finds it."""
+        try:
+            from customtkinter.windows.widgets.core_widget_classes.ctk_base_class import (
+                CTkBaseClass,
+            )
+            return CTkBaseClass._detect_color_of_master(self, master)
+        except Exception:
+            try:
+                return master.cget("bg")
+            except Exception:
+                return T.BG
+
+    # CustomTkinter's own detector recurses through this name.
+    def _detect_color_of_master(self, master_widget=None):
+        return self._own_bg(master_widget if master_widget is not None else self.master)
+
+    def _tk_colors(self) -> dict:
+        m = self._lb_mode
+        bg = _pick(self._lb_fg_color if self._lb_fg_color is not None else self._lb_bg_color, m)
+        return {"fg": _pick(self._lb_text_color, m), "bg": bg}
+
+    def _tk_sizes(self) -> dict:
+        s = self._lb_scaling
+        out = {"font": tk_font(self._lb_font, s),
+               "wraplength": int(round(self._lb_wraplength * s))}
+        if self._lb_width:
+            out.update(image=_blank(self._lb_blank_root), compound="center",
+                       width=int(round(self._lb_width * s)))
+        return out
+
+    # ---- the CTkLabel surface --------------------------------------------
+
+    def configure(self, cnf=None, **kw):
+        if cnf is not None and not kw:
+            if isinstance(cnf, str):
+                return self.cget(cnf)
+            kw = dict(cnf)
+        if not kw:
+            return super().configure()
+        tk_kw: dict = {}
+        colors = sizes = False
+        if "text" in kw:
+            text = kw.pop("text")
+            if self._lb_shown.get("text") != text:
+                self._lb_shown["text"] = text
+                tk_kw["text"] = text
+        if "font" in kw:
+            font = kw.pop("font")
+            if font is not None and font != self._lb_font:
+                self._lb_font, sizes = font, True
+        if "wraplength" in kw:
+            wrap = int(kw.pop("wraplength") or 0)
+            if wrap != self._lb_wraplength:
+                self._lb_wraplength, sizes = wrap, True
+        if "width" in kw:
+            width = int(kw.pop("width") or 0)
+            if width != self._lb_width:
+                self._lb_width, sizes = width, True
+                if not width:
+                    tk_kw.update(image="", width=0)
+        kw.pop("height", None)
+        if "text_color" in kw:
+            color = kw.pop("text_color")
+            if color is not None and color != self._lb_text_color:
+                self._lb_text_color, colors = color, True
+        if "fg_color" in kw:
+            color = kw.pop("fg_color")
+            color = None if color in (None, "transparent") else color
+            if color != self._lb_fg_color:
+                self._lb_fg_color, colors = color, True
+        if "bg_color" in kw:
+            color = kw.pop("bg_color")
+            self._lb_bg_color = (self._own_bg(self.master) if color == "transparent"
+                              else color)
+            colors = True
+        for key in ("anchor", "justify", "cursor"):
+            if key in kw:
+                value = kw.pop(key)
+                if self._lb_shown.get(key) != value:
+                    self._lb_shown[key] = value
+                    tk_kw[key] = value
+        for key in ("corner_radius", "text_color_disabled", "state", "compound"):
+            kw.pop(key, None)
+        if colors:
+            tk_kw.update(self._tk_colors())
+        if sizes:
+            tk_kw.update(self._tk_sizes())
+        tk_kw.update(kw)
+        if tk_kw:
+            super().configure(**tk_kw)
+        return None
+
+    config = configure
+
+    def cget(self, key: str):
+        if key == "text":
+            return self._lb_shown.get("text", "")
+        if key == "font":
+            return self._lb_font
+        if key == "text_color":
+            return self._lb_text_color
+        if key == "fg_color":
+            return self._lb_fg_color or "transparent"
+        if key == "bg_color":
+            return self._lb_bg_color
+        if key == "wraplength":
+            return self._lb_wraplength
+        if key == "width":
+            return self._lb_width
+        if key in ("anchor", "justify", "cursor"):
+            return self._lb_shown.get(key, super().cget(key))
+        return super().cget(key)
+
+    def drawn_font(self):
+        """The font as Tk draws it -- scaled -- for measuring."""
+        return tkinter.Label.cget(self, "font")
+
+    # ---- geometry, scaled as CustomTkinter scales its widgets' -------------
+    #
+    # CustomTkinter multiplies the padding given to `grid` and `pack`, and the
+    # position given to `place`, by the display's scaling. A plain Tk widget
+    # does not, so without this every gap beside a label would shrink by a
+    # third on the field laptop and the pages would not line up.
+
+    def _scaled(self, kw: dict) -> dict:
+        s = self._lb_scaling
+
+        def one(v):
+            return v * s if isinstance(v, float) else int(v * s)
+        out = dict(kw)
+        for key in ("padx", "pady"):
+            v = out.get(key)
+            if isinstance(v, (int, float)):
+                out[key] = one(v)
+            elif isinstance(v, tuple):
+                out[key] = tuple(one(x) for x in v)
+        for key in ("x", "y"):
+            if isinstance(out.get(key), (int, float)):
+                out[key] = one(out[key])
+        return out
+
+    def grid(self, cnf=None, **kw):
+        if cnf:
+            kw = {**cnf, **kw}
+        if kw:
+            self._lb_geometry = ("grid", kw)
+        return tkinter.Grid.grid_configure(self, **self._scaled(kw))
+
+    grid_configure = grid
+
+    def pack(self, cnf=None, **kw):
+        if cnf:
+            kw = {**cnf, **kw}
+        if kw:
+            self._lb_geometry = ("pack", kw)
+        return tkinter.Pack.pack_configure(self, **self._scaled(kw))
+
+    pack_configure = pack
+
+    def place(self, cnf=None, **kw):
+        if cnf:
+            kw = {**cnf, **kw}
+        if kw:
+            self._lb_geometry = ("place", kw)
+        return tkinter.Place.place_configure(self, **self._scaled(kw))
+
+    place_configure = place
+
+    # ---- following the window --------------------------------------------
+
+    def _set_appearance_mode(self, mode_string) -> None:
+        mode = 1 if str(mode_string).lower() == "dark" else 0
+        if mode == self._lb_mode:
+            return
+        self._lb_mode = mode
+        try:
+            super().configure(**self._tk_colors())
+        except tkinter.TclError:
+            pass
+
+    def _set_scaling(self, widget_scaling, _window_scaling=None) -> None:
+        if widget_scaling == self._lb_scaling:
+            return
+        self._lb_scaling = widget_scaling
+        try:
+            super().configure(**self._tk_sizes())
+            kind, kw = getattr(self, "_lb_geometry", (None, None))
+            # Re-applied only if still managed: a label taken out of the grid
+            # must not be put back by a change of monitor.
+            if kind and self.winfo_manager() == kind:
+                getattr(self, kind)(**kw)
+        except tkinter.TclError:
+            pass
+
+    def destroy(self) -> None:
+        try:
+            ctk.AppearanceModeTracker.remove(self._set_appearance_mode)
+            ctk.ScalingTracker.remove_widget(self._set_scaling, self)
+        except Exception:
+            pass
+        super().destroy()
+
 
 class Card(ctk.CTkFrame):
     """A titled section panel."""
+
+    #: The longest subtitle put beside its title on a compact screen.
+    BESIDE_MAX_CHARS = 130
 
     def __init__(self, master, title: str, subtitle: str = "", **kw):
         super().__init__(master, fg_color=T.SURFACE, corner_radius=T.RADIUS,
@@ -22,15 +329,24 @@ class Card(ctk.CTkFrame):
         head = ctk.CTkFrame(self, fg_color="transparent")
         head.grid(row=0, column=0, sticky="ew", padx=T.PAD, pady=(T.PAD, 4))
         head.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(head, text=title, font=T.FONT_H1, text_color=T.HEADING
-                     ).grid(row=0, column=0, sticky="w")
+        self.head = head
+        self.title_label = Label(head, text=title, font=T.FONT_H1,
+                                 text_color=T.HEADING, anchor="w")
+        self.title_label.grid(row=0, column=0, sticky="w")
         self._subtitle = None
+        #: Compact: the subtitle beside the title rather than under it -- if
+        #: it is a sentence or so. A paragraph beside a title reads as a
+        #: column of its own, so a long one stays underneath.
+        self._beside = T.compact() and len(subtitle) <= self.BESIDE_MAX_CHARS
         if subtitle:
-            self._subtitle = ctk.CTkLabel(head, text=subtitle, font=T.FONT_SMALL,
-                                          text_color=T.TEXT_MUTED,
-                                          justify="left", anchor="w")
-            self._subtitle.grid(row=1, column=0, columnspan=2, sticky="ew",
-                                pady=(2, 0))
+            self._subtitle = Label(head, text=subtitle, font=T.FONT_SMALL,
+                                   text_color=T.TEXT_MUTED,
+                                   justify="left", anchor="w")
+            if self._beside:
+                self._subtitle.grid(row=0, column=1, sticky="ew", padx=(12, 0))
+            else:
+                self._subtitle.grid(row=1, column=0, columnspan=2, sticky="ew",
+                                    pady=(2, 0))
             # A label will not wrap unless it is given a width, and the card's
             # width is not known until it has been laid out. Without this a long
             # subtitle runs off the right edge of the window instead of flowing
@@ -55,14 +371,20 @@ class Card(ctk.CTkFrame):
         # The head frame is inset by T.PAD on each side, and a few pixels
         # more go to the card's own border and rounding. Erring narrow
         # costs nothing; erring wide clips the last word of the line.
-        width = event.width - 2 * T.PAD - 16
-        if width < 120:
-            return
         try:
-            scaling = ctk.ScalingTracker.get_widget_scaling(self)
+            scaling = ctk.ScalingTracker.get_widget_scaling(self) or 1.0
         except Exception:
             scaling = 1.0
-        target = int(width / (scaling or 1.0))
+        width = event.width - (2 * T.PAD + 16) * scaling
+        if self._beside:
+            # Beside the title: what the title leaves of the row.
+            try:
+                width -= self.title_label.winfo_reqwidth() + 12 * scaling
+            except Exception:
+                return
+        if width < 120:
+            return
+        target = int(width / scaling)
 
         # Re-wrapping changes the label's height, which fires <Configure> again;
         # ignoring changes of a few pixels stops that becoming a loop.
@@ -206,7 +528,7 @@ def rigid_width(root) -> float:
         except Exception:
             continue
         stack.extend(children)
-        if isinstance(w, _RIGID) or (isinstance(w, ctk.CTkLabel)
+        if isinstance(w, _RIGID) or (isinstance(w, (ctk.CTkLabel, Label))
                                      and not _wraps(w)):
             rows.add(w.master)
     for row in rows:
@@ -221,7 +543,7 @@ def rigid_width(root) -> float:
 
 
 def _wraps(widget) -> bool:
-    if not isinstance(widget, ctk.CTkLabel):
+    if not isinstance(widget, (ctk.CTkLabel, Label)):
         return False
     try:
         return int(widget.cget("wraplength") or 0) > 0
@@ -537,6 +859,68 @@ def fit_wrap(container, *labels, margin: int = 24) -> None:
     container.bind("<Configure>", fit, add="+")
 
 
+def shown(widget) -> bool:
+    """Is `widget` on screen?
+
+    Asked of the window when it can answer -- it knows which tab is open, and
+    tabs that are not open are parked off-screen, still mapped (see
+    `shell.TabStrip`) -- and of Tk otherwise. For deciding whether a periodic
+    redraw is worth doing.
+    """
+    root = widget
+    while root is not None and not isinstance(root, tkinter.Tk):
+        root = getattr(root, "master", None)
+    ask = getattr(root, "is_shown", None)
+    if callable(ask):
+        return bool(ask(widget))
+    try:
+        return bool(widget.winfo_viewable())
+    except Exception:
+        return False
+
+
+#: Texts already cut to a width, by (font, text, width). Bounded, and simply
+#: emptied when full: the same few dozen rows are refitted all day.
+_ELIDED: dict[tuple, str] = {}
+ELIDED_MAX = 4096
+
+
+def elide(font, text: str, room: float, strip: str = "") -> str:
+    """`text` cut to `room` pixels in `font`, ending in an ellipsis if it was cut.
+
+    `font` is a `tkinter.font.Font` measuring what the widget draws with.
+    The cut point is found by halving rather than by dropping one character
+    at a time: each measurement is a round trip into Tk, and the old way cost
+    one per character removed -- for the Navigation matrix, some five hundred
+    a refresh, four refreshes a second. Answers are remembered, because most
+    rows say the same thing refresh after refresh. `strip` is what is trimmed
+    off the end of a cut text before the ellipsis.
+    """
+    if not text or room <= 0:
+        return text
+    key = (str(font), text, int(room), strip)
+    hit = _ELIDED.get(key)
+    if hit is not None:
+        return hit
+    measure = font.measure
+    if measure(text) <= room:
+        out = text
+    else:
+        lo, hi = 0, len(text) - 1      # the longest prefix that fits with "…"
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if measure(text[:mid] + "…") <= room:
+                lo = mid
+            else:
+                hi = mid - 1
+        cut = text[:lo].rstrip(strip) if strip else text[:lo]
+        out = cut + "…" if cut else "…"
+    if len(_ELIDED) >= ELIDED_MAX:
+        _ELIDED.clear()
+    _ELIDED[key] = out
+    return out
+
+
 def one_line_height(wrap: str = "word") -> int:
     """The smallest an output box may get and still show a line of text.
 
@@ -740,9 +1124,9 @@ def checkbox(master, text: str, variable, command=None) -> ctk.CTkCheckBox:
                            command=command)
 
 
-def label(master, text: str, muted: bool = False, font=None) -> ctk.CTkLabel:
-    return ctk.CTkLabel(master, text=text, font=font or T.FONT_BODY,
-                        text_color=T.TEXT_MUTED if muted else T.TEXT, anchor="w")
+def label(master, text: str, muted: bool = False, font=None) -> Label:
+    return Label(master, text=text, font=font or T.FONT_BODY,
+                 text_color=T.TEXT_MUTED if muted else T.TEXT, anchor="w")
 
 
 def button(master, text, command, kind: str = "primary", width: int = 120):
@@ -775,7 +1159,7 @@ class PauseCell(ctk.CTkFrame):
         super().__init__(master, fg_color=T.SURFACE, corner_radius=6,
                          border_width=1, border_color=T.BORDER)
         self._on_remove = on_remove
-        self.index_label = ctk.CTkLabel(self, text=f"pause {index}",
+        self.index_label = Label(self, text=f"pause {index}",
                                         font=T.FONT_SMALL,
                                         text_color=T.TEXT_MUTED, anchor="w")
         self.index_label.grid(row=0, column=0, padx=(8, 6), pady=3)
@@ -842,18 +1226,20 @@ class TransectRow(ctk.CTkFrame):
                                padx=(0, 10))
         self.pauses_frame.grid_remove()
 
-        self.status = ctk.CTkLabel(self, text="", font=T.FONT_SMALL,
-                                   text_color=T.TEXT_MUTED, anchor="w",
-                                   justify="left")
+        self.status = Label(self, text="", font=T.FONT_SMALL,
+                            text_color=T.TEXT_MUTED, anchor="w",
+                            justify="left")
         self.status.grid(row=0, column=6, sticky="ew", padx=(4, 8))
 
-        button(self, "Remove", lambda: on_remove(self), "danger", width=80
-               ).grid(row=0, column=7)
-
+        # On the transect's own line, beside Remove. It used to sit on a line
+        # of its own under the end time, which made every transect two rows
+        # tall whether it had a pause or not.
         self.add_pause_btn = button(self, "+ Add pause", self.add_pause,
                                     "ghost", width=110)
-        self.add_pause_btn.grid(row=1, column=3, columnspan=2, sticky="w",
-                                pady=(0, 3))
+        self.add_pause_btn.grid(row=0, column=7, padx=(0, 6))
+
+        button(self, "Remove", lambda: on_remove(self), "danger", width=80
+               ).grid(row=0, column=8)
 
         # Wire the callbacks only now: every widget refresh() touches exists.
         for e in (self.start, self.end):
@@ -933,7 +1319,7 @@ class SiteFrame(ctk.CTkFrame):
         head.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 4))
         head.grid_columnconfigure(6, weight=1)
 
-        ctk.CTkLabel(head, text=f"Site {index}", font=T.FONT_H2,
+        Label(head, text=f"Site {index}", font=T.FONT_H2,
                      text_color=T.HEADING).grid(row=0, column=0, padx=(0, 12))
 
         label(head, "name").grid(row=0, column=1, padx=(0, 4))

@@ -29,7 +29,7 @@ from .. import mcap_health as H
 from ..ffmpeg_tools import CancelledError
 from ..telemetry_cache import cache_dir_for, plan_windows
 from . import theme as T
-from .widgets import Card, button, entry, label
+from .widgets import Card, Label, button, entry, label
 
 _STATUS_COLOR = {
     "ok": T.TEXT_MUTED,
@@ -66,7 +66,7 @@ class HealthPage(ctk.CTkFrame):
         c1 = Card(body, "3.  Recordings",
                   "The logs folder of a flight. Each .mcap is checked for "
                   "damage without reading it end to end.")
-        c1.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        c1.grid(row=0, column=0, sticky="ew", pady=(0, T.GAP))
         c1.body.grid_columnconfigure(0, weight=1)
         row = ctk.CTkFrame(c1.body, fg_color="transparent")
         row.grid(row=0, column=0, sticky="ew")
@@ -78,7 +78,7 @@ class HealthPage(ctk.CTkFrame):
                ).grid(row=0, column=2, padx=(8, 0))
 
         c2 = Card(body, "4.  What the check found", "")
-        c2.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        c2.grid(row=1, column=0, sticky="ew", pady=(0, T.GAP))
         c2.body.grid_columnconfigure(0, weight=1)
         self.table = ctk.CTkFrame(c2.body, fg_color="transparent")
         self.table.grid(row=0, column=0, sticky="ew")
@@ -87,7 +87,7 @@ class HealthPage(ctk.CTkFrame):
         self.empty.grid(row=0, column=0, sticky="w")
 
         acts = ctk.CTkFrame(c2.body, fg_color="transparent")
-        acts.grid(row=1, column=0, sticky="w", pady=(12, 0))
+        acts.grid(row=1, column=0, sticky="w", pady=(T.GAP, 0))
         self.deep_btn = button(acts, "Check telemetry coverage", self._deep,
                                "ghost", 220)
         self.deep_btn.grid(row=0, column=0)
@@ -102,7 +102,7 @@ class HealthPage(ctk.CTkFrame):
         c4 = Card(body, "5.  Autopilot logs (.BIN)",
                   "Written by the flight controller, so they survive a Pi "
                   "failure. For transects with no telemetry in the mcap.")
-        c4.grid(row=3, column=0, sticky="ew", pady=(0, 12))
+        c4.grid(row=3, column=0, sticky="ew", pady=(0, T.GAP))
         c4.body.grid_columnconfigure(0, weight=1)
         self.bins_frame = ctk.CTkFrame(c4.body, fg_color="transparent")
         self.bins_frame.grid(row=0, column=0, sticky="ew")
@@ -110,7 +110,7 @@ class HealthPage(ctk.CTkFrame):
         label(self.bins_frame, "Press Check to look for .BIN logs.", True
               ).grid(row=0, column=0, sticky="w")
         bacts = ctk.CTkFrame(c4.body, fg_color="transparent")
-        bacts.grid(row=1, column=0, sticky="w", pady=(12, 0))
+        bacts.grid(row=1, column=0, sticky="w", pady=(T.GAP, 0))
         self.bin_btn = button(bacts, "Use BIN for telemetry", self._use_bin,
                               "primary", 200)
         self.bin_btn.grid(row=0, column=0)
@@ -125,7 +125,7 @@ class HealthPage(ctk.CTkFrame):
         c3 = Card(body, "6.  Transects",
                   "Whether the telemetry each transect needs actually exists. "
                   "Needs the coverage check above.")
-        c3.grid(row=4, column=0, sticky="ew", pady=(0, 12))
+        c3.grid(row=4, column=0, sticky="ew", pady=(0, T.GAP))
         c3.body.grid_columnconfigure(0, weight=1)
         self.verdicts = ctk.CTkFrame(c3.body, fg_color="transparent")
         self.verdicts.grid(row=0, column=0, sticky="ew")
@@ -288,7 +288,7 @@ class HealthPage(ctk.CTkFrame):
                         f"–{_clock(b.boot_last + al.offset)}  ({al.note})")
             else:
                 note = f"NOT VERIFIED -- {al.note or 'no overlapping recording'}"
-            ctk.CTkLabel(row, text=note, font=T.FONT_SMALL, anchor="w",
+            Label(row, text=note, font=T.FONT_SMALL, anchor="w",
                          text_color=T.TEXT_MUTED if (al and al.trustworthy) else T.WARN
                          ).grid(row=0, column=3, sticky="w")
         ready = [b for b in self.bins
@@ -410,7 +410,7 @@ class HealthPage(ctk.CTkFrame):
             label(row, r.path.name).grid(row=0, column=0, sticky="w", padx=(0, 12))
             label(row, gb, True).grid(row=0, column=1, sticky="w", padx=(0, 12))
             label(row, span, True).grid(row=0, column=2, sticky="w", padx=(0, 12))
-            st = ctk.CTkLabel(row, text=r.status, font=T.FONT_BODY, anchor="w",
+            st = Label(row, text=r.status, font=T.FONT_BODY, anchor="w",
                               text_color=_STATUS_COLOR.get(r.status, T.TEXT))
             st.grid(row=0, column=3, sticky="w", padx=(0, 12))
             label(row, self._telemetry_cell(r), True).grid(
@@ -465,7 +465,7 @@ class HealthPage(ctk.CTkFrame):
             label(row, v.name).grid(row=0, column=0, sticky="w")
             label(row, f"{_clock(v.start)}–{_clock(v.end)}", True).grid(
                 row=0, column=1, sticky="w", padx=(0, 12))
-            ctk.CTkLabel(row, text=v.explain(), font=T.FONT_BODY, anchor="w",
+            Label(row, text=v.explain(), font=T.FONT_BODY, anchor="w",
                          text_color=T.TEXT_MUTED if v.ok else T.TEXT
                          ).grid(row=0, column=2, sticky="w")
 

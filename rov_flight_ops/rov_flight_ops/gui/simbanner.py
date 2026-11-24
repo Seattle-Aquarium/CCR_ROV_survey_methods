@@ -19,6 +19,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from . import theme as T
+from .widgets import Label
 
 #: The simulator's own colour, as (light, dark): 7.1:1 and 6.3:1 against the
 #: banner in each mode.
@@ -43,7 +44,7 @@ class SimControls:
             button_color=T.SURFACE_ALT, bg_color="transparent")
         self.switch.grid(row=0, column=0, padx=(8, 12), pady=3)
         self.line = ctk.CTkFrame(parent, fg_color="transparent", bg_color=T.HEADER_BG)
-        self.fault = ctk.CTkLabel(self.line, text="", font=T.FONT_SMALL,
+        self.fault = Label(self.line, text="", font=T.FONT_SMALL,
                                   text_color=T.TEXT_MUTED, anchor="w", height=22)
         self.fault.grid(row=0, column=0, sticky="w")
         self.reveal = ctk.CTkButton(
@@ -149,9 +150,15 @@ class SimControls:
         self._paint(sim.active, connected)
 
     def _paint(self, active: bool, connected: bool) -> None:
-        self.box.configure(border_color=SIM_COLOR if active else T.HEADER_BG)
-        self.switch.configure(text_color=SIM_COLOR if active else
-                              (T.TEXT_MUTED if connected else T.TEXT))
+        # Once a second, and the same answer almost every time: the box and
+        # the switch each redraw their whole shape on a configure, which was
+        # seven milliseconds of every second while the simulator ran.
+        look = (active, connected)
+        if look != getattr(self, "_look", None):
+            self._look = look
+            self.box.configure(border_color=SIM_COLOR if active else T.HEADER_BG)
+            self.switch.configure(text_color=SIM_COLOR if active else
+                                  (T.TEXT_MUTED if connected else T.TEXT))
         text, tone, button = self.sim.banner(self.app.nav.current) if active \
             else ("", "muted", "")
         shown = (text, tone, button)

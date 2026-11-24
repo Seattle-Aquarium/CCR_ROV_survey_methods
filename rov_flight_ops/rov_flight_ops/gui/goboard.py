@@ -20,7 +20,7 @@ import customtkinter as ctk
 
 from .. import board as B
 from . import theme as T
-from .widgets import Card
+from .widgets import Card, Label, elide
 
 FONT_ROW = T.FONT_BODY
 FONT_DETAIL = T.FONT_SMALL
@@ -53,13 +53,13 @@ class GoBoard(Card):
         top = ctk.CTkFrame(body, fg_color="transparent")
         top.grid(row=0, column=0, sticky="ew", pady=(0, 4))
         top.grid_columnconfigure(1, weight=1)
-        self.verdict_mark = ctk.CTkLabel(top, text="○", font=FONT_MARK, width=18,
+        self.verdict_mark = Label(top, text="○", font=FONT_MARK, width=18,
                                          text_color=T.TEXT_MUTED, height=20)
         self.verdict_mark.grid(row=0, column=0, sticky="w")
-        self.headline = ctk.CTkLabel(top, text="", font=FONT_ROW, text_color=T.TEXT,
+        self.headline = Label(top, text="", font=FONT_ROW, text_color=T.TEXT,
                                      anchor="w", height=20)
         self.headline.grid(row=0, column=1, sticky="ew", padx=(4, 8))
-        self.power_label = ctk.CTkLabel(top, text="", font=FONT_ROW,
+        self.power_label = Label(top, text="", font=FONT_ROW,
                                         text_color=T.TEXT, anchor="e", height=20)
         self.power_label.grid(row=0, column=2, sticky="e")
 
@@ -83,13 +83,13 @@ class GoBoard(Card):
         f = self.rows_frame
         col, r = divmod(index, self._per_column)
         base = col * 3
-        mark = ctk.CTkLabel(f, text="○", font=FONT_MARK, width=16,
+        mark = Label(f, text="○", font=FONT_MARK, width=16,
                             text_color=T.TEXT_MUTED, height=20)
         mark.grid(row=r, column=base, sticky="w", padx=(16 if col else 0, 0))
-        name = ctk.CTkLabel(f, text="", font=FONT_ROW, text_color=T.TEXT,
+        name = Label(f, text="", font=FONT_ROW, text_color=T.TEXT,
                             anchor="w", height=20)
         name.grid(row=r, column=base + 1, sticky="w", padx=(4, 10))
-        detail = ctk.CTkLabel(f, text="", font=FONT_DETAIL, text_color=T.TEXT_MUTED,
+        detail = Label(f, text="", font=FONT_DETAIL, text_color=T.TEXT_MUTED,
                               anchor="w", height=20)
         detail.grid(row=r, column=base + 2, sticky="ew")
         got = (mark, name, detail)
@@ -123,12 +123,7 @@ class GoBoard(Card):
         room = self._detail_px
         if not text or room <= 0:
             return text
-        font = self._font(FONT_DETAIL)
-        if font.measure(text) <= room:
-            return text
-        while text and font.measure(text + "…") > room:
-            text = text[:-1]
-        return text.rstrip(" ·,") + "…"
+        return elide(self._font(FONT_DETAIL), text, room, strip=" ·,")
 
     # -- painting ------------------------------------------------------------
 

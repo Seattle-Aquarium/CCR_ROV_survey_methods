@@ -56,13 +56,18 @@ def boxes(widget, found=None):
 
 
 def test_folding_the_banner_keeps_the_rule_and_both_controls(app):
+    """Whichever way it starts -- open on a roomy screen, folded on a compact
+    one like the field laptop's -- folded is under half the height of open,
+    and the rule and the two controls are there both ways."""
     app.deiconify()
     app.geometry("1300x900")
     pump(app)
-    tall = int(app.header.cget("height"))
+    was_open = app.banner_open
+    first = int(app.header.cget("height"))
     app.toggle_banner()
     pump(app)
-    short = int(app.header.cget("height"))
+    second = int(app.header.cget("height"))
+    tall, short = (first, second) if was_open else (second, first)
     try:
         assert short < tall / 2, (tall, short)
         assert app.theme_switch.winfo_ismapped() and app.fold_btn.winfo_ismapped()
@@ -71,7 +76,8 @@ def test_folding_the_banner_keeps_the_rule_and_both_controls(app):
         app.toggle_banner()
         pump(app)
         app.withdraw()
-    assert int(app.header.cget("height")) == tall
+    assert app.banner_open == was_open
+    assert int(app.header.cget("height")) == first
 
 
 def test_every_output_box_opens_one_line_tall(app):

@@ -430,7 +430,9 @@ def test_live_monitoring_is_coloured_by_level_and_drawn_at_display_scale(app):
         cv = page.canvas
         s = page._geom.get("s", 1.0)
         n = len(L.GROUPS["CPU"])
-        assert int(cv.cget("height")) == int((MP.ROW_H * n + MP.TIME_H) * s)
+        # The strip height follows the layout density (`theme.set_density`).
+        assert page._row_h in (MP.ROW_H, MP.ROW_H_COMPACT)
+        assert int(cv.cget("height")) == int((page._row_h * n + MP.TIME_H) * s)
         fills = {cv.itemcget(i, "fill") for i in cv.find_all()
                  if cv.type(i) in ("line", "rectangle")}
         green = page._apply_appearance_mode(B.LEVEL_COLORS[B.NORMAL])

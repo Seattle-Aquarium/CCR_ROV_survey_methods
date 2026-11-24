@@ -52,7 +52,7 @@ class SummaryPage(ctk.CTkFrame):
         c1 = Card(body, "1.  Read the day",
                   "Reads every recording and log in the flight's logs folder "
                   "(about a minute for 5 GB). Changes nothing.")
-        c1.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        c1.grid(row=0, column=0, sticky="ew", pady=(0, T.GAP))
         c1.body.grid_columnconfigure(0, weight=1)
 
         row = ctk.CTkFrame(c1.body, fg_color="transparent")
@@ -74,7 +74,7 @@ class SummaryPage(ctk.CTkFrame):
         # ---- 2. what it found ------------------------------------------
         c2 = Card(body, "2.  What the logs say",
                   "Ranked by weight. The PDF has the readings behind each.")
-        c2.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        c2.grid(row=1, column=0, sticky="ew", pady=(0, T.GAP))
         c2.body.grid_columnconfigure(0, weight=1)
         self.findings = output_box(c2.body, wrap="word")
         self.findings.grid(row=0, column=0, sticky="ew")

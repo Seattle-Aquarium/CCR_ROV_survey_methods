@@ -33,6 +33,7 @@ from each batch.
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import sys
 import threading
@@ -46,11 +47,12 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from .. import diagnostics
-from . import ctk_tuning
+from . import ctk_tuning, screen
 from . import gradients as G
 from . import theme as T
 from .widgets import (
     Grip,
+    Label,
     OutputBox,
     Repaint,
     Splitter,
@@ -192,15 +194,19 @@ class Lamp(ctk.CTkFrame):
     def __init__(self, master, text: str, **kw):
         super().__init__(master, fg_color="transparent", **kw)
         self._state = self.OFF
-        self.dot = ctk.CTkLabel(self, text=self.OFF[0], width=14,
+        self.dot = Label(self, text=self.OFF[0], width=14,
                                 font=("Segoe UI Symbol", 14),
                                 text_color=T.TEXT_MUTED)
         self.dot.grid(row=0, column=0, padx=(0, 4))
-        self.caption = ctk.CTkLabel(self, text=text, font=T.FONT_SMALL,
+        self.caption = Label(self, text=text, font=T.FONT_SMALL,
                                     text_color=T.TEXT_MUTED, anchor="w")
         self.caption.grid(row=0, column=1, sticky="w")
 
     def set_state(self, state: tuple[str, str]) -> None:
+        # Once a second from the banner, and almost always the same state:
+        # repainting both labels for nothing was a millisecond a second.
+        if state is self._state:
+            return
         self._state = state
         self.refresh_theme()
 
@@ -230,18 +236,31 @@ class TabStrip(ctk.CTkFrame):
     ``sections``, ``current``, ``set_enabled`` and ``set_locked`` -- so a page
     written against UTC's rail works unchanged on a tab.
 
-    **Only the open tab is laid out.** The five pages share one grid cell, and
-    the first version simply stacked them and raised the open one. They were
-    all still *managed*, so every one of them was measured and re-laid-out
-    every time the window changed width -- five tabs' worth of work to show
-    one. Measured on the station this was written on, that was 120 ms per
-    resize step where laying out the open tab alone is 45: it is where most of
-    the stutter came from when a window edge was dragged. The four that are
-    not being looked at are now taken out of the grid entirely and put back
-    when they are chosen, which costs one layout pass on a tab change -- an
-    action that happens a handful of times a day, against a resize that
-    happens sixty times a second.
+    **Only the open tab follows the window's size.** The pages share one
+    holder. The first version stacked them in one grid cell and raised the
+    open one, so every page was re-laid-out every time the window changed
+    width -- eight tabs' worth of work to show one. The second took the
+    hidden pages out of the grid, which made resizing cheap but made every
+    tab change *map* the whole page again: on Windows every Tk widget is a
+    native window, and showing the Navigation tab meant showing some five
+    hundred of them one at a time -- 0.6 s on the field laptop, and most of
+    a second for DVL.
+
+    Now a hidden page is **parked**: placed just off the left edge of the
+    holder, at the size it was last shown at, and left mapped. Nothing about
+    it changes while it is parked, so resizing the window lays out only the
+    open page; and opening a tab moves one window back into view and paints
+    it, rather than rebuilding and mapping everything in it. If the window's
+    size changed while it was parked, it is laid out once, at the new size,
+    as it arrives.
+
+    A parked page is still mapped and viewable as far as Tk is concerned, so
+    "is this on screen?" has to be asked of the window (`Shell.is_shown`, or
+    `widgets.shown`) rather than of Tk.
     """
+
+    #: How far left of the holder a parked page sits, beyond its own width.
+    PARK_GAP = 64
 
     def __init__(self, master, holder, on_select: Callable[[str], None]):
         super().__init__(master, fg_color="transparent")
@@ -250,15 +269,21 @@ class TabStrip(ctk.CTkFrame):
         self._buttons: dict[str, ctk.CTkButton] = {}
         self._pages: dict[str, ctk.CTkFrame] = {}
         self._current: str | None = None
-        #: The tab to come back to when the start-up warm-up has been round
-        #: them all; None when it is not running.
-        self._warm_home: str | None = None
-        #: The pending `after` for the next tab in the warm-up, so a click can
-        #: cancel it.
-        self._warm_after: str | None = None
-        #: Set once somebody has chosen a tab themselves. The warm-up never
-        #: moves them after that.
+        #: name -> the (width, height) the page was last laid out at.
+        self._sized: dict[str, tuple[int, int]] = {}
+        #: The holder's size, as its last <Configure> said.
+        self._holder_px: tuple[int, int] = (1, 1)
+        #: Pages still to be laid out at the holder's first real size, and
+        #: the pending `after` that does the next one.
+        self._to_prime: list[str] = []
+        self._prime_after: str | None = None
+        #: When the holder's size last changed (or a layout last finished),
+        #: and the pending re-layout while a drag is under way.
+        self._configured_at = 0.0
+        self._resize_after: str | None = None
+        #: Set once somebody has chosen a tab themselves.
         self._chosen = False
+        tkinter.Frame.bind(holder, "<Configure>", self._holder_configured, add="+")
         #: A stable identifier per tab, independent of its position and of
         #: its displayed name.
         #:
@@ -276,25 +301,124 @@ class TabStrip(ctk.CTkFrame):
         # Sized to the name: eight tabs at the default width did not fit
         # a 1500-pixel window beside the recorder's badge.
         btn = ctk.CTkButton(
-            self, text=f"{n}  {name}", font=T.FONT_TAB, height=36, width=40,
+            self, text=f"{n}  {name}", font=T.FONT_TAB, height=T.TAB_H, width=40,
             corner_radius=8, fg_color="transparent", hover_color=T.SURFACE,
             text_color=T.TEXT_MUTED, border_width=0, border_color=T.ACCENT,
             command=lambda: self.select(name))
-        btn.grid(row=0, column=len(self._buttons), padx=(0, 6), sticky="w")
+        btn.grid(row=0, column=len(self._buttons),
+                 padx=(0, 2 if T.compact() else 6), sticky="w")
         self._buttons[name] = btn
 
         page = ctk.CTkFrame(self._holder, fg_color="transparent")
-        page.grid(row=0, column=0, sticky="nsew")
         page.grid_columnconfigure(0, weight=1)
         page.grid_rowconfigure(0, weight=1)
-        # Gridded and then removed, which keeps the options for when it is
-        # chosen. Until then Tk has nothing to lay out for it.
-        page.grid_remove()
         self._pages[name] = page
         self._keys[name] = key or name.lower().replace(" ", "_")
+        self._park(name)
         if self._current is None:
             self.select(name, notify=False, by_user=False)
         return page
+
+    # ---- placing pages ---------------------------------------------------
+
+    @staticmethod
+    def _place(page, **kw) -> None:
+        # Tk's own place: CustomTkinter's refuses a width and height.
+        tkinter.Place.place_configure(page, **kw)
+
+    def _park(self, name: str) -> None:
+        """Move a page out of view, keeping its size and everything in it."""
+        page = self._pages[name]
+        w, h = self._sized.get(name, self._holder_px)
+        self._place(page, x=-(w + self.PARK_GAP), y=0, width=w, height=h)
+        self._sized[name] = (w, h)
+
+    def _show(self, name: str) -> None:
+        """Bring a page into view at the holder's size."""
+        w, h = self._holder_px
+        self._place(self._pages[name], x=0, y=0, width=w, height=h)
+        self._sized[name] = (w, h)
+
+    #: While a window edge is being dragged, the open page is laid out at
+    #: most this often, and once more at the size the drag ends at.
+    RESIZE_EVERY_MS = 150
+
+    def _holder_configured(self, event) -> None:
+        """The holder changed size: the open page follows it, and nothing else.
+
+        Not at every step of a drag, though. Laying out a page is mostly Tk
+        moving and repainting the native windows in it -- measured on the
+        field laptop, 170-300 ms a step for the busier tabs, almost none of it
+        in this program's code -- and a window manager sends a step for every
+        few pixels the pointer moves. Laid out at every one, the window fell
+        further and further behind the pointer. So a change after a quiet
+        spell is applied at once (maximizing, restoring), and during a drag
+        the page follows at most every `RESIZE_EVERY_MS`, with a last pass at
+        the size it ends at; the window's edge itself is drawn by Windows and
+        keeps up regardless.
+
+        The first real size is also when every page is laid out for the first
+        time, one per turn of the event loop -- see `warm`.
+        """
+        size = (max(1, int(event.width)), max(1, int(event.height)))
+        if size == self._holder_px:
+            return
+        first = self._holder_px == (1, 1)
+        self._holder_px = size
+        if first:
+            if self._current is not None:
+                self._show(self._current)
+            self.warm()
+            return
+        # A drag is sizes arriving close together. Measured from when the last
+        # one *arrived* -- not from when the last layout started, because a
+        # layout that takes longer than the interval would otherwise make
+        # every step of a drag look like the first one after a quiet spell.
+        now = time.monotonic()
+        dragging = now - self._configured_at < self.DRAG_GAP_S
+        self._configured_at = now
+        if self._resize_after is not None:
+            return                        # the pending pass takes the newest size
+        if not dragging:
+            self._follow_holder()
+        else:
+            self._resize_after = self.after(self.RESIZE_EVERY_MS, self._follow_holder)
+
+    #: Sizes arriving closer together than this are one drag.
+    DRAG_GAP_S = 0.4
+
+    def _follow_holder(self) -> None:
+        self._resize_after = None
+        name = self._current
+        if name is not None and self._sized.get(name) != self._holder_px:
+            try:
+                self._show(name)
+            except tkinter.TclError:
+                pass                      # the window is closing
+        # The time the layout is *finished*, as near as can be told: after the
+        # idle work the move has queued.
+        try:
+            self.after_idle(self._mark_configured)
+        except tkinter.TclError:
+            pass
+
+    def _mark_configured(self) -> None:
+        self._configured_at = time.monotonic()
+
+    @property
+    def current_page(self):
+        return self._pages.get(self._current) if self._current else None
+
+    def page_of(self, widget):
+        """The page frame `widget` is on, or None for the window's own chrome."""
+        pages = self._pages.values()
+        w = widget
+        while w is not None:
+            for p in pages:
+                if w is p:
+                    return p
+            w = getattr(w, "master", None)
+        return None
 
     def key_of(self, name: str) -> str:
         """The stable identifier for a tab. Save this, never the position."""
@@ -326,21 +450,35 @@ class TabStrip(ctk.CTkFrame):
             return
         if by_user:
             self._chosen = True
-            self._stop_warm()
         previous = self._current
         self._current = name
+        self._show(name)
         if previous is not None and previous != name:
-            page = self._pages.get(previous)
-            if page is not None:
-                page.grid_remove()
-        self._pages[name].grid()
-        for n, btn in self._buttons.items():
+            self._release_focus(previous)
+            self._park(previous)
+        # Only the two buttons that changed: each one redraws its whole shape.
+        for n in {name, previous} if previous != name else {name}:
+            btn = self._buttons.get(n)
+            if btn is None:
+                continue
             on = n == name
             btn.configure(text_color=T.HEADING if on else T.TEXT_MUTED,
                           font=T.FONT_TAB_ON if on else T.FONT_TAB,
                           border_width=2 if on else 0)
         if notify:
             self._on_select(name)
+
+    def _release_focus(self, name: str) -> None:
+        """Keystrokes must not go on landing in a box on a page out of view."""
+        try:
+            focused = self.focus_get()
+        except Exception:
+            return
+        if focused is not None and self.page_of(focused) is self._pages.get(name):
+            try:
+                self.focus_set()
+            except Exception:
+                pass
 
     @property
     def current(self) -> str | None:
@@ -370,68 +508,46 @@ class TabStrip(ctk.CTkFrame):
         if self._current:
             self.select(self._current, notify=False, by_user=False)
 
-    #: How long each tab is left open while it is warmed.
-    WARM_HOLD_MS = 55
+    #: Between laying out one parked page and the next at start-up, so a
+    #: click can get in between.
+    WARM_GAP_MS = 15
 
-    def warm(self, index: int = 0) -> None:
-        """Open every tab once, at start-up, so no first click has to wait.
+    def warm(self) -> None:
+        """Lay every parked page out once, at the window's real size.
 
-        Keeping only the open tab in the grid is what makes resizing cheap,
-        and the price is that a tab's first appearance pays for its whole
-        layout in one go. Measured here: 242 ms the first time each tab was
-        opened, against 43 ms before -- a hitch right when somebody has just
-        clicked. Doing the work up front, while the window is idle and nobody
-        is waiting on it, puts it where it cannot be felt.
-
-        **It warms by opening each tab, exactly as a click does, one per turn
-        of the event loop.** The obvious version -- grid a page, lay it out,
-        take it back out again, without ever showing it -- does not work, and
-        does not fail loudly either: the page is laid out but never finishes
-        *mapping*, and every widget inside a canvas-embedded frame (which is
-        every card on every tab, because each tab scrolls) is then left
-        believing it was never shown. The tab opens, its geometry is right to
-        the pixel, and it draws nothing at all. Going through the same path a
-        click goes through cannot drift away from what a click does, which
-        after that is the property worth having. The cost is that the tabs
-        flick past once while the window is starting.
-
-        `notify=False`: this is not somebody choosing a tab, and the pages'
-        `refresh` hooks should not be run as though it were.
+        A page's first layout is its most expensive -- every widget in it is
+        measured, placed and mapped for the first time -- and it used to be
+        paid on the first click of each tab. Parked pages can be laid out
+        where nobody sees them, so they are: one page per turn of the event
+        loop, starting when the holder first has a real size, so input is
+        never held for more than one page at a time and nothing flickers.
+        (The version before parking warmed by flicking through every tab.)
         """
-        names = list(self._pages)
-        if self._chosen:
-            # They are already looking at something they picked. Warming the
-            # rest would walk them off it; the tabs they have not opened can
-            # pay for their own first layout.
-            self._warm_home = None
-            return
-        if index == 0:
-            if self._warm_home is not None:
-                return                    # one is already going round
-            self._warm_home = self._current
-        if index >= len(names):
-            if self._warm_home is not None:
-                self.select(self._warm_home, notify=False, by_user=False)
-            self._warm_home = None
-            self._warm_after = None
-            return
-        try:
-            self.select(names[index], notify=False, by_user=False)
-            self._warm_after = self.after(
-                self.WARM_HOLD_MS, lambda: self.warm(index + 1))
-        except Exception:
-            self._warm_home = None        # the window is closing
-            self._warm_after = None
+        if not self._to_prime:
+            self._to_prime = [n for n in self._pages if n != self._current]
+        if self._prime_after is None:
+            self._prime_after = self.after(self.WARM_GAP_MS, self._prime_next)
 
-    def _stop_warm(self) -> None:
-        """Abandon the warm-up without returning to where it started."""
-        if self._warm_after is not None:
-            try:
-                self.after_cancel(self._warm_after)
-            except Exception:
-                pass
-            self._warm_after = None
-        self._warm_home = None
+    def _prime_next(self) -> None:
+        self._prime_after = None
+        while self._to_prime:
+            name = self._to_prime.pop(0)
+            if name == self._current or name not in self._pages:
+                continue
+            if self._sized.get(name) != self._holder_px:
+                self._sized[name] = self._holder_px
+                try:
+                    self._park(name)
+                except Exception:
+                    self._to_prime = []   # the window is closing
+                    return
+                break
+        if self._to_prime:
+            self._prime_after = self.after(self.WARM_GAP_MS, self._prime_next)
+
+    @property
+    def warming(self) -> bool:
+        return bool(self._to_prime) or self._prime_after is not None
 
 
 class Shell(ctk.CTk):
@@ -449,12 +565,28 @@ class Shell(ctk.CTk):
         # and a scrollbar already built would keep the method it was made with.
         ctk_tuning.apply()
         super().__init__()
+        # The root's <Configure>, narrowed to the root itself: see
+        # `ctk_tuning.quiet_root_configure`.
+        ctk_tuning.quiet_root_configure(self, self._root_configured)
         self.title(self.APP_NAME)
-        self.geometry("1320x900")
-        self.minsize(1000, 640)
+
+        # The density, from the screen the window opens on -- before anything
+        # is built, because widgets read it as they are made (`theme`).
+        saved = getattr(self, "settings", None) or {}
+        self.work_area = screen.work_area(self)
+        # ROV_UI_DENSITY overrides the settings file: for running the tests
+        # in both layouts on one machine, or trying one without editing it.
+        choice = os.environ.get("ROV_UI_DENSITY") or saved.get("ui_density") or "auto"
+        T.set_density(T.density_for(self.work_area[3] if self.work_area else None,
+                                    choice))
+        self._place_window(saved)
+        self.minsize(*self.MIN_SIZE)
 
         self.mode = "dark"
-        self.banner_open = True
+        # Folded on a compact screen until somebody opens it; after that, the
+        # way it was left.
+        was_open = saved.get("banner_open")
+        self.banner_open = (not T.compact()) if was_open is None else bool(was_open)
         T.apply(ctk, self.mode)
         self.configure(fg_color=T.BG)
 
@@ -494,6 +626,57 @@ class Shell(ctk.CTk):
         self._beat_due = time.monotonic() + diagnostics.HEARTBEAT_S
         self.after(int(diagnostics.HEARTBEAT_S * 1000), self._heartbeat)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    #: The size the window opens at where the screen has room, and the least
+    #: it can be made, in logical pixels.
+    DEFAULT_SIZE = (1320, 900)
+    MIN_SIZE = (900, 540)
+
+    def _place_window(self, saved: dict) -> None:
+        """Open at a size the screen can hold, maximized where it is small.
+
+        It used to ask for 1320 x 900 whatever the screen: on the field
+        laptop that is 1980 x 1350 physical pixels on a 1920 x 1080 panel, so
+        the window opened with its log, progress bar and Stop button below
+        the bottom of the screen. Now the normal size is capped to the work
+        area -- so un-maximizing it never loses the edges either -- and on a
+        compact screen it opens maximized, unless it was last closed
+        un-maximized (`window_zoomed` in the settings file).
+        """
+        want_w, want_h = self.DEFAULT_SIZE
+        area = self.work_area
+        if area is None:
+            self.geometry(f"{want_w}x{want_h}")
+            return
+        x0, y0, aw, ah = area
+        # The title bar and frame are outside the size asked for.
+        w, h = min(want_w, aw - 24), min(want_h, ah - 48)
+        x, y = x0 + max(0, (aw - w) // 2), y0 + max(0, (ah - h - 32) // 2)
+        self.geometry(f"{w}x{h}+{x}+{y}")
+        zoom = saved.get("window_zoomed")
+        if zoom is None:
+            zoom = T.compact() or w < want_w or h < want_h
+        if zoom:
+            # Once the window exists: CustomTkinter shows it from mainloop.
+            self.after(30, self._zoom)
+
+    def _zoom(self) -> None:
+        try:
+            self.state("zoomed")
+        except tkinter.TclError:
+            pass
+
+    def _remember_window(self) -> None:
+        """Keep whether the window was maximized, for next time."""
+        settings = getattr(self, "settings", None)
+        saver = getattr(self, "save_settings", None)
+        if settings is None or not callable(saver):
+            return
+        try:
+            settings["window_zoomed"] = self.state() == "zoomed"
+            saver()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     #  for subclasses
@@ -544,6 +727,10 @@ class Shell(ctk.CTk):
         # carries this for the same reason; the frame holding them did not.
         self.controls = ctk.CTkFrame(self.header, fg_color=T.HEADER_BG,
                                      bg_color=T.HEADER_BG, corner_radius=0)
+        # Its width changes with the simulator's fault line, and what the
+        # folded banner has room for on its left changes with it.
+        tkinter.Frame.bind(self.controls, "<Configure>",
+                           lambda _e: self._header_paint.ask(), add="+")
         # Folded away, everything sits in one row reading left to right:
         # versions, lamps, then the three controls. Open, the versions move
         # up beside the title and the lamps drop under the two controls --
@@ -551,7 +738,7 @@ class Shell(ctk.CTk):
         self.versions_row = ctk.CTkFrame(self.controls, fg_color="transparent")
         self.version_labels: dict[str, ctk.CTkLabel] = {}
         for i, key in enumerate(VERSION_KEYS):
-            lab = ctk.CTkLabel(self.versions_row, text="", font=T.FONT_SMALL,
+            lab = Label(self.versions_row, text="", font=T.FONT_SMALL,
                                text_color=T.TEXT_MUTED, anchor="w")
             lab.grid(row=0, column=i, padx=(0, 12), sticky="w")
             self.version_labels[key] = lab
@@ -575,7 +762,8 @@ class Shell(ctk.CTk):
             bg_color=T.HEADER_BG)
         self.theme_switch.select()
         self.fold_btn = ctk.CTkButton(
-            self.controls, text="▲", width=34, height=28, corner_radius=6,
+            self.controls, text="▲" if self.banner_open else "▼",
+            width=34, height=28, corner_radius=6,
             font=("Segoe UI Symbol", 14), fg_color="transparent",
             hover_color=T.SURFACE_ALT,
             text_color=T.TEXT, border_width=1, border_color=T.BORDER,
@@ -707,11 +895,19 @@ class Shell(ctk.CTk):
         return self._logo_ready
 
     def toggle_banner(self) -> None:
-        """Fold the banner away, or bring it back."""
+        """Fold the banner away, or bring it back -- and remember which."""
         self.banner_open = not self.banner_open
         self.fold_btn.configure(text="▲" if self.banner_open else "▼")
         self._lay_out_controls()
         self._paint_header()
+        settings = getattr(self, "settings", None)
+        saver = getattr(self, "save_settings", None)
+        if settings is not None and callable(saver):
+            settings["banner_open"] = self.banner_open
+            try:
+                saver()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     #  versions and lamps
@@ -852,15 +1048,20 @@ class Shell(ctk.CTk):
             # be at least as tall as they are, or they are clipped by the
             # gradient rule.
             h = max(block_h, ctl_h) + 2 * pad + rule_h
+            brand = "open"
         else:
             block_h = 0
-            h = int(6 * s) + ctl_h + int(6 * s) + rule_h
+            vpad = int((4 if T.compact() else 6) * s)
+            h = vpad + ctl_h + vpad + rule_h
+            brand = self._folded_brand(w, pad, ctl_h, s)
 
         # Everything a full repaint depends on except the width. The version
         # column is in here because it is drawn, so a version arriving has to
-        # be able to redraw it.
+        # be able to redraw it. What the folded banner has room for on its
+        # left depends on the width, so that is in here too -- as the answer,
+        # not the width.
         shape = (h, rule_h, pad, self.banner_open, self.mode, round(s, 3),
-                 self.DISPLAY_TITLE, tuple(self.version_lines()))
+                 self.DISPLAY_TITLE, tuple(self.version_lines()), brand)
         if shape == self._painted and self._ground_id is not None:
             self._restretch(w, h, rule_h, pad)
             return
@@ -909,12 +1110,49 @@ class Shell(ctk.CTk):
                                   font=T.scale_font(T.FONT_BANNER_SUB, s),
                                   fill=muted)
                     vy += sub_h + int(4 * s)
+        elif brand != "none":
+            # Folded: the program's name -- with the logo where there is room
+            # for both -- left of the controls: the banner's identity in the
+            # height of one row of controls.
+            mid = (h - rule_h) // 2
+            x = pad
+            logo = self._logo_scaled(self._folded_logo_h(ctl_h)) \
+                if brand == "logo" else None
+            if logo is not None:
+                self._logo_photo = ImageTk.PhotoImage(logo)
+                c.create_image(x, mid, image=self._logo_photo, anchor="w")
+                x += logo.width + int(12 * s)
+            c.create_text(x, mid, anchor="w", text=self.DISPLAY_TITLE,
+                          font=T.scale_font(T.FONT_FOLDED_TITLE, s),
+                          fill=self._apply_appearance_mode(T.HEADING))
 
         # The one gradient in the application: a single object, no type on it.
         self._rule_id = c.create_image(0, h - rule_h, image=self._rule(w, rule_h),
                                        anchor="nw")
         self._controls_id = c.create_window(w - pad, (h - rule_h) // 2,
                                             window=self.controls, anchor="e")
+
+    @staticmethod
+    def _folded_logo_h(ctl_h: int) -> int:
+        return max(8, int(ctl_h * 0.8))
+
+    def _folded_brand(self, w: int, pad: int, ctl_h: int, s: float) -> str:
+        """What fits left of the controls when folded: "logo" (the logo and
+        the program's name), "title" (the name alone), or "none". The logo is
+        never shown on its own: it is the emblem over the words SEATTLE
+        AQUARIUM, and at the height of a row of buttons the words are a smudge."""
+        try:
+            room = w - 2 * pad - self.controls.winfo_reqwidth() - int(24 * s)
+        except tkinter.TclError:
+            return "none"
+        logo = self._logo_scaled(self._folded_logo_h(ctl_h))
+        logo_w = (logo.width + int(12 * s)) if logo is not None else 0
+        title_w = self._font(T.FONT_FOLDED_TITLE, s).measure(self.DISPLAY_TITLE)
+        if logo_w and room >= logo_w + title_w:
+            return "logo"
+        if room >= title_w:
+            return "title"
+        return "none"
 
     def _rule(self, w: int, rule_h: int):
         """The gradient along the banner's foot, as a Tk image.
@@ -978,12 +1216,34 @@ class Shell(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _build_tabs(self) -> None:
+        compact = T.compact()
         self.content = ctk.CTkFrame(self, fg_color="transparent")
-        self.content.grid(row=2, column=0, sticky="nsew", padx=16, pady=(6, 6))
+        self.content.grid(row=2, column=0, sticky="nsew",
+                          padx=10 if compact else 16,
+                          pady=(4, 4) if compact else (6, 6))
         self.content.grid_columnconfigure(0, weight=1)
         self.content.grid_rowconfigure(0, weight=1)
         self.nav = TabStrip(self, self.content, on_select=self._tab_shown)
-        self.nav.grid(row=1, column=0, sticky="w", padx=14, pady=(8, 0))
+        self.nav.grid(row=1, column=0, sticky="w", padx=8 if compact else 14,
+                      pady=(3, 0) if compact else (8, 0))
+
+    def is_shown(self, widget) -> bool:
+        """Is `widget` on screen: on the open tab, and itself mapped?
+
+        Pages that are not open are parked off-screen rather than unmapped
+        (`TabStrip`), so Tk's own `winfo_ismapped` and `winfo_viewable` say
+        yes for everything on them. The pages' refresh timers ask this
+        instead, so a tab nobody is looking at is not redrawn.
+        """
+        nav = getattr(self, "nav", None)
+        if nav is not None:
+            page = nav.page_of(widget)
+            if page is not None and page is not nav.current_page:
+                return False
+        try:
+            return bool(widget.winfo_ismapped())
+        except Exception:
+            return False
 
     def _tab_shown(self, name: str) -> None:
         for page in self._tab_pages.get(name, []):
@@ -1003,7 +1263,7 @@ class Shell(ctk.CTk):
         body.grid_columnconfigure(0, weight=1)
         return body
 
-    def pair(self, body, row: int, pady=(0, 12), *, split_key: str = ""
+    def pair(self, body, row: int, pady=None, *, split_key: str = ""
              ) -> tuple[ctk.CTkFrame, ctk.CTkFrame]:
         """Two columns, for sections small enough to sit side by side.
 
@@ -1013,7 +1273,8 @@ class Shell(ctk.CTk):
         the settings file, and the divider is kept in `self.splits`.
         """
         frame = ctk.CTkFrame(body, fg_color="transparent")
-        frame.grid(row=row, column=0, sticky="ew", pady=pady)
+        frame.grid(row=row, column=0, sticky="ew",
+                   pady=(0, T.GAP) if pady is None else pady)
         frame.grid_rowconfigure(0, weight=1)
         left = ctk.CTkFrame(frame, fg_color="transparent")
         right = ctk.CTkFrame(frame, fg_color="transparent")
@@ -1058,11 +1319,18 @@ class Shell(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _build_footer(self) -> None:
-        """Log, progress, status and Stop, shared by every tab.
+        """Log, status, progress, the recorder's state and Stop, on every tab.
 
         The handle along the top edge resizes the log and nothing else, so
-        progress and status stay on screen however far it is closed.
+        the status line stays on screen however far it is closed. Under the
+        log is one row: what the program is doing, how far a job has got (the
+        bar is there only while one runs), what the subclass keeps in
+        `footer_note` -- the flight recorder's state, in this program -- and
+        Stop. It used to be three rows, and the recorder's state sat at the
+        end of the tab row, where on the field laptop it ran into the tabs.
         """
+        compact = T.compact()
+        side = 10 if compact else 16
         f = ctk.CTkFrame(self, fg_color=T.SURFACE, corner_radius=0)
         f.grid(row=3, column=0, sticky="ew")
         f.grid_columnconfigure(0, weight=1)
@@ -1077,31 +1345,48 @@ class Shell(ctk.CTk):
             f, lambda: float(self.log.cget("height")),
             lambda h: self.log.configure(height=h),
             minimum=one_line_height("word"), grows_downward=False,
-            expanded=220)
-        self.log_grip.grid(row=0, column=0, columnspan=2, sticky="ew",
-                           padx=16, pady=(2, 0))
-        self.log.grid(row=1, column=0, columnspan=2, sticky="ew",
-                      padx=16, pady=(0, 6))
+            expanded=220, thickness=8 if compact else 10)
+        self.log_grip.grid(row=0, column=0, columnspan=4, sticky="ew",
+                           padx=side, pady=(1, 0))
+        self.log.grid(row=1, column=0, columnspan=4, sticky="ew",
+                      padx=side, pady=(0, 4 if compact else 6))
         self.log.configure(state="disabled")
-        self.bind("<Configure>", self._cap_log, add="+")
 
-        self.progress = ctk.CTkProgressBar(f, height=12, corner_radius=6,
+        row_pad = (0, 5 if compact else 8)
+        self.status = Label(f, text="Ready.", font=T.FONT_SMALL,
+                            text_color=T.TEXT_MUTED, anchor="w")
+        self.status.grid(row=2, column=0, sticky="ew", padx=(side, 8), pady=row_pad)
+        self.progress = ctk.CTkProgressBar(f, width=180, height=8, corner_radius=4,
                                            progress_color=T.ACCENT,
                                            fg_color=T.SURFACE_ALT)
         self.progress.set(0.0)
-        self.progress.grid(row=2, column=0, sticky="ew", padx=(16, 12),
-                           pady=(0, 4))
-        self.status = ctk.CTkLabel(f, text="Ready.", font=T.FONT_SMALL,
-                                   text_color=T.TEXT_MUTED, anchor="w")
-        self.status.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 8))
-        self.cancel_btn = button(f, "Stop", self._cancel_run, "danger", 90)
-        self.cancel_btn.grid(row=2, column=1, rowspan=2, padx=(0, 16),
-                             pady=(0, 8))
+        self.progress.grid(row=2, column=1, padx=(0, 12), pady=row_pad)
+        self.progress.grid_remove()          # shown while a job runs
+        #: The subclass's line beside Stop: the flight recorder's state here.
+        self.footer_note = Label(f, text="", font=T.FONT_SMALL,
+                                 text_color=T.TEXT_MUTED, anchor="e")
+        self.footer_note.grid(row=2, column=2, sticky="e", padx=(0, 12),
+                              pady=row_pad)
+        self.cancel_btn = button(f, "Stop", self._cancel_run, "danger", 80)
+        self.cancel_btn.configure(height=24 if compact else 28)
+        self.cancel_btn.grid(row=2, column=3, padx=(0, side), pady=row_pad)
         self.cancel_btn.configure(state="disabled")
 
-    def _cap_log(self, event) -> None:
+    def _root_configured(self) -> None:
+        """The window itself was moved or resized (and nothing else was).
+
+        CustomTkinter's own bookkeeping first -- this replaces its binding --
+        then ours.
+        """
+        try:
+            self._update_dimensions_event()
+        except Exception:
+            pass
+        self._cap_log()
+
+    def _cap_log(self, _event=None) -> None:
         """Keep the log from being dragged taller than the window can spare."""
-        if event.widget is not self:
+        if not hasattr(self, "log_grip"):
             return
         try:
             s = T.scale_of(self)
@@ -1133,6 +1418,7 @@ class Shell(ctk.CTk):
         self._cancel = job.cancel
         self.cancel_btn.configure(state="normal")
         self.progress.set(0.0)
+        self.progress.grid()
         if label:
             self._log("─" * 60)
             self._log(label)
@@ -1294,6 +1580,7 @@ class Shell(ctk.CTk):
                  time.monotonic() - job.started, job.label)
         try:
             self.cancel_btn.configure(state="disabled")
+            self.progress.grid_remove()
         except Exception:
             pass
 
@@ -1455,6 +1742,7 @@ class Shell(ctk.CTk):
         if self._closing:
             return
         self._closing = True
+        self._remember_window()
         log.info("window closed")
         try:
             self.destroy()

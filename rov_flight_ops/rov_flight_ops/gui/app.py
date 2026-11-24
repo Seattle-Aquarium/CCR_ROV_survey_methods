@@ -386,10 +386,10 @@ class App(Shell):
 
         # The recorder's state, on every tab. A recording that fails while the
         # operator is on BlueOS logs must not wait to be noticed until someone
-        # opens Monitoring again.
-        self.recorder_badge = ctk.CTkLabel(self, text="", font=T.FONT_SMALL,
-                                           text_color=T.TEXT_MUTED, anchor="e")
-        self.recorder_badge.grid(row=1, column=0, sticky="e", padx=18, pady=(8, 0))
+        # opens Monitoring again. It sits on the footer's status row, beside
+        # Stop: at the end of the tab row it ran into the tabs on the field
+        # laptop's screen.
+        self.recorder_badge = self.footer_note
         self.after(1000, self._update_badge)
 
     def _update_badge(self) -> None:

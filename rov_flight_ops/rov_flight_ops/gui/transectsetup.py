@@ -22,7 +22,7 @@ import customtkinter as ctk
 from .. import previewsource as P
 from ..survey import PLAN_FILENAME
 from . import theme as T
-from .widgets import Card, button, fit_wrap
+from .widgets import Card, Label, button, fit_wrap
 
 SOURCES = {"Automatic": P.AUTO, "Flight folder": P.FOLDER, "Vehicle": P.VEHICLE}
 
@@ -44,8 +44,8 @@ class TransectSetup(ctk.CTkFrame):
         c1 = Card(body, "1.  Sites and transects",
                   "Times are TC-25, the GoPro clock after a Labs time sync. "
                   f"Save writes {PLAN_FILENAME} into the flight folder.")
-        c1.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        self.folder_note = ctk.CTkLabel(c1.body, text="", font=T.FONT_SMALL,
+        c1.grid(row=0, column=0, sticky="ew", pady=(0, T.GAP))
+        self.folder_note = Label(c1.body, text="", font=T.FONT_SMALL,
                                         text_color=T.TEXT_MUTED, anchor="w")
         self.folder_note.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         app.sites_holder = ctk.CTkFrame(c1.body, fg_color="transparent")
@@ -66,13 +66,13 @@ class TransectSetup(ctk.CTkFrame):
                   "The dive profile with your transects marked, from the "
                   "recordings or, before they are downloaded, the autopilot's "
                   "log on the vehicle.")
-        c2.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        c2.grid(row=1, column=0, sticky="ew", pady=(0, T.GAP))
         c2.body.grid_columnconfigure(0, weight=1)
         prow = ctk.CTkFrame(c2.body, fg_color="transparent")
         prow.grid(row=0, column=0, sticky="w")
         button(prow, "Preview transects", self._preview, "primary", width=170
                ).grid(row=0, column=0)
-        ctk.CTkLabel(prow, text="read from", font=T.FONT_SMALL,
+        Label(prow, text="read from", font=T.FONT_SMALL,
                      text_color=T.TEXT_MUTED).grid(row=0, column=1, padx=(18, 8))
         self.source = ctk.CTkSegmentedButton(
             prow, values=list(SOURCES), font=T.FONT_SMALL,
@@ -82,12 +82,12 @@ class TransectSetup(ctk.CTkFrame):
         self.source.set("Automatic")
         self.source.grid(row=0, column=2)
 
-        self.preview_note = ctk.CTkLabel(
+        self.preview_note = Label(
             c2.body, text="", font=T.FONT_SMALL, text_color=T.TEXT_MUTED,
             anchor="w", justify="left", wraplength=900)
         self.preview_note.grid(row=1, column=0, sticky="ew", pady=(6, 0))
         fit_wrap(c2.body, self.preview_note)
-        self.preview_img = ctk.CTkLabel(c2.body, text="")
+        self.preview_img = Label(c2.body, text="")
         self.preview_img.grid(row=2, column=0, sticky="w", pady=(8, 0))
         self.preview_img.grid_remove()          # takes no room until drawn
 

@@ -21,6 +21,7 @@ from .. import board as B
 from .. import tc25 as TC
 from ..nav.model import Quality
 from . import theme as T
+from .widgets import Label, shown
 
 FONT_VALUE = (T.MONO, 20, "bold")
 #: The gap either side of each cell, so both groups are spaced alike.
@@ -79,12 +80,12 @@ class FlightNumbers(ctk.CTkFrame):
             cell = ctk.CTkFrame(self, fg_color="transparent")
             cell.grid(row=0, column=col, sticky="nsew", padx=CELL_PAD, pady=4)
             cell.grid_columnconfigure(0, weight=1)
-            ctk.CTkLabel(cell, text=heads[key], font=FONT_HEAD, height=14,
+            Label(cell, text=heads[key], font=FONT_HEAD, height=14,
                          text_color=T.TEXT_MUTED).grid(row=0, column=0)
-            value = ctk.CTkLabel(cell, text="—", font=FONT_VALUE, height=28,
+            value = Label(cell, text="—", font=FONT_VALUE, height=28,
                                  text_color=T.TEXT_MUTED)
             value.grid(row=1, column=0)
-            sub = ctk.CTkLabel(cell, text="", font=T.FONT_SMALL, height=14,
+            sub = Label(cell, text="", font=T.FONT_SMALL, height=14,
                                text_color=T.TEXT_MUTED)
             sub.grid(row=2, column=0)
             self.cells[key] = (value, sub)
@@ -94,7 +95,7 @@ class FlightNumbers(ctk.CTkFrame):
 
     def _tick_clock(self) -> None:
         try:
-            if self.winfo_ismapped():
+            if shown(self):
                 value, sub = self.cells["tc25"]
                 _set(value, text=TC.tc25(), text_color=T.TEXT)
                 self.clock.poll()

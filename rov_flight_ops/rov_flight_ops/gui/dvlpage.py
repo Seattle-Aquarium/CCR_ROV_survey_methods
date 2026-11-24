@@ -53,7 +53,19 @@ from ..dvl import protocol as P
 from ..dvl import webapi
 from ..dvl.recorder import DvlRecorder, dvl_folder
 from . import theme as T
-from .widgets import Card, Repaint, button, entry, fit_wrap, label, output_box, say
+from .widgets import (
+    Card,
+    Label,
+    Repaint,
+    button,
+    elide,
+    entry,
+    fit_wrap,
+    label,
+    output_box,
+    say,
+    shown,
+)
 
 #: One colour per transducer, id 0..3, kept everywhere on the page.
 BEAM_COLORS = (brand.SEAFOAM, brand.CORAL, "#FFC24D", brand.PURPLE_STAR)
@@ -85,6 +97,8 @@ ACOUSTIC_H = 170
 TICK_MS = 500
 #: ...and redraws its charts this often.
 CHART_EVERY_S = 1.0
+#: Logical pixels of chart per point drawn. See `_draw_charts` for why.
+CHART_PX_PER_POINT = 3.0
 
 FONT_TILE_TITLE = (T.FAMILY_SEMIBOLD, 10)
 FONT_BIG = (T.MONO, 15, "bold")
@@ -125,6 +139,19 @@ def _axis(value: float) -> str:
 
 def _rate(snap, kind: str) -> str:
     return f"{snap.rates.get(kind, 0.0):.1f}/s"
+
+
+def _set(widget, **kw) -> None:
+    """Configure a label only with what has changed. The page refreshes twice a
+    second and most of its twenty-odd figures say the same thing each time; a
+    label configured to what it already shows still re-measures and redraws."""
+    cache = getattr(widget, "_dvl_cache", None)
+    if cache is None:
+        cache = widget._dvl_cache = {}
+    changes = {k: v for k, v in kw.items() if cache.get(k) != v}
+    if changes:
+        cache.update(changes)
+        widget.configure(**changes)
 
 
 def _segmented(master, values, command=None):
@@ -175,6 +202,16 @@ class DvlPage(ctk.CTkFrame):
         cv.base_height = height                      # type: ignore[attr-defined]
         return cv
 
+    def _canvas_font(self, spec):
+        """A Tk font for measuring text drawn on a canvas in `spec`, made once."""
+        from tkinter import font as tkfont
+        cache = self.__dict__.setdefault("_measure_fonts", {})
+        key = tuple(spec)
+        got = cache.get(key)
+        if got is None:
+            got = cache[key] = tkfont.Font(font=spec)
+        return got
+
     def _colors(self) -> dict:
         m = self._apply_appearance_mode
         return {"text": m(T.TEXT), "muted": m(T.TEXT_MUTED), "border": m(T.BORDER),
@@ -188,9 +225,9 @@ class DvlPage(ctk.CTkFrame):
         c = Card(parent, "1.  DVL",
                  "Most important first. Gaps by the DVL's clock: quiet = made "
                  "nothing, missing = never arrived, stall = late.")
-        c.grid(row=row, column=0, sticky="ew", pady=(0, 12))
+        c.grid(row=row, column=0, sticky="ew", pady=(0, T.GAP))
         c.body.grid_columnconfigure(0, weight=1)
-        self.conn_label = ctk.CTkLabel(c.body, text="", font=T.FONT_BODY,
+        self.conn_label = Label(c.body, text="", font=T.FONT_BODY,
                                        text_color=T.TEXT, anchor="w", justify="left",
                                        cursor="hand2")
         self.conn_label.grid(row=0, column=0, sticky="nw")
@@ -202,7 +239,7 @@ class DvlPage(ctk.CTkFrame):
                ).grid(row=0, column=0)
         button(b, "Folder", self._open_folder, "ghost", width=70
                ).grid(row=0, column=1, padx=(6, 0))
-        self.problem_label = ctk.CTkLabel(c.body, text="", font=T.FONT_SMALL,
+        self.problem_label = Label(c.body, text="", font=T.FONT_SMALL,
                                           text_color=T.WARN, anchor="w",
                                           justify="left")
         self.problem_label.grid(row=1, column=0, columnspan=2, sticky="ew")
@@ -267,7 +304,7 @@ class DvlPage(ctk.CTkFrame):
         c = Card(parent, "2.  The four beams",
                  "Where each points, forward up. Cover one on the bench: its "
                  "tile goes red.")
-        c.grid(row=row, column=0, sticky="nsew", pady=(0, 12))
+        c.grid(row=row, column=0, sticky="nsew", pady=(0, T.GAP))
         c.body.grid_columnconfigure(0, weight=1)
         self.beams = self._make_canvas(c.body, BEAMS_H)
         self.beams.grid(row=0, column=0, sticky="ew")
@@ -339,9 +376,20 @@ class DvlPage(ctk.CTkFrame):
             cv.create_rectangle(x0, y0, x0 + tile_w, y0 + tile_h, outline=edge,
                                 width=max(1, int((3 if bvalid is False else 2) * s)))
             pad = 9 * s
+            # Fitted to the tile: on a narrow screen "forward-starboard" ran
+            # out through the tile's border. A step or two smaller first, and
+            # cut short only if even that will not fit.
+            title = f"T{beam.number} · id {tid} · {P.beam_position(beam, off)}"
+            room = tile_w - 2 * pad
+            family, size, *style = FONT_TILE_TITLE
+            for step in (0, 1, 2):
+                title_font = F((family, size - step, *style))
+                if self._canvas_font(title_font).measure(title) <= room:
+                    break
+            else:
+                title = elide(self._canvas_font(title_font), title, room)
             cv.create_text(x0 + pad, y0 + 13 * s, anchor="w", fill=color,
-                           font=F(FONT_TILE_TITLE),
-                           text=f"T{beam.number} · id {tid} · {P.beam_position(beam, off)}")
+                           font=title_font, text=title)
             # The lamp on the distance's line: the title can take the width.
             r = 5 * s
             cv.create_oval(x0 + tile_w - pad - 2 * r, y0 + 35 * s - r,
@@ -399,10 +447,10 @@ class DvlPage(ctk.CTkFrame):
         across = 4
         for i, (key, name) in enumerate(names):
             r, col = divmod(i, across)
-            ctk.CTkLabel(grid, text=name, font=T.FONT_SMALL, text_color=T.TEXT_MUTED,
+            Label(grid, text=name, font=T.FONT_SMALL, text_color=T.TEXT_MUTED,
                          anchor="w").grid(row=r, column=col * 2, sticky="nw",
                                           padx=(0 if col == 0 else 16, 8))
-            v = ctk.CTkLabel(grid, text="—", font=T.FONT_SMALL, text_color=T.TEXT,
+            v = Label(grid, text="—", font=T.FONT_SMALL, text_color=T.TEXT,
                              anchor="w", justify="left")
             v.grid(row=r, column=col * 2 + 1, sticky="nw")
             self.health[key] = v
@@ -421,7 +469,7 @@ class DvlPage(ctk.CTkFrame):
         c = Card(parent, "4.  Live charts",
                  "Shaded: velocity invalid. Lines: gaps — grey quiet, red "
                  "missing, yellow late.")
-        c.grid(row=row, column=0, sticky="ew", pady=(0, 12))
+        c.grid(row=row, column=0, sticky="ew", pady=(0, T.GAP))
         c.body.grid_columnconfigure(0, weight=1)
         self.window_pick = _segmented(c.body, list(WINDOWS), self._pick_window)
         self.window_pick.set(self._window)
@@ -432,13 +480,23 @@ class DvlPage(ctk.CTkFrame):
         self.charts.bind("<Configure>", self._charts_repaint.ask)
 
     def _fit_health(self, grid) -> None:
-        """Values wrap within their quarter of the width, never across it."""
+        """Values wrap within their own column, never across into the next.
+
+        The room is what the name columns leave, measured -- not a quarter of
+        the width less a guess at the names. The names include
+        "→ GLOBAL_VISION_POSITION_EST.", and the guess left the values on the
+        field laptop's screen running under the next name.
+        """
+        across = 4
+
         def fit(event=None) -> None:
             try:
                 scaling = ctk.ScalingTracker.get_widget_scaling(grid) or 1.0
+                names = sum(grid.grid_bbox(col * 2, 0)[2] for col in range(across))
             except Exception:
-                scaling = 1.0
-            room = int(grid.winfo_width() / scaling / 4) - 150
+                return
+            gaps = (16 * (across - 1) + 8) * scaling
+            room = int((grid.winfo_width() - names - gaps) / scaling / across) - 6
             if room > 60:
                 for v in self.health.values():
                     if v.cget("wraplength") != room:
@@ -464,14 +522,23 @@ class DvlPage(ctk.CTkFrame):
         c = self._colors()
         strip_h = STRIP_H * s
         x0, x1 = NAME_W * s, w - 60 * s
-        pixels = max(1, int(x1 - x0))
+        # A point every few pixels, not every pixel: Tk on Windows draws a
+        # line wider than one pixel through GDI's geometric pens, whose cost
+        # climbs much faster than the number of points, and eleven series of
+        # two minutes at 10 Hz were most of a second's drawing. Gaps are
+        # marked by their own lines below, so a stall is never decimated away.
+        pixels = max(1, int((x1 - x0) / (CHART_PX_PER_POINT * s)))
         if self._charts_repaint.busy:
             pixels = max(1, pixels // 3)
-        step = max(1, len(hist) // pixels)
+        step = max(1, -(-len(hist) // pixels))
         pts = hist[::step]
 
         def x_of(t):
             return x0 + max(0.0, min(1.0, (t - (now - span)) / span)) * (x1 - x0)
+
+        # Each sample's x once, shared by the eleven series drawn from it:
+        # working it out per series per point was most of this redraw.
+        xs = [x_of(p.t) for p in pts]
 
         # Invalid spans, as bands under every strip.
         bands, start = [], None
@@ -484,19 +551,22 @@ class DvlPage(ctk.CTkFrame):
         if start is not None:
             bands.append((start, now))
 
-        temps = [(t, deg) for t, deg in snap.temperature if t >= now - span]
+        # Series as (x, value): the x already worked out above.
+        temps = [(x_of(t), deg) for t, deg in snap.temperature if t >= now - span]
+        both = list(zip(xs, pts, strict=True))
         strips = [
             ("altitude / beams", "m",
-             [(c["text"], [(p.t, p.altitude) for p in pts if p.valid])] +
-             [(BEAM_COLORS[i], [(p.t, p.distance[i]) for p in pts]) for i in range(4)]),
-            ("RSSI", "dBm", [(BEAM_COLORS[i], [(p.t, p.rssi[i]) for p in pts])
+             [(c["text"], [(x, p.altitude) for x, p in both if p.valid])] +
+             [(BEAM_COLORS[i], [(x, p.distance[i]) for x, p in both])
+              for i in range(4)]),
+            ("RSSI", "dBm", [(BEAM_COLORS[i], [(x, p.rssi[i]) for x, p in both])
                              for i in range(4)]),
-            ("NSD (noise)", "dBm", [(BEAM_COLORS[i], [(p.t, p.nsd[i]) for p in pts])
+            ("NSD (noise)", "dBm", [(BEAM_COLORS[i], [(x, p.nsd[i]) for x, p in both])
                                     for i in range(4)]),
             ("report interval", "ms: DVL / laptop",
-             [(c["text"], [(p.t, p.d_tov_ms) for p in pts]),
-              (brand.CORAL, [(p.t, p.d_rx_ms) for p in pts])]),
-            ("FOM", "m/s", [(c["text"], [(p.t, p.fom) for p in pts if p.valid])]),
+             [(c["text"], [(x, p.d_tov_ms) for x, p in both]),
+              (brand.CORAL, [(x, p.d_rx_ms) for x, p in both])]),
+            ("FOM", "m/s", [(c["text"], [(x, p.fom) for x, p in both if p.valid])]),
             ("DVL temperature", "°C", [(brand.CORAL, temps)]),
         ]
         total = int(strip_h * len(strips))
@@ -524,17 +594,21 @@ class DvlPage(ctk.CTkFrame):
             lo, hi = min(values), max(values)
             if hi - lo < 1e-9:
                 lo, hi = lo - 0.5, hi + 0.5
+            ky = (y1 - y0) / (hi - lo)
+            number = (int, float)
             for color, ser in series:
                 coords: list[float] = []
-                for t, v in ser:
-                    if not isinstance(v, (int, float)):
+                add = coords.extend
+                for x, v in ser:
+                    if not isinstance(v, number):
                         if len(coords) >= 4:
-                            cv.create_line(*coords, fill=color, width=lw)
+                            cv.create_line(*coords, fill=color, width=lw, joinstyle="bevel")
                         coords = []
+                        add = coords.extend
                         continue
-                    coords += [x_of(t), y1 - (v - lo) / (hi - lo) * (y1 - y0)]
+                    add((x, y1 - (v - lo) * ky))
                 if len(coords) >= 4:
-                    cv.create_line(*coords, fill=color, width=lw)
+                    cv.create_line(*coords, fill=color, width=lw, joinstyle="bevel")
             cv.create_text(w - 6 * s, y0, anchor="ne", text=_axis(hi),
                            fill=c["muted"], font=F(FONT_CANVAS_SMALL))
             cv.create_text(w - 6 * s, y1, anchor="se", text=_axis(lo),
@@ -553,7 +627,7 @@ class DvlPage(ctk.CTkFrame):
     def _build_acoustic(self, parent, row: int) -> None:
         c = Card(parent, "3.  Echo and spectrum",
                  "The latest ping, per beam, from the DVL's web API.")
-        c.grid(row=row, column=0, sticky="nsew", pady=(0, 12))
+        c.grid(row=row, column=0, sticky="nsew", pady=(0, T.GAP))
         c.body.grid_columnconfigure(0, weight=0)
         c.body.grid_columnconfigure(1, weight=1)
         label(c.body, "snapshots", muted=True).grid(row=0, column=0, padx=(0, 8),
@@ -669,7 +743,7 @@ class DvlPage(ctk.CTkFrame):
         self.diag_pick.grid(row=0, column=0)
         button(r, "Collect diagnostic log", self._collect, "primary", width=200
                ).grid(row=0, column=1, padx=(10, 0))
-        self.diag_label = ctk.CTkLabel(c.body, text="", font=T.FONT_SMALL,
+        self.diag_label = Label(c.body, text="", font=T.FONT_SMALL,
                                        text_color=T.TEXT_MUTED, anchor="w",
                                        justify="left")
         self.diag_label.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
@@ -780,7 +854,7 @@ class DvlPage(ctk.CTkFrame):
     def _tick(self) -> None:
         """Twice a second while on screen; nothing at all while it is not."""
         try:
-            if self.beams.winfo_ismapped():
+            if shown(self.beams):
                 self._update_text()
                 self._draw_beams()
                 now = time.monotonic()
@@ -811,20 +885,20 @@ class DvlPage(ctk.CTkFrame):
                                                       else (s.ws_error or "not connected"))
         api_ok = not s.web_error and bool(s.status.get("reachable"))
         web = f"{lamp(api_ok)} web API " + (s.web_error or "")
-        self.conn_label.configure(text=f"DVL {addr}{src}      {tcp}      {ws}      {web}",
+        _set(self.conn_label, text=f"DVL {addr}{src}      {tcp}      {ws}      {web}",
                                   text_color=T.OK if s.tcp_connected else T.TEXT)
         if s.problem:
-            self.problem_label.configure(text=s.problem)
+            _set(self.problem_label, text=s.problem)
             self.problem_label.grid()
         else:
             self.problem_label.grid_remove()
 
         # 6. delivery
         d = self.delivery
-        d["dvl_vel"].configure(text=f"{_rate(s, 'velocity')}  "
+        _set(d["dvl_vel"], text=f"{_rate(s, 'velocity')}  "
                                     f"(valid {_rate(s, 'velocity_valid')}, "
                                     f"invalid {_rate(s, 'velocity_invalid')})")
-        d["dvl_dr"].configure(text=_rate(s, "position_local"))
+        _set(d["dvl_dr"], text=_rate(s, "position_local"))
 
         down = s.mavlink.get("_down") or ""
 
@@ -839,32 +913,32 @@ class DvlPage(ctk.CTkFrame):
             rate = m.get("rate")
             return ((f"{rate:.1f}/s" if isinstance(rate, (int, float)) else "…")
                     + f"  (count {m['counter']:,})")
-        d["ext_dist"].configure(text=mav("255/0/DISTANCE_SENSOR"))
-        d["ext_gvpe"].configure(text=mav("255/0/GLOBAL_VISION_POSITION_ESTIMATE"))
-        d["ext_vpd"].configure(text=mav("255/0/VISION_POSITION_DELTA"))
-        d["ap_rf"].configure(text=mav("1/1/RANGEFINDER"))
+        _set(d["ext_dist"], text=mav("255/0/DISTANCE_SENSOR"))
+        _set(d["ext_gvpe"], text=mav("255/0/GLOBAL_VISION_POSITION_ESTIMATE"))
+        _set(d["ext_vpd"], text=mav("255/0/VISION_POSITION_DELTA"))
+        _set(d["ap_rf"], text=mav("1/1/RANGEFINDER"))
         st = s.status
         if st.get("ext_reachable"):
-            d["ext"].configure(text=f"{st.get('ext_status') or '?'} · sends "
+            _set(d["ext"], text=f"{st.get('ext_status') or '?'} · sends "
                                     f"{st.get('ext_should_send') or '?'} · rangefinder "
                                     f"{_f(st.get('ext_rangefinder'))}")
         else:
-            d["ext"].configure(text="not answering" if st.get("ext_reachable") is False
+            _set(d["ext"], text="not answering" if st.get("ext_reachable") is False
                                else "—")
         clients = st.get("json_clients")
-        d["clients"].configure(text=(f"{clients}  (this program is one of them)"
+        _set(d["clients"], text=(f"{clients}  (this program is one of them)"
                                      if clients is not None else "—"))
 
         h = self.health
         med = s.median_ms
-        h["cadence"].configure(text=(f"median {med:.0f} ms ≈ {1000 / med:.1f} Hz"
+        _set(h["cadence"], text=(f"median {med:.0f} ms ≈ {1000 / med:.1f} Hz"
                                      if med else "—"))
-        h["last"].configure(text=(f"{s.last_rx_age_s:.1f} s ago"
+        _set(h["last"], text=(f"{s.last_rx_age_s:.1f} s ago"
                                   if s.last_rx_age_s is not None else "—"))
         cad = s.cadence or {}
         gaps = cad.get("gaps") or {}
         gap_ms = cad.get("gap_ms") or {}
-        h["gaps"].configure(text=("  ·  ".join(
+        _set(h["gaps"], text=("  ·  ".join(
             f"{GAP_WORDS[k]} {gaps.get(k, 0)}"
             + (f" ({gap_ms.get(k, 0) / 1000:.1f} s)" if gaps.get(k) else "")
             for k in ("dvl_quiet", "missing_reports", "delivery_stall")
@@ -872,7 +946,7 @@ class DvlPage(ctk.CTkFrame):
             + (f"\n~{cad.get('missing_reports_estimate', 0)} report(s) made and never "
                f"received" if cad.get("missing_reports_estimate") else ""))
             if cad else "—")
-        h["invalid"].configure(text=(f"{cad.get('invalid_reports', 0):,} reports in "
+        _set(h["invalid"], text=(f"{cad.get('invalid_reports', 0):,} reports in "
                                      f"{cad.get('invalid_spans', 0)} stretch(es), "
                                      f"{cad.get('invalid_ms', 0) / 1000:.1f} s"
                                      if cad else "—"))
@@ -882,37 +956,37 @@ class DvlPage(ctk.CTkFrame):
         net = v.get("rx_minus_tx_ms")
         net_text = (_f(net, 1, "ms") if not isinstance(net, (int, float))
                     or abs(net) < 10_000 else "— (DVL clock not set)")
-        h["latency"].configure(text=f"{_f(v.get('tx_minus_tov_ms'), 1, 'ms')} / "
+        _set(h["latency"], text=f"{_f(v.get('tx_minus_tov_ms'), 1, 'ms')} / "
                                     f"{net_text}")
         skew = st.get("dvl_clock_minus_laptop_ms")
         skew_text = (f"{abs(skew) / 86_400_000:.0f} days "
                      f"{'behind' if skew < 0 else 'ahead'}"
                      if isinstance(skew, (int, float)) and abs(skew) >= 86_400_000
                      else f"{_f(skew, 0, 'ms')} ± {_f(st.get('clock_uncertainty_ms'), 0)}")
-        h["clock"].configure(text=(f"{skew_text} · NTP "
+        _set(h["clock"], text=(f"{skew_text} · NTP "
                                    f"{'synced' if st.get('ntp_synchronized') else 'not synced'}"
                                    if st.get("dvl_clock_utc") else "—"))
         cyc = st.get("cfg_periodic_cycling_enabled")
         in_cycle = s.rates.get("ws_periodic_cycling", 0) > 0
-        h["cycling"].configure(
+        _set(h["cycling"], 
             text=("ON — the DVL drops reports every 10 s" if cyc else
                   "off" if cyc is False else "—") + ("  (checking now)" if in_cycle else ""),
             text_color=T.WARN if cyc or in_cycle else T.TEXT)
         temp = st.get("temperature_c")
-        h["temp"].configure(text=f"{_f(temp, 1, '°C')} / {_f(st.get('cpu_load'), 2)}",
+        _set(h["temp"], text=f"{_f(temp, 1, '°C')} / {_f(st.get('cpu_load'), 2)}",
                             text_color=T.WARN if isinstance(temp, (int, float))
                             and temp >= CAP.HOT_C else T.TEXT)
         run = s.ws_velocity.get("run_config")
         expected = P.RANGE_MODES.get(int(run)) if isinstance(run, (int, float)) else None
-        h["range"].configure(text=f"setting {_f(st.get('cfg_range_mode'))} · running "
+        _set(h["range"], text=f"setting {_f(st.get('cfg_range_mode'))} · running "
                                   f"{_f(run, 0)}"
                                   + (f" (Water Linked: {expected[2]})" if expected else ""))
-        h["warnings"].configure(text=st.get("warnings") or ("none" if st else "—"),
+        _set(h["warnings"], text=st.get("warnings") or ("none" if st else "—"),
                                 text_color=T.WARN if st.get("warnings") else T.TEXT)
-        h["streams"].configure(text=f"TCP {_rate(s, 'velocity')} vel · "
+        _set(h["streams"], text=f"TCP {_rate(s, 'velocity')} vel · "
                                     f"web {_rate(s, 'ws')} msgs · "
                                     f"orientation {_rate(s, 'ws_roll_pitch_yaw')}")
-        h["snaps"].configure(text=(f"{rec.snapshot_hz:g}/s asked · "
+        _set(h["snaps"], text=(f"{rec.snapshot_hz:g}/s asked · "
                                    f"{_rate(s, 'echo')} achieved"
                                    if rec.snapshot_hz else "off"))
         if s.events and s.events[-1] != self._events_shown:

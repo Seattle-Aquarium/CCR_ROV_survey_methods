@@ -29,7 +29,7 @@ from ..nav import origin as O
 from ..nav import profiles as PR
 from ..nav import session as SESS
 from . import theme as T
-from .widgets import Card, button, entry, label, output_box, say
+from .widgets import Card, Label, button, entry, label, output_box, say
 
 log = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ class DetailsDrawer(_Drawer):
             origin_confirmed=bool(getattr(page.origin_state, "confirmed",
                                           False)))
 
-        head = ctk.CTkLabel(
+        head = Label(
             tab, text=report.headline, font=T.FONT_H2, anchor="w",
             text_color=(T.WARN if report.severity == DG.PROBLEM
                         else T.HEADING))

@@ -65,14 +65,14 @@ class TransectPage(ctk.CTkFrame):
         # ---- 1. what will be read ------------------------------------
         c1 = Card(body, "1.  Recordings",
                   "The flight's .mcap files, read as one dive.")
-        c1.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        c1.grid(row=0, column=0, sticky="ew", pady=(0, T.GAP))
         self.found = label(c1.body, "No flight folder selected yet.", muted=True)
         self.found.grid(row=0, column=0, sticky="w")
 
         # ---- 2. what will be cut -------------------------------------
         c2 = Card(body, "2.  Transects",
                   "From the Transects tab; edit them there.")
-        c2.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        c2.grid(row=1, column=0, sticky="ew", pady=(0, T.GAP))
         self.plan_summary = label(c2.body, "", muted=True)
         self.plan_summary.grid(row=0, column=0, sticky="w")
 
@@ -80,7 +80,7 @@ class TransectPage(ctk.CTkFrame):
         c3 = Card(body, "3.  Options",
                   "Depth_std puts transects on the MLLW tide datum; it needs "
                   "the internet, and is left blank without it.")
-        c3.grid(row=2, column=0, sticky="ew", pady=(0, 12))
+        c3.grid(row=2, column=0, sticky="ew", pady=(0, T.GAP))
         c3.body.grid_columnconfigure(1, weight=1)
 
         label(c3.body, "Tide station").grid(row=0, column=0, sticky="w", pady=4)
@@ -106,7 +106,7 @@ class TransectPage(ctk.CTkFrame):
         c4 = Card(body, "4.  Extract",
                   "One CSV per transect, plus a site map. A file open in Excel "
                   "is written alongside.")
-        c4.grid(row=3, column=0, sticky="ew", pady=(0, 12))
+        c4.grid(row=3, column=0, sticky="ew", pady=(0, T.GAP))
         row = ctk.CTkFrame(c4.body, fg_color="transparent")
         row.grid(row=0, column=0, sticky="w")
         self.run_btn = button(row, "Extract transect CSVs", self._run,
@@ -121,7 +121,7 @@ class TransectPage(ctk.CTkFrame):
         c5 = Card(body, "5.  Sensor health",
                   "Where each column's numbers came from, and whether the "
                   "instruments behind them behaved.")
-        c5.grid(row=4, column=0, sticky="ew", pady=(0, 12))
+        c5.grid(row=4, column=0, sticky="ew", pady=(0, T.GAP))
         c5.body.grid_columnconfigure(0, weight=1)
 
         hrow = ctk.CTkFrame(c5.body, fg_color="transparent")

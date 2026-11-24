@@ -17,7 +17,7 @@ import customtkinter as ctk
 from ..nav import plan as P
 from . import navdraw
 from . import theme as T
-from .widgets import Splitter, button, entry, label
+from .widgets import Label, Splitter, button, entry, label
 
 #: Tools offered, in the order they are used.
 PALETTE = ("pan", "line", "polyline", "rect", "grid", "circle", "polygon")
@@ -129,10 +129,10 @@ class PlanPanel(ctk.CTkFrame):
         box.grid(row=4, column=0, sticky="nsew")
         box.grid_columnconfigure(0, weight=1)
         self.inspector = box
-        self.title = ctk.CTkLabel(box, text="Nothing selected", font=T.FONT_H2,
+        self.title = Label(box, text="Nothing selected", font=T.FONT_H2,
                                   text_color=T.HEADING, anchor="w")
         self.title.grid(row=0, column=0, sticky="ew", padx=8, pady=(7, 2))
-        self.summary = ctk.CTkLabel(box, text="", font=T.FONT_SMALL,
+        self.summary = Label(box, text="", font=T.FONT_SMALL,
                                     text_color=T.TEXT_MUTED, anchor="w",
                                     justify="left")
         self.summary.grid(row=1, column=0, sticky="ew", padx=8)
@@ -191,7 +191,7 @@ class PlanPanel(ctk.CTkFrame):
                                corner_radius=4)
             row.grid(row=i, column=0, sticky="ew", pady=1)
             row.grid_columnconfigure(0, weight=1)
-            name = ctk.CTkLabel(
+            name = Label(
                 row, text=f"{navdraw.KIND_GLYPH.get(f.kind, '•')} {f.name}",
                 font=T.FONT_SMALL, anchor="w", cursor="hand2")
             name.grid(row=0, column=0, sticky="ew", padx=(6, 0))

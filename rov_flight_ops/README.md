@@ -28,9 +28,12 @@ never break another. Two things are deliberately *not* separate:
   [Settings and cache](#settings-and-cache)).
 
 Because the copies can drift, a fix to shared logic has to be made in both
-folders. The GUI's shared files (`gui/shell.py`, `widgets.py`, `theme.py`,
-`gradients.py`), `mcap_extract.py` and `diagnostics.py` are currently identical
-in both.
+folders. `gui/gradients.py`, `mcap_extract.py` and `diagnostics.py` are
+currently identical in both. `gui/shell.py`, `widgets.py` and `theme.py` were
+too, until November 2026, when this program's copies were reworked for the
+field laptops' screens and speed (see
+[Changes for the field laptops' screens](#changes-for-the-field-laptops-screens-november-2026));
+ROV Imagery Processing has not had that work yet.
 
 ---
 
@@ -126,13 +129,24 @@ From a terminal: `python -m rov_flight_ops` (in the environment above).
 
 ## The window
 
+* **It fits the screen it opens on.** The window opens at a size the screen
+  can hold, and **maximized on a small screen** — the field laptops' 1920 × 1080
+  panels run at 150 %, which leaves 1280 × 672 logical pixels above the
+  taskbar. Whether it was last closed maximized is remembered. On a screen
+  like that it also lays itself out **compact**: the same type sizes for
+  everything you read, but less padding, headings a step smaller, card
+  subtitles beside their titles, and a tab row and footer one line each. A
+  roomier screen gets the original, *comfortable* layout. `ui_density` in
+  `settings.json` (`auto`, `compact` or `comfortable`) overrides the choice.
 * **Tabs across the top** are the navigation, numbered in the order a survey
   day uses them. There is no chapter rail any more — its width goes back to the
   work.
 * **The title banner folds away.** The **▲** button to the right of the
   *Dark mode* switch hides the logo, title and attribution; the gradient bar,
-  the switch and the button stay and rise to the top of the window. **▼**
-  brings the banner back.
+  the switch and the button stay and rise to the top of the window, with the
+  program's name at the left when there is room for it. **▼** brings the
+  banner back. On a compact screen it starts folded — open, it took a fifth of
+  the field laptop's height — and after that it opens the way it was left.
 * **The banner carries the three software versions** — BlueOS, ArduSub and
   Cockpit — read off the vehicle once a minute while it is connected. Open,
   they are a column beside the title; folded, a row to the left of the lamps.
@@ -155,8 +169,9 @@ From a terminal: `python -m rov_flight_ops` (in the environment above).
   the foot of the window has a handle on its top edge; every section with a
   report box has a handle on its bottom edge. Drag to resize; double-click the
   handle to jump between one line and a comfortable height. They never shrink
-  below one line, and the progress bar and status line are never inside the
-  part that shrinks.
+  below one line, and the status line under the log is never inside the part
+  that shrinks. That line is the footer's one row: what the program is doing,
+  a progress bar while a job runs, the recorder's state, and **Stop**.
 * **Sections that sit side by side are divided by draggable handles.** On
   Navigation: the map against the right-hand column, readiness against the
   survey plan, and the plan's feature list against its inspector. On
@@ -168,10 +183,12 @@ From a terminal: `python -m rov_flight_ops` (in the environment above).
   divider — a scrolling tab's sections are as tall as their content, and the
   report boxes inside them have their own handles.
 * **Small sections sit side by side** where they are short enough to.
-* **The recorder's state is on every tab**, at the right of the tab row:
-  *Watching 192.168.2.2 for arming*, *● Recording … · rows · host*, or a warning
-  in words if recording has failed — so a failure is not waiting to be noticed
-  on the Monitoring tab while someone is downloading logs.
+* **The recorder's state is on every tab**, on the footer's row beside
+  **Stop**: *Watching 192.168.2.2 for arming*, *● Recording … · rows · host*,
+  or a warning in words if recording has failed — so a failure is not waiting
+  to be noticed on the Monitoring tab while someone is downloading logs. (It
+  used to be at the end of the tab row, where on the field laptop it ran into
+  the tabs.)
 * **The ROV flight simulator** is the switch left of *Diagnostics*, open or
   folded. See [below](#the-rov-flight-simulator).
 
@@ -536,7 +553,7 @@ disarms, the video glitches, a minute goes on getting the ROV back where it
 was. That minute is inside the transect but was not surveyed, and its imagery
 must not be filed as though it were.
 
-**+ Add pause**, under each transect's *end* box, adds a start and an end
+**+ Add pause**, beside each transect's *Remove*, adds a start and an end
 beside the transect's own times. Add as many as a transect needs. The row then
 reads, for example, *10.5 min surveying · 1.5 min paused*.
 
@@ -964,13 +981,17 @@ rov_flight_ops/
     launch.py                entry point for a packaged build
     pyproject.toml           package and dependencies
     assets/                  fonts, logos, icon
+    tools/profile_window.py  measures the window on this laptop (README: field laptops)
     specifications/          design documents: the DVL capture's sources, schema,
                              invariants, diagnosis guide, provenance, bench checklist
     rov_flight_ops/          the package
         gui/
             app.py           the window and its eight tabs
-            shell.py         banner fold, tabs, resizable output (same file as imagery's copy)
-            widgets.py       cards, resize grips, site/transect editors
+            shell.py         banner fold, tabs (parked off-screen when hidden), the footer
+            widgets.py       cards, one-window labels, resize grips, site/transect editors
+            theme.py         colours, type, and the compact / comfortable density
+            screen.py        the work area of the monitor the window is on
+            ctk_tuning.py    the corrections made to CustomTkinter, all in one place
             monitorpage.py   Monitoring: recording, path to the vehicle, live charts
             goboard.py       Monitoring: the go / no-go board (judged in board.py)
             paramspage.py    Parameters tab (compared in paramcheck.py)
@@ -1169,3 +1190,116 @@ The remaining cost is CustomTkinter redrawing each visible widget's rounded
 rectangle as it resizes, which is inherent to the framework. Getting under
 about 35 ms would mean changing framework, and that is not worth it for this
 program.
+
+(Item 1 has since been replaced by parking — see below.)
+
+## Changes for the field laptops' screens (November 2026)
+
+The program was built on a 4K laptop at 250 % — 1536 × 960 logical pixels —
+and flown from Dell Rugged laptops whose 1920 × 1080 panels run at 150 %:
+1280 × 720 logical, of which 672 is above the taskbar. A quarter less height,
+and every tab ran out of height first. It was also slower there than it had
+been at the desk. This round was done on the field laptop itself, profiled
+with the simulator flying and the window maximized, and checked by screenshot.
+
+### The layout
+
+| maximized, physical pixels | before | after |
+|---|---:|---:|
+| banner | 198 | 65 (folded; still 198 open) |
+| tab row | 72 | 47 |
+| log, status and Stop | 151 | 108 |
+| **left for the page** | **541** | **740** |
+| the Navigation map | about 37 | about 375 |
+
+* **The window fits the screen** and opens maximized on a small one; it used
+  to ask for more than the panel has and open with its foot off the bottom.
+* **A compact density** on screens under 860 logical pixels tall
+  (`theme.set_density`): the same type size for everything that is read, but
+  less padding, headings a step smaller, card subtitles beside their titles,
+  a tab row and a footer one line each, shorter Monitoring strips (the rate
+  and the thresholds share a line), and every transect one row tall with
+  *+ Add pause* beside *Remove*. The original layout is *comfortable*, and a
+  roomy screen still gets it.
+* **The banner starts folded** on a compact screen, with the program's name
+  at its left where it fits, and remembers being opened.
+* **The recorder's state moved to the footer**, beside Stop: at the end of the
+  tab row it ran into the tabs.
+* Things that were cut off at that width are not: the row names on the
+  Flight card ("Folde", "Reco"), the Navigation readiness matrix's source
+  names, the UGPS verdict, the DVL figures (which ran under the next name),
+  and a DVL beam tile's title. The line saying what a position rests on now
+  shares the position's line, trimmed with an ellipsis.
+
+### What made it slow, worst first
+
+Measured with [`tools/profile_window.py`](tools/profile_window.py), which
+times every Tk callback, runs a 10 ms probe timer to see how long the loop is
+blocked, times Tk's own drawing of the charts, and drags and moves its own
+window — run it on any laptop to see what it costs there.
+
+1. **Wide strip-chart lines.** Tk on Windows draws a line wider than one pixel
+   through GDI's geometric pens, and with rounded joins their cost grows far
+   faster than the number of points: seven strips took 3 ms at 120 points,
+   55 ms at 600 and 640 ms at 1,800. The DVL tab's charts took **39 ms to
+   build and 249 ms to draw, once a second** — the window was blocked a
+   third of the time it was open. Monitoring's took 56–63 ms a second, and
+   would have reached half a second with thirty minutes of history in the
+   30-minute window. Now: a point every three logical pixels (each bucket
+   drawn at its most outstanding sample, so a spike keeps its height as well
+   as its colour) and bevelled joins. DVL 6 + 7.5 ms; Monitoring about
+   10 + 10 ms, whatever the window.
+2. **The Navigation page drew itself on every tab**, four times a second: the
+   map, the readiness matrix, the plan panel and the strips, 60–100 ms of
+   every second whichever tab was open. Now only the guidance is kept up to
+   date off screen.
+3. **Text was cut to fit one character at a time**, a round trip into Tk per
+   character — about five hundred measurements per refresh of the Navigation
+   matrix. Now halving, and remembered (`widgets.elide`).
+4. **CustomTkinter itself** (`ctk_tuning.py`): every `configure` read every
+   option of the widget back from Tk; the root window's `<Configure>` ran in
+   Python for every widget in the window that moved — over a thousand times
+   for one tab change; the display-scaling and light/dark polls ran 10 and 33
+   times a second for nothing; and a theme change laid the whole window out
+   once per widget.
+5. **Every label was three native windows** (a Tk frame, a canvas and a label)
+   with a 28-pixel floor. On Windows each Tk widget is a real child window to
+   map, move and paint — about a quarter of a millisecond each to show on this
+   laptop. `widgets.Label` is one, and replaces all of them.
+6. **A tab change mapped every widget on the page again.** Hidden pages are
+   now parked off-screen, still mapped, at the size they last had
+   (`shell.TabStrip`); a tab change moves one window and paints it.
+7. **Every resize step laid the page out again.** During a drag the open page
+   now follows a few times a second, then exactly at the size it ends at.
+8. Smaller things that changed nothing on screen but were done once a second
+   or more: the lamps, the simulator's banner, button states.
+
+### Before and after, on the field laptop
+
+Simulator flying, window maximized, medians unless stated; `main` at
+6d57f5e against this branch.
+
+| | before | after |
+|---|---:|---:|
+| window thread CPU, a quiet tab | 10–11 % | 3–4 % |
+| timer work, a quiet tab | 86–90 ms/s | 16–21 ms/s |
+| window thread CPU, Navigation / Monitoring / DVL | 14 / 18 / 31 % | 9 / 9 / 7 % |
+| longest stall, DVL / Parameters | 207 / 390 ms | 48 / 16 ms |
+| tab change, Navigation / Monitoring / DVL / Parameters | 214 / 244 / 134 / 396 ms | 121 / 150 / 68 / 100 ms |
+| tab change, the other four | 70–155 ms | 48–74 ms |
+| first visit after maximizing, DVL / Navigation | 956 / 567 ms | 149 / 261 ms |
+| moving the window, per step (worst) | 9 ms (183 ms) | 5 ms (26 ms) |
+| map redraw, 40 minutes of track | 10.5–14.8 ms | 4.2–7.3 ms |
+| a 44-step resize drag, Monitoring / DVL | 19.6 / 24.0 s | 10.8 / 8.9 s |
+
+What is left: a resize step still costs this laptop 100–150 ms however little
+is re-laid out — Windows repainting the window — so a drag is smoother but not
+free; Navigation's resize is slightly slower than before because it now has a
+full-size map and matrix on screen rather than a sliver; the Monitoring board
+judges the vehicle in about 12 ms each second it is on screen; and the
+Parameters table is built in a few hundred milliseconds the first time the
+vehicle's parameters arrive. Buttons, entries and coloured frames are still
+CustomTkinter's, two or three native windows each.
+
+`ROV_UI_DENSITY=compact` (or `comfortable`) in the environment overrides the
+density for one run — that is how the test suite is run in both.

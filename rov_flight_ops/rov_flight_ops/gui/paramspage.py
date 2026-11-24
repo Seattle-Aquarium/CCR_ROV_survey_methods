@@ -36,7 +36,7 @@ from .. import diagnostics, paramfile
 from .. import paramcheck as PC
 from ..nav import profiles as PR
 from . import theme as T
-from .widgets import Card, button, fit_wrap, label
+from .widgets import Card, Label, button, fit_wrap, label, shown
 
 log = logging.getLogger(__name__)
 
@@ -122,13 +122,13 @@ class Table(ctk.CTkFrame):
             for r in rows:
                 made = {"cells": [], "button": None, "note": None}
                 if r.get("header"):
-                    lab = ctk.CTkLabel(self, text="", anchor="w", height=24)
+                    lab = Label(self, text="", anchor="w", height=24)
                     lab.grid(row=grid_row, column=0, columnspan=len(self.widths) + 1,
                              sticky="ew", pady=(8, 1))
                     made["cells"].append(lab)
                 else:
                     for i in range(len(r["cells"])):
-                        lab = ctk.CTkLabel(self, text="", anchor="w", height=20)
+                        lab = Label(self, text="", anchor="w", height=20)
                         lab.grid(row=grid_row, column=i, sticky="ew",
                                  padx=(0, 8))
                         made["cells"].append(lab)
@@ -139,7 +139,7 @@ class Table(ctk.CTkFrame):
                         made["button"] = btn
                 grid_row += 1
                 if r.get("note"):
-                    lab = ctk.CTkLabel(self, text="", anchor="w", justify="left",
+                    lab = Label(self, text="", anchor="w", justify="left",
                                        height=16, font=T.FONT_SMALL)
                     lab.grid(row=grid_row, column=1, columnspan=len(self.widths),
                              sticky="ew", pady=(0, 3))
@@ -199,14 +199,14 @@ class ParamsPage(ctk.CTkFrame):
         c = Card(body, "1.  Key parameters",
                  "Vehicle, then reference.   ▲ differs   ◆ set per site   "
                  "= worked out from the others")
-        c.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        c.grid(row=0, column=0, sticky="ew", pady=(0, T.GAP))
         top = ctk.CTkFrame(c.body, fg_color="transparent")
         top.grid(row=0, column=0, sticky="ew")
         top.grid_columnconfigure(1, weight=1)
-        self.verdict = ctk.CTkLabel(top, text="—", font=FONT_VERDICT,
+        self.verdict = Label(top, text="—", font=FONT_VERDICT,
                                     text_color=T.TEXT_MUTED, anchor="w")
         self.verdict.grid(row=0, column=0, sticky="w", padx=(0, 14))
-        self.headline = ctk.CTkLabel(top, text="", font=T.FONT_BODY,
+        self.headline = Label(top, text="", font=T.FONT_BODY,
                                      text_color=T.TEXT, anchor="w")
         self.headline.grid(row=0, column=1, sticky="ew")
         buttons = ctk.CTkFrame(top, fg_color="transparent")
@@ -219,11 +219,11 @@ class ParamsPage(ctk.CTkFrame):
                               lambda: self._set(self._key_settable()), "ghost",
                               width=170)
         self.key_all.grid(row=0, column=2, padx=(8, 0))
-        self.detail = ctk.CTkLabel(top, text="", font=T.FONT_SMALL,
+        self.detail = Label(top, text="", font=T.FONT_SMALL,
                                    text_color=T.TEXT_MUTED, anchor="w",
                                    justify="left")
         self.detail.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(2, 0))
-        self.write_state = ctk.CTkLabel(top, text="", font=T.FONT_SMALL,
+        self.write_state = Label(top, text="", font=T.FONT_SMALL,
                                         text_color=T.TEXT_MUTED, anchor="w")
         self.write_state.grid(row=2, column=0, columnspan=3, sticky="ew",
                               pady=(2, 0))
@@ -242,7 +242,7 @@ class ParamsPage(ctk.CTkFrame):
 
     def _build_profile(self, parent, row: int) -> None:
         c = Card(parent, "3.  Navigation profile")
-        c.grid(row=row, column=0, sticky="nsew", pady=(0, 12))
+        c.grid(row=row, column=0, sticky="nsew", pady=(0, T.GAP))
         head = ctk.CTkFrame(c.body, fg_color="transparent")
         head.grid(row=0, column=0, sticky="ew")
         head.grid_columnconfigure(1, weight=1)
@@ -258,8 +258,8 @@ class ParamsPage(ctk.CTkFrame):
 
     def _build_origin(self, parent, row: int) -> None:
         c = Card(parent, "4.  Origin")
-        c.grid(row=row, column=0, sticky="nsew", pady=(0, 12))
-        self.origin_text = ctk.CTkLabel(c.body, text="", font=T.FONT_SMALL,
+        c.grid(row=row, column=0, sticky="nsew", pady=(0, T.GAP))
+        self.origin_text = Label(c.body, text="", font=T.FONT_SMALL,
                                         text_color=T.TEXT, anchor="w",
                                         justify="left")
         self.origin_text.grid(row=0, column=0, sticky="ew")
@@ -268,8 +268,8 @@ class ParamsPage(ctk.CTkFrame):
     def _build_messages(self, parent, row: int) -> None:
         c = Card(parent, "5.  Message health",
                  "Age is since a new message, by mavlink2rest's counter.")
-        c.grid(row=row, column=0, sticky="nsew", pady=(0, 12))
-        self.messages = ctk.CTkLabel(c.body, text="", font=T.FONT_MONO,
+        c.grid(row=row, column=0, sticky="nsew", pady=(0, T.GAP))
+        self.messages = Label(c.body, text="", font=T.FONT_MONO,
                                      text_color=T.TEXT, anchor="nw",
                                      justify="left")
         self.messages.grid(row=0, column=0, sticky="ew")
@@ -279,7 +279,7 @@ class ParamsPage(ctk.CTkFrame):
         c = Card(body, "2.  Other differences",
                  "Everything else on the vehicle that is not as the file has "
                  "it.")
-        c.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        c.grid(row=1, column=0, sticky="ew", pady=(0, T.GAP))
         head = ctk.CTkFrame(c.body, fg_color="transparent")
         head.grid(row=0, column=0, sticky="ew")
         head.grid_columnconfigure(0, weight=1)
@@ -291,7 +291,7 @@ class ParamsPage(ctk.CTkFrame):
         self.others_all.grid(row=0, column=1, sticky="e")
         self.others_table = Table(c.body, (22, 190, 0, 170, 170))
         self.others_table.grid(row=1, column=0, sticky="ew", pady=(4, 0))
-        self.ignored = ctk.CTkLabel(c.body, text="", font=T.FONT_SMALL,
+        self.ignored = Label(c.body, text="", font=T.FONT_SMALL,
                                     text_color=T.TEXT_MUTED, anchor="w",
                                     justify="left")
         self.ignored.grid(row=2, column=0, sticky="ew", pady=(6, 0))
@@ -311,7 +311,7 @@ class ParamsPage(ctk.CTkFrame):
 
     def _tick(self) -> None:
         try:
-            if self.winfo_ismapped():
+            if shown(self):
                 self._update()
         except Exception:
             diagnostics.log_exception("Parameters tab", *sys.exc_info(),

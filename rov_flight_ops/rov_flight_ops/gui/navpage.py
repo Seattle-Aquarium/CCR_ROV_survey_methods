@@ -62,7 +62,7 @@ from . import navdraw, navmap
 from . import theme as T
 from .navmap import MapCanvas, Marker, format_position
 from .navplanpanel import PlanPanel
-from .widgets import Card, Repaint, Splitter, button, label
+from .widgets import Card, Label, Repaint, Splitter, button, elide, label, shown
 
 log = logging.getLogger(__name__)
 
@@ -96,10 +96,11 @@ MAP_MIN_PX, SIDE_MIN_PX = 360, 380
 NARROW_MAP_MIN_PX, NARROW_SIDE_MIN_PX = 160, 200
 
 #: The share of the matrix's width the Detail column gets, and the floor
-#: below which eliding it stops being useful. 13 of 32 is the column's grid
+#: below which eliding it stops being useful. 10 of 32 is the column's grid
 #: weight; keeping the two in step is what makes the elide match what is
-#: actually on screen.
-DETAIL_SHARE = 13 / 32
+#: actually on screen. (It was 13, with 7 for the source names, which cut
+#: "Acoustic position" short on the field laptop's narrower column.)
+DETAIL_SHARE = 10 / 32
 DETAIL_MIN_PX = 120
 
 #: How small the divider between the two cards may make each, in logical
@@ -253,12 +254,21 @@ class NavigationPage(ctk.CTkFrame):
         #: the map on a tall window. It grows with its chips.
         self.trust_legend = ctk.CTkFrame(readout, fg_color="transparent",
                                          width=0, height=0)
-        self.trust_legend.grid(row=0, column=1, sticky="e")
+        self.trust_legend.grid(row=0, column=2, sticky="e")
         self._legend_shown: list = []
 
+        # What the position rests on. On a compact screen it shares the
+        # position's line -- cut to fit, with an ellipsis -- rather than
+        # taking a line of the map's height for itself.
         self.trust_label = label(readout, "", muted=True)
         self.trust_label.configure(anchor="w")
-        self.trust_label.grid(row=1, column=0, columnspan=2, sticky="ew")
+        self._trust_inline = T.compact()
+        if self._trust_inline:
+            readout.grid_columnconfigure(0, weight=0)
+            readout.grid_columnconfigure(1, weight=1)
+            self.trust_label.grid(row=0, column=1, sticky="ew", padx=(14, 8))
+        else:
+            self.trust_label.grid(row=1, column=0, columnspan=3, sticky="ew")
         #: Hidden until there is something to say. An empty label still
         #: occupies a row, and "unknown — no position" under "— no position"
         #: is the same sentence twice.
@@ -267,13 +277,14 @@ class NavigationPage(ctk.CTkFrame):
 
         self._build_strip(col, row=3)
 
+        gap = 4 if T.compact() else 6
         from .flightstrip import FlightNumbers
         self.numbers = FlightNumbers(col)
-        self.numbers.grid(row=4, column=0, sticky="ew", pady=(6, 0))
+        self.numbers.grid(row=4, column=0, sticky="ew", pady=(gap, 0))
 
         from .ugpsstrip import ReceiversStrip
         self.ugps_strip = ReceiversStrip(col, self.app)
-        self.ugps_strip.grid(row=5, column=0, sticky="ew", pady=(6, 0))
+        self.ugps_strip.grid(row=5, column=0, sticky="ew", pady=(gap, 0))
         self._ugps_ticks = 0
 
     def _build_strip(self, parent, row: int) -> None:
@@ -284,12 +295,13 @@ class NavigationPage(ctk.CTkFrame):
         strip.grid_columnconfigure((0, 1, 2), weight=1, uniform="strip")
         self.strip = strip
 
+        pady = 4 if T.compact() else 7
         self.strip_guide = _StripCell(strip, "GUIDANCE")
-        self.strip_guide.grid(row=0, column=0, sticky="nsew", padx=8, pady=7)
+        self.strip_guide.grid(row=0, column=0, sticky="nsew", padx=8, pady=pady)
         self.strip_site = _StripCell(strip, "SITE / ORIGIN")
-        self.strip_site.grid(row=0, column=1, sticky="nsew", padx=8, pady=7)
+        self.strip_site.grid(row=0, column=1, sticky="nsew", padx=8, pady=pady)
         self.strip_home = _StripCell(strip, "TO SITE")
-        self.strip_home.grid(row=0, column=2, sticky="nsew", padx=8, pady=7)
+        self.strip_home.grid(row=0, column=2, sticky="nsew", padx=8, pady=pady)
 
     def _build_side_column(self) -> None:
         col = ctk.CTkFrame(self, fg_color="transparent")
@@ -804,7 +816,7 @@ class NavigationPage(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _escape(self, _event=None) -> None:
-        if self.editor is None or not self.winfo_viewable():
+        if self.editor is None or not self.on_screen():
             return
         if self.editor.drawing or self.editor._draft:
             self.editor.cancel_draft()
@@ -812,7 +824,7 @@ class NavigationPage(ctk.CTkFrame):
             self.plan_panel.refresh()
 
     def _enter(self, _event=None) -> None:
-        if self.editor is not None and self.winfo_viewable():
+        if self.editor is not None and self.on_screen():
             if self.editor.finish():
                 self.plan_panel.refresh()
 
@@ -905,7 +917,43 @@ class NavigationPage(ctk.CTkFrame):
     #  the refresh loop
     # ------------------------------------------------------------------
 
+    def on_screen(self) -> bool:
+        """Is this the tab being looked at?
+
+        Asked of the tab strip when this is the application's own Navigation
+        page -- a dictionary lookup -- and of Tk otherwise.
+        """
+        app = self.app
+        nav = getattr(app, "nav", None)
+        pages = getattr(app, "pages", {}) or {}
+        if nav is not None and pages.get("navigation") is self:
+            try:
+                return nav.key_of(nav.current) == "navigation"
+            except Exception:
+                pass
+        return shown(self)
+
     def _tick(self) -> None:
+        """Four times a second: draw the page if it is on screen.
+
+        Off screen, only the guidance is kept up to date -- it accumulates the
+        line's progress for the navigation log -- and nothing is drawn. The
+        map, the matrix, the plan panel and the strips used to be redrawn
+        whichever tab was open, which on the field laptop was the largest
+        single cost in the whole window: 60-100 ms of every second, on every
+        tab, for a page nobody was looking at. Opening the tab draws it at
+        once (`refresh`).
+        """
+        if not self.on_screen():
+            try:
+                if self.collector is not None and self.following:
+                    self._render_guidance(self.collector.snapshot(),
+                                          time.monotonic())
+            except Exception:
+                diagnostics.log_exception("navigation guidance", *sys.exc_info(),
+                                          level=logging.WARNING)
+            self.after(REFRESH_MS, self._tick)
+            return
         try:
             if self.numbers.winfo_ismapped():
                 self.numbers.update_from(self.collector.snapshot()
@@ -1011,7 +1059,16 @@ class NavigationPage(ctk.CTkFrame):
             else:
                 self.trust_label.grid_remove()
         if line:
-            _set_label(self.trust_label, text=line[:190],
+            text = line[:190]
+            if self._trust_inline:
+                room = self.trust_label.winfo_width() - 8
+                if room > 40:
+                    try:
+                        text = elide(_measurer(self.trust_label), text, room,
+                                     strip=" ,;·-—")
+                    except Exception:
+                        pass
+            _set_label(self.trust_label, text=text,
                        text_color=(T.TEXT_MUTED if state in (TR.ABSOLUTE,
                                                              TR.RELATIVE)
                                    else T.WARN))
@@ -1023,7 +1080,7 @@ class NavigationPage(ctk.CTkFrame):
         for kid in self.trust_legend.winfo_children():
             kid.destroy()
         for i, (_state, text, color, dash) in enumerate(styles):
-            chip = ctk.CTkLabel(self.trust_legend,
+            chip = Label(self.trust_legend,
                                 text=("- - " if dash else "— ") + text,
                                 font=T.FONT_SMALL, text_color=color)
             chip.grid(row=0, column=i, padx=(8, 0))
@@ -1125,9 +1182,13 @@ class NavigationPage(ctk.CTkFrame):
         _set_label(self.foot_label, text="  ·  ".join(bits)[:150],
                    text_color=color)
         can = self._can_write()
-        self.apply_button.configure(
-            state="normal" if can else "disabled",
-            text="Review & apply…" if can else "Apply (locked)")
+        # Four times a second, and nearly always the same: a button redraws
+        # its whole shape on every configure.
+        want = ("normal" if can else "disabled",
+                "Review & apply…" if can else "Apply (locked)")
+        if getattr(self, "_apply_shown", None) != want:
+            self._apply_shown = want
+            self.apply_button.configure(state=want[0], text=want[1])
 
     # ------------------------------------------------------------------
     #  controls
@@ -1501,13 +1562,13 @@ class _StripCell(ctk.CTkFrame):
     def __init__(self, master, title: str, **kw):
         super().__init__(master, fg_color="transparent", **kw)
         self.grid_columnconfigure(0, weight=1)
-        self._title = ctk.CTkLabel(self, text=title, font=T.FONT_SMALL,
+        self._title = Label(self, text=title, font=T.FONT_SMALL,
                                    text_color=T.TEXT_MUTED, anchor="w")
         self._title.grid(row=0, column=0, sticky="ew")
-        self._value = ctk.CTkLabel(self, text=NO_VALUE, font=T.FONT_H2,
+        self._value = Label(self, text=NO_VALUE, font=T.FONT_H2,
                                    text_color=T.TEXT, anchor="w")
         self._value.grid(row=1, column=0, sticky="ew")
-        self._note = ctk.CTkLabel(self, text="", font=T.FONT_SMALL,
+        self._note = Label(self, text="", font=T.FONT_SMALL,
                                   text_color=T.TEXT_MUTED, anchor="w")
         self._note.grid(row=2, column=0, sticky="ew")
 
@@ -1544,27 +1605,27 @@ class _SensorMatrix(ctk.CTkScrollableFrame):
 
     def __init__(self, master, **kw):
         super().__init__(master, fg_color="transparent", **kw)
-        self.grid_columnconfigure(0, weight=7, uniform="mx")
+        self.grid_columnconfigure(0, weight=10, uniform="mx")
         for i in range(1, 5):
             self.grid_columnconfigure(i, weight=3, uniform="mx")
-        self.grid_columnconfigure(5, weight=13, uniform="mx")
+        self.grid_columnconfigure(5, weight=10, uniform="mx")
         heads = ("Source", "Conf", "Recv", "Valid", "Fused", "Detail")
         for i, text in enumerate(heads):
-            ctk.CTkLabel(self, text=text, font=T.FONT_SMALL,
+            Label(self, text=text, font=T.FONT_SMALL,
                          text_color=T.TEXT_MUTED,
                          anchor="w").grid(row=0, column=i, sticky="ew",
                                           padx=3, pady=(0, 3))
         self._cells: dict[str, tuple] = {}
         for r, (key, name) in enumerate(self.ROWS, start=1):
-            n = ctk.CTkLabel(self, text=name, font=T.FONT_SMALL, anchor="w")
+            n = Label(self, text=name, font=T.FONT_SMALL, anchor="w")
             n.grid(row=r, column=0, sticky="ew", padx=3, pady=1)
             marks = []
             for col in range(1, 5):
-                lab = ctk.CTkLabel(self, text="–", font=T.FONT_SMALL,
+                lab = Label(self, text="–", font=T.FONT_SMALL,
                                    text_color=T.TEXT_MUTED, anchor="w")
                 lab.grid(row=r, column=col, sticky="ew", padx=3)
                 marks.append(lab)
-            detail = ctk.CTkLabel(self, text="", font=T.FONT_SMALL,
+            detail = Label(self, text="", font=T.FONT_SMALL,
                                   text_color=T.TEXT_MUTED, anchor="w")
             detail.grid(row=r, column=5, sticky="ew", padx=3)
             detail._full = ""
@@ -1627,8 +1688,12 @@ def _measurer(label):
     narrow at 150 % scaling. The inner Tk label carries the scaled font, which
     is the one on the screen.
     """
-    widget = getattr(label, "_label", None) or label
-    spec = widget.cget("font")
+    drawn = getattr(label, "drawn_font", None)
+    if callable(drawn):
+        spec = drawn()                   # widgets.Label: the scaled Tk font
+    else:
+        widget = getattr(label, "_label", None) or label
+        spec = widget.cget("font")
     key = tuple(spec) if isinstance(spec, (list, tuple)) else str(spec)
     hit = _FONT_CACHE.get(key)
     if hit is None:
@@ -1652,7 +1717,7 @@ def _elide(label, text: str, room_px: float) -> None:
         _set_label(label, text=text)     # not laid out yet; _refit will return
         return
     try:
-        measure = _measurer(label).measure
+        font = _measurer(label)
     except Exception:
         # Never let a measuring problem blank a diagnostic row -- but say so,
         # because the first version of this swallowed an AttributeError and
@@ -1661,13 +1726,7 @@ def _elide(label, text: str, room_px: float) -> None:
                     exc_info=True)
         _set_label(label, text=text)
         return
-    if measure(text) <= room:
-        _set_label(label, text=text)
-        return
-    cut = text
-    while cut and measure(cut + "…") > room:
-        cut = cut[:-1]
-    _set_label(label, text=(cut.rstrip(" ,;·-") + "…") if cut else "…")
+    _set_label(label, text=elide(font, text, room, strip=" ,;·-"))
 
 
 def _vessel_feeding(s) -> bool | None:

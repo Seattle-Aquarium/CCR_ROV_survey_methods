@@ -542,39 +542,68 @@ class MapCanvas(ctk.CTkFrame):
         """
         if not points:
             return
+        o = self._origin_px()
+        if o is None:
+            return
+        ox, oy, _w, _h = o
         s = T.scale_of(self) or 1.0
         width = max(1, int(round(width * s)))
         by_segment: dict[int, list] = {}
         for p in points:
             by_segment.setdefault(getattr(p, "segment", 0), []).append(p)
 
+        # Each point's position in world pixels at this zoom is remembered on
+        # the point itself (`_ccr_px`): a track point never moves, the map is
+        # redrawn four times a second, and projecting a long dive's ten
+        # thousand points afresh each time was most of what the map cost.
+        # Panning only changes the origin taken off them. Decimation compares
+        # squared distances, which is the same test without the square root.
+        zoom = self.zoom
+        to_tile = geo.latlon_to_tile_xy
+        min2 = MIN_SEGMENT_PX * MIN_SEGMENT_PX
+        unknown = TR.UNKNOWN
         for seg in sorted(by_segment):
             pts = by_segment[seg]
             drawn: list[tuple[float, float]] = []
             states: list[str] = []
-            last: tuple[float, float] | None = None
+            lx = ly = None
             for p in pts:
-                at = self.xy(p.lat, p.lon)
-                if at is None:
-                    continue
-                if last is not None and math.dist(at, last) < MIN_SEGMENT_PX:
-                    continue
-                drawn.append(at)
-                states.append(getattr(p, "trust", TR.UNKNOWN))
-                last = at
+                got = getattr(p, "_ccr_px", None)
+                if got is None or got[0] != zoom:
+                    try:
+                        tx, ty = to_tile(p.lat, p.lon, zoom)
+                    except (TypeError, ValueError):
+                        continue
+                    got = (zoom, tx * TILE_PX, ty * TILE_PX)
+                    try:
+                        p._ccr_px = got
+                    except Exception:
+                        pass                    # a point that cannot carry it
+                x, y = got[1] - ox, got[2] - oy
+                if lx is not None:
+                    dx, dy = x - lx, y - ly
+                    if dx * dx + dy * dy < min2:
+                        continue
+                drawn.append((x, y))
+                states.append(getattr(p, "trust", unknown))
+                lx, ly = x, y
                 if len(drawn) >= MAX_DRAWN_POINTS:
                     break
             if len(drawn) < 2:
                 continue
 
-            kw = {"width": width, "capstyle": "round", "joinstyle": "round"}
+            # Bevelled joins: at three to five pixels they look the same as
+            # round ones, and Windows draws a wide line with round joins at a
+            # third of the speed -- which a hovering ROV's jittery track, a
+            # direction change every couple of pixels, is made of.
+            kw = {"width": width, "capstyle": "round", "joinstyle": "bevel"}
             if dash:
                 kw["dash"] = dash
             # A white halo under every track, so black and red both read on
             # dark water and on the pier alike.
             flat = [v for at in drawn for v in at]
             self.canvas.create_line(*flat, fill=HALO, width=width + max(2, int(2 * s)),
-                                    capstyle="round", joinstyle="round")
+                                    capstyle="round", joinstyle="bevel")
             if not by_trust:
                 self.canvas.create_line(*flat, fill=color, **kw)
                 continue

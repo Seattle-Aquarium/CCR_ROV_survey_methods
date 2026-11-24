@@ -32,7 +32,7 @@ import customtkinter as ctk
 
 from .. import pifiles as PF
 from . import theme as T
-from .widgets import Card, button, checkbox, entry, fit_wrap, label
+from .widgets import Card, Label, button, checkbox, entry, fit_wrap, label
 
 #: What can be picked on each panel, in the order a survey day reaches for it.
 #:
@@ -129,7 +129,7 @@ class LogsPage(ctk.CTkFrame):
         c = Card(body, "1.  Files",
                  "Tick the types, then search. Click to select, again to "
                  "unselect, Shift-click for a range.")
-        c.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        c.grid(row=0, column=0, sticky="ew", pady=(0, T.GAP))
         c.body.grid_columnconfigure(0, weight=1)
         self.card = c
 
@@ -162,7 +162,7 @@ class LogsPage(ctk.CTkFrame):
         if self.app.settings.get("c3_folder"):
             self.c3_entry.insert(0, self.app.settings["c3_folder"])
 
-        self.found_note = ctk.CTkLabel(c.body, text="Nothing searched yet.",
+        self.found_note = Label(c.body, text="Nothing searched yet.",
                                        font=T.FONT_SMALL, text_color=T.TEXT_MUTED,
                                        anchor="w", justify="left", wraplength=900)
         self.found_note.grid(row=2, column=0, sticky="ew", pady=(8, 6))
@@ -196,7 +196,7 @@ class LogsPage(ctk.CTkFrame):
                    set_height=lambda h: self.tree.configure(
                        height=max(4, round(h / self._row_px_unscaled()))))
 
-        self.sel_note = ctk.CTkLabel(c.body, text="", font=T.FONT_SMALL,
+        self.sel_note = Label(c.body, text="", font=T.FONT_SMALL,
                                      text_color=T.TEXT, anchor="w")
         self.sel_note.grid(row=4, column=0, sticky="ew", pady=(6, 0))
 
@@ -816,7 +816,7 @@ class ActionPanel:
                                       column=i % self.PERIODS_PER_LINE,
                                       sticky="w", padx=(0, 18), pady=2)
 
-        self.note = ctk.CTkLabel(c.body, text="", font=T.FONT_SMALL,
+        self.note = Label(c.body, text="", font=T.FONT_SMALL,
                                  text_color=T.TEXT_MUTED, anchor="w",
                                  justify="left", wraplength=480)
         self.note.grid(row=4, column=0, sticky="ew")
