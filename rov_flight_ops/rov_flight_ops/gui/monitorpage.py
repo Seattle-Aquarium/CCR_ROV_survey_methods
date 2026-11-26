@@ -222,8 +222,8 @@ def achieved_hz(history, seconds: float = 60.0) -> float | None:
 FAST_TRACE_NOTE = (
     f"While a flight records, the tether is also traced faster than this: "
     f"adapter counters at {1 / nettrace.FAST_PERIOD_S:g} Hz "
-    f"(logs/network_fast_*.csv) and pings at {1 / nettrace.ECHO_PERIOD_S:g} Hz "
-    f"(logs/network_pings_*.csv). Those are for afterwards and are not drawn "
+    f"(logs/network/network_fast_*.csv) and pings at {1 / nettrace.ECHO_PERIOD_S:g} Hz "
+    f"(logs/network/network_pings_*.csv). Those are for afterwards and are not drawn "
     f"here.")
 
 
@@ -300,8 +300,14 @@ class MonitorPage(ctk.CTkFrame):
         else:
             rows = (0, 0, 0)
         board_parent, flight_parent, chart_parent = parents
+        #: What the vehicle will record the flight as, and whether it is set
+        #: up to (`recordingsetup`). Read off the window's thread.
+        self._setup = None
+        self._setup_asked = -1e9
+        self._setup_busy = ""
+        self._setup_thread = None
         from .goboard import GoBoard
-        self.board = GoBoard(board_parent)
+        self.board = GoBoard(board_parent, on_fix=self._switch_router)
         self.board.grid(row=rows[0], column=0, sticky="nsew", pady=(0, T.GAP))
         self._build_flight_card(flight_parent, rows[1])
         self._build_chart_card(chart_parent, rows[2])
@@ -322,7 +328,7 @@ class MonitorPage(ctk.CTkFrame):
         # "Recording" were cut to "Folde" and "Reco". Only the rows stretch.
         b.grid_columnconfigure(0, weight=0)
         b.grid_columnconfigure(1, weight=1)
-        for r, text in enumerate(("Folder", "Recording", "Vehicle", "Note")):
+        for r, text in enumerate(("Folder", "Recording", "Logging", "Vehicle", "Note")):
             label(b, text, muted=True).grid(row=r, column=0, sticky="w",
                                            padx=(0, 12), pady=3)
 
@@ -347,10 +353,29 @@ class MonitorPage(ctk.CTkFrame):
                                         text_color=T.TEXT_MUTED, anchor="w")
         self.state_label.grid(row=0, column=3, sticky="ew", padx=(10, 0))
 
+        # How much is logged: Standard while the vehicle works, Intensive to
+        # chase a fault (logprofile.py has the whole table).
+        lr = ctk.CTkFrame(b, fg_color="transparent")
+        lr.grid(row=2, column=1, sticky="ew", pady=3)
+        lr.grid_columnconfigure(1, weight=1)
+        from .. import logprofile
+        self.profile_pick = ctk.CTkSegmentedButton(
+            lr, values=[pr.label for pr in logprofile.PROFILES.values()],
+            command=self._pick_profile, font=T.FONT_SMALL, fg_color=T.SURFACE_ALT,
+            selected_color=T.SEGMENT_SELECTED,
+            selected_hover_color=T.SEGMENT_SELECTED_HOVER,
+            unselected_color=T.SURFACE_ALT, unselected_hover_color=T.BORDER,
+            text_color=T.TEXT)
+        self.profile_pick.grid(row=0, column=0, sticky="w")
+        self.profile_note = Label(lr, text="", font=T.FONT_SMALL,
+                                  text_color=T.TEXT_MUTED, anchor="w")
+        self.profile_note.grid(row=0, column=1, sticky="ew", padx=(10, 0))
+        self._show_profile()
+
         # The one place the vehicle's address is typed. Everything that talks
         # to the ROV -- the recorder, the logs tab, the preview -- reads it.
         hr = ctk.CTkFrame(b, fg_color="transparent")
-        hr.grid(row=2, column=1, sticky="ew", pady=3)
+        hr.grid(row=3, column=1, sticky="ew", pady=3)
         self.host_entry = entry(hr, "192.168.2.2 (blank = tether)", width=170)
         self.host_entry.grid(row=0, column=0)
         saved = getattr(self.app, "settings", {}).get("vehicle_host", "")
@@ -367,7 +392,7 @@ class MonitorPage(ctk.CTkFrame):
         # What just happened, typed as it happens -- "video froze", "restarted
         # BlueOS" -- so the logs say it rather than someone's memory.
         mr = ctk.CTkFrame(b, fg_color="transparent")
-        mr.grid(row=3, column=1, sticky="ew", pady=3)
+        mr.grid(row=4, column=1, sticky="ew", pady=3)
         mr.grid_columnconfigure(0, weight=1)
         self.mark_entry = entry(mr, "What just happened? (Enter to mark)",
                                 width=260)
@@ -378,6 +403,24 @@ class MonitorPage(ctk.CTkFrame):
 
         self._net_text = ""
         self._capabilities_said: tuple = ()
+
+    def _show_profile(self) -> None:
+        get = getattr(self.app, "logging_profile", None)
+        from .. import logprofile
+        p = get() if callable(get) else logprofile.get(None)
+        self.profile_pick.set(p.label)
+        self.profile_note.configure(text=p.blurb,
+                                    text_color=T.WARN if p.key == logprofile.INTENSIVE
+                                    else T.TEXT_MUTED)
+
+    def _pick_profile(self, label_text: str) -> None:
+        from .. import logprofile
+        key = next((k for k, pr in logprofile.PROFILES.items()
+                    if pr.label == label_text), logprofile.DEFAULT)
+        setter = getattr(self.app, "set_logging_profile", None)
+        if callable(setter):
+            setter(key)
+        self._show_profile()
 
     def _mark(self) -> None:
         """Stamp the moment into the logs, with whatever was typed."""
@@ -462,14 +505,17 @@ class MonitorPage(ctk.CTkFrame):
                 "saves into its logs folder.")
             return
         from datetime import datetime
+
+        from .. import logpaths
         name = f"network_check_{datetime.now():%Y-%m-%d_%H%M%S}.txt"
+        folder = logpaths.network_dir(folder)
         try:
             folder.mkdir(parents=True, exist_ok=True)
             (folder / name).write_text(self._net_text, encoding="utf-8")
         except OSError as ex:
             messagebox.showerror("Could not save", str(ex))
             return
-        self._say(f"Network check saved to logs\\{name}.")
+        self._say(f"Network check saved to logs\\network\\{name}.")
 
     def _logs_folder(self) -> Path | None:
         rec = self.recorder
@@ -556,6 +602,9 @@ class MonitorPage(ctk.CTkFrame):
             self.app.recorder = rec
         rec.flight_dir = self.app.flight_dir
         rec.dvl_host = getattr(self.app, "dvl_address", "")
+        profile = getattr(self.app, "logging_profile", None)
+        if callable(profile):
+            rec.profile = profile()
         return rec
 
     def _host(self) -> str:
@@ -716,6 +765,94 @@ class MonitorPage(ctk.CTkFrame):
                        history_rows=rows, dvl=dvl, ugps=ugps)
         self.board.update_from(B.judge(inp))
         self.board.fit(self.board.winfo_width())
+        self._poll_setup()
+        self.board.update_setup(self._setup, busy=self._setup_busy)
+
+    # ------------------------------------------------------------------
+    #  what the vehicle will record: mcap or tlog, and the router
+    # ------------------------------------------------------------------
+
+    #: How often the recording setup is read: before a flight, and during one
+    #: (when only "is the tlog still growing" is new).
+    SETUP_EVERY_S = 30.0
+    SETUP_EVERY_RECORDING_S = 120.0
+
+    def _poll_setup(self) -> None:
+        app = self.app
+        if getattr(app, "simulating", False):
+            self._setup = _simulated_setup()
+            app.recording_setup = self._setup
+            return
+        t = self._setup_thread
+        if t is not None and t.is_alive():
+            return
+        rec = getattr(app, "recorder", None)
+        recording = bool(rec is not None and rec.status.state == "recording")
+        every = self.SETUP_EVERY_RECORDING_S if recording else self.SETUP_EVERY_S
+        if time.monotonic() - self._setup_asked < every:
+            return
+        self._setup_asked = time.monotonic()
+        host = (app.version_host() if hasattr(app, "version_host")
+                else "192.168.2.2")
+
+        def work() -> None:
+            from .. import recordingsetup as RS
+            try:
+                got = RS.read(host)
+            except Exception:
+                return
+            # A vehicle that did not answer at all leaves the last reading
+            # standing rather than replacing it with nothing: the tether
+            # comes and goes, the vehicle's setup does not change with it.
+            if got.blueos or self._setup is None:
+                self._setup = got if got.blueos else None
+                # The BlueOS logs tab ticks mcap or tlog from this.
+                app.recording_setup = self._setup
+
+        import threading
+        self._setup_thread = threading.Thread(target=work, daemon=True,
+                                              name="recording-setup")
+        self._setup_thread.start()
+
+    def _switch_router(self, router: str) -> None:
+        """Switch BlueOS's MAVLink router to one that writes tlogs."""
+        app = self.app
+        if getattr(app, "simulating", False):
+            messagebox.showinfo(app.title(), "The ROV flight simulator sends "
+                                             "nothing to any vehicle.")
+            return
+        setup = self._setup
+        host = app.version_host() if hasattr(app, "version_host") else "192.168.2.2"
+        now = setup.router if setup is not None else "unknown"
+        if not messagebox.askyesno(
+                app.title(),
+                f"Switch the vehicle at {host} from the {now} router to "
+                f"{router}?\n\nBlueOS {setup.blueos if setup else ''} records "
+                f"telemetry as tlogs only through {router}; with {now} nothing "
+                f"is recorded.\n\nOnly done with the ROV confirmed disarmed. "
+                f"MAVLink drops for a few seconds while the router restarts — "
+                f"Cockpit and QGC reconnect on their own.", icon="warning"):
+            return
+        self._setup_busy = f"Switching the router to {router}…"
+        self.board.update_setup(self._setup, busy=self._setup_busy)
+
+        def work(progress, cancel):
+            from .. import recordingsetup as RS
+            return RS.set_router(host, router)
+
+        def done(res) -> None:
+            self._setup_busy = ""
+            self._setup_asked = -1e9          # read again at once
+            if isinstance(res, Exception) or res is None:
+                messagebox.showerror(app.title(), f"Could not switch: {res}")
+                return
+            ok, text = res
+            self._say(text)
+            (messagebox.showinfo if ok else messagebox.showwarning)(app.title(), text)
+
+        if not app.submit(work, f"Switching the MAVLink router to {router}…",
+                          on_done=done):
+            self._setup_busy = ""
 
     def _update_state(self) -> None:
         rec = getattr(self.app, "recorder", None)
@@ -1158,6 +1295,21 @@ class MonitorPage(ctk.CTkFrame):
                                    x_b + 10 * s + dx, y_b + 8 * s + dy,
                                    fill=c["tip_bg"], outline=c["tip_edge"], tags="tip")
         cv.tag_raise(text_id, rect)
+
+
+def _simulated_setup():
+    """What the board says about recording while the simulator flies: the
+    simulated vehicle is a BlueOS 1.4.6 Nereo on the right router."""
+    from .. import recordingsetup as RS
+    from ..sim.controller import VERSIONS
+    s = RS.RecordingSetup(host="simulated", blueos=VERSIONS.get("blueos", "1.4.6"),
+                          router="MAVLinkRouter",
+                          routers=["MAVLinkRouter", "MAVLink-Server", "MAVP2P"],
+                          newest="00044-simulated.tlog", newest_age_s=1.0,
+                          read_at=time.time())
+    s.expects = RS.expected_format(s.blueos)
+    RS.judge(s)
+    return s
 
 
 def _time_ticks(span: float) -> list[float]:

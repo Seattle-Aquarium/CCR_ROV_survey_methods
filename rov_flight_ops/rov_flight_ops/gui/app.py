@@ -19,10 +19,12 @@ day uses it:
    deck: type the transect times, save them, and check them against the dive
    profile.
 6. **BlueOS logs** -- see what is on the Pi, download it into the flight
-   folder, and clear old files off it.
-7. **Flight summary** -- the day read back, and whether the recordings are
-   sound.
-8. **Analyze transects** -- per-transect CSVs and sensor health.
+   folder (with the 1 Hz transect CSVs and C3 imagery sorted by transect if
+   asked), read the day back as a flight report, and clear old files off it.
+
+*Flight summary* and *Analyze transects* were tabs 7 and 8. They are on the
+shelf (`shelf.py`): built, tested, and back with one line in the settings
+file.
 
 Imagery -- photos and video -- is ROV Imagery Processing, a separate program.
 """
@@ -40,7 +42,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from .. import diagnostics, discovery, settings
+from .. import diagnostics, discovery, logprofile, settings, shelf
 from ..config import AppConfig
 from ..survey import PLAN_FILENAME, Site, SurveyPlan, plan_path
 from . import theme as T
@@ -89,6 +91,55 @@ class App(Shell):
 
     def save_settings(self) -> None:
         settings.save(self.settings)
+
+    # ------------------------------------------------------------------
+    #  how much to log: Standard or Intensive (logprofile)
+    # ------------------------------------------------------------------
+
+    def logging_profile(self) -> logprofile.Profile:
+        return logprofile.from_settings(self.settings)
+
+    def dvl_snapshot_hz(self) -> float:
+        """Acoustic snapshots per second under the current profile: off on
+        Standard, the DVL tab's own choice on Intensive."""
+        p = self.logging_profile()
+        if p.dvl_snapshot_hz is not None:
+            return float(p.dvl_snapshot_hz)
+        from ..dvl.capture import DEFAULT_SNAPSHOT_HZ
+        try:
+            hz = float(self.settings.get("dvl_snapshot_hz", DEFAULT_SNAPSHOT_HZ))
+        except (TypeError, ValueError):
+            hz = DEFAULT_SNAPSHOT_HZ
+        return hz or DEFAULT_SNAPSHOT_HZ
+
+    def set_logging_profile(self, key: str) -> None:
+        """Switch every recorder to a logging profile, now or at its next flight."""
+        p = logprofile.get(key)
+        if self.settings.get("logging_profile") == p.key:
+            return
+        self.settings["logging_profile"] = p.key
+        self.save_settings()
+        self.apply_logging_profile()
+        self._log(f"Logging: {p.label} — {p.blurb}. The DVL and UGPS captures "
+                  f"start fresh files now; the flight recorder and network trace "
+                  f"change at the next flight.")
+
+    def apply_logging_profile(self) -> None:
+        p = self.logging_profile()
+        if self.recorder is not None:
+            self.recorder.profile = p
+        if self.dvl is not None:
+            self.dvl.set_profile(p, snapshot_hz=self.dvl_snapshot_hz())
+        if self.ugps is not None:
+            self.ugps.set_profile(p)
+        nav = self.pages.get("navigation") if hasattr(self, "pages") else None
+        col = getattr(nav, "collector", None)
+        if col is not None:
+            col.param_period_s = p.nav_params_s
+        dvl_page = self.pages.get("dvl") if hasattr(self, "pages") else None
+        sync = getattr(dvl_page, "sync_snapshots", None)
+        if callable(sync):
+            sync()
 
     # ------------------------------------------------------------------
     #  the ROV flight simulator's switch, in the banner
@@ -204,16 +255,12 @@ class App(Shell):
         if self.simulating and self.simulator.dvl is not None:
             return self.simulator.dvl
         if self.dvl is None:
-            from ..dvl.capture import DEFAULT_SNAPSHOT_HZ
             from ..dvl.recorder import DvlRecorder
-            try:
-                hz = float(self.settings.get("dvl_snapshot_hz", DEFAULT_SNAPSHOT_HZ))
-            except (TypeError, ValueError):
-                hz = DEFAULT_SNAPSHOT_HZ
             self.dvl = DvlRecorder(vehicle_host=self.version_host(),
                                    dvl_host=self.settings.get("dvl_host", ""),
-                                   snapshot_hz=hz,
-                                   flight_id=self._flight_for_dvl)
+                                   snapshot_hz=self.dvl_snapshot_hz(),
+                                   flight_id=self._flight_for_dvl,
+                                   profile=self.logging_profile())
         return self.dvl
 
     def dvl_address(self) -> str:
@@ -291,7 +338,8 @@ class App(Shell):
         if self.ugps is None:
             from ..ugps import DEFAULT_HOST, UgpsCapture
             self.ugps = UgpsCapture(self.settings.get("ugps_host") or DEFAULT_HOST,
-                                    flight_id=self._flight_for_dvl)
+                                    flight_id=self._flight_for_dvl,
+                                    profile=self.logging_profile())
         self.ugps.ensure_running()
         return self.ugps
 
@@ -313,15 +361,16 @@ class App(Shell):
     #  tabs
     # ------------------------------------------------------------------
 
+    def shelved(self, key: str) -> bool:
+        """Is this part of the program on the shelf (built, not shown)?"""
+        return not shelf.enabled(self.settings, key)
+
     def build_tabs(self) -> None:
         from .dvlpage import DvlPage
-        from .healthpage import HealthPage
         from .logspage import LogsPage
         from .monitorpage import MonitorPage
         from .navpage import NavigationPage
         from .paramspage import ParamsPage
-        from .summarypage import SummaryPage
-        from .transectpage import TransectPage
         from .transectsetup import TransectSetup
 
         # 1. Monitoring: the system at a glance on the left, the flight --
@@ -366,21 +415,27 @@ class App(Shell):
         logs.grid(row=0, column=0, sticky="nsew")
         self.mount("BlueOS logs", "logs", logs)
 
-        # 7. Flight summary: the report, then recording health, in one column.
-        tab = self.add_tab("Flight summary", "flight_summary")
-        body = self.scroll_body(tab)
-        summary = SummaryPage(body, self, scroll=False)
-        summary.grid(row=0, column=0, sticky="ew")
-        health = HealthPage(body, self, scroll=False)
-        health.grid(row=1, column=0, sticky="ew")
-        self.mount("Flight summary", "summary", summary)
-        self.mount("Flight summary", "health", health)
+        # On the shelf unless the settings file asks for them back
+        # (shelf.py): the flight report is built from BlueOS logs now, and
+        # the 1 Hz transect CSVs come with a download.
+        if not self.shelved("flight_summary"):
+            from .healthpage import HealthPage
+            from .summarypage import SummaryPage
+            tab = self.add_tab("Flight summary", "flight_summary")
+            body = self.scroll_body(tab)
+            summary = SummaryPage(body, self, scroll=False)
+            summary.grid(row=0, column=0, sticky="ew")
+            health = HealthPage(body, self, scroll=False)
+            health.grid(row=1, column=0, sticky="ew")
+            self.mount("Flight summary", "summary", summary)
+            self.mount("Flight summary", "health", health)
 
-        # 8. Analyze transects.
-        tab = self.add_tab("Analyze transects", "analyze_transects")
-        analyze = TransectPage(tab, self)
-        analyze.grid(row=0, column=0, sticky="nsew")
-        self.mount("Analyze transects", "analyze", analyze)
+        if not self.shelved("analyze_transects"):
+            from .transectpage import TransectPage
+            tab = self.add_tab("Analyze transects", "analyze_transects")
+            analyze = TransectPage(tab, self)
+            analyze.grid(row=0, column=0, sticky="nsew")
+            self.mount("Analyze transects", "analyze", analyze)
 
         monitor.refresh()
 
@@ -587,6 +642,7 @@ class App(Shell):
                 self.recorder = FlightRecorder(host=host, flight_dir=self.flight_dir)
             self.recorder.flight_dir = self.flight_dir
             self.recorder.dvl_host = self.dvl_address
+            self.recorder.profile = self.logging_profile()
             if not self.recorder.watching:
                 self.recorder.retarget(host)
                 # Queued, not done here: opening the performance counters and

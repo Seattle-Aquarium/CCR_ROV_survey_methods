@@ -251,12 +251,16 @@ def test_arming_starts_a_flight_and_disarming_closes_it(tmp_path, monkeypatch):
         rec.stop_watching(finish=False)
 
     logs = tmp_path / "logs"
+    # The flight record stays in logs/; the laptop's CSV is filed in
+    # logs/laptop and the network trace in logs/network (logpaths.py).
     names = sorted(p.name.split("_2026")[0].split("_20")[0]
-                   for p in logs.iterdir())
+                   for p in [*logs.iterdir(), *(logs / "laptop").iterdir()]
+                   if p.is_file())
     # One record per flight now, not seven files. The reasons are in
     # flightfile's docstring; the test follows the file that replaced them.
     for want in ("laptop_monitor", "flight"):
         assert any(want in n for n in names), f"no {want} file in {names}"
+    assert not list(logs.glob("laptop_monitor_*")), "the laptop CSV is loose in logs/"
 
     stamp = rec.status.flight_id
     record = json.loads((logs / f"flight_{stamp}.json").read_text())
@@ -274,7 +278,7 @@ def test_arming_starts_a_flight_and_disarming_closes_it(tmp_path, monkeypatch):
     assert record["schema"].startswith("utc.flight/")
 
     # The CSV's header must match the schema exactly.
-    csv_path = logs / f"laptop_monitor_{stamp}.csv"
+    csv_path = logs / "laptop" / f"laptop_monitor_{stamp}.csv"
     header = csv_path.read_text(encoding="utf-8").splitlines()[0]
     assert header.split(",") == list(laptop.COLUMNS)
 

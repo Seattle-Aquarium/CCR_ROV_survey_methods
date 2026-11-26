@@ -125,7 +125,7 @@ def records(folder: Path) -> list[Path]:
 
 
 def csvs(folder: Path) -> list[Path]:
-    return sorted((folder / "logs").glob("laptop_monitor_*.csv"))
+    return sorted((folder / "logs" / "laptop").glob("laptop_monitor_*.csv"))
 
 
 # --------------------------------------------------------------------------

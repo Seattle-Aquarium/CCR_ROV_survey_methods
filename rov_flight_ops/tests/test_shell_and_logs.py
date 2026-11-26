@@ -82,7 +82,8 @@ def test_folding_the_banner_keeps_the_rule_and_both_controls(app):
 
 def test_every_output_box_opens_one_line_tall(app):
     found = boxes(app)
-    assert len(found) >= 3, "expected the report boxes on Monitoring at least"
+    # The tabs with most of them are on the shelf (SHELF.md); DVL keeps one.
+    assert len(found) >= 1, "expected at least the DVL tab's report box"
     for box in found:
         assert int(box.cget("height")) == box.min_height
     assert int(app.log.cget("height")) == one_line_height("word")
@@ -122,14 +123,16 @@ def test_switching_flights_resets_the_plan_and_the_analyze_folder(app, tmp_path,
         app.use_flight(a)
         app._apply_plan(SurveyPlan([Site("Alki", "t", "2026-09-13",
                                          [Transect("T1", "10:00:00", "10:10:00")])]))
-        analyze = app.pages["analyze"]
-        analyze.refresh()
-        assert analyze._out_dir() == a
+        analyze = app.pages.get("analyze")      # on the shelf by default
+        if analyze is not None:
+            analyze.refresh()
+            assert analyze._out_dir() == a
 
         app.use_flight(b)
         typed = [t for s in app._plan().sites for t in s.transects if t.start_tc]
         assert typed == [], "Alki's transects were carried into Centennial"
-        assert analyze._out_dir() == b
+        if analyze is not None:
+            assert analyze._out_dir() == b
     finally:
         app.flight_dir = None
 
@@ -281,7 +284,13 @@ def logs(app, vehicle, tmp_path, monkeypatch):     # noqa: F811
     page.c3_entry.delete(0, "end")
     for key, v in page.v_kind.items():
         v.set(key in ("mcap", "bin"))
+    # These tests are about the download itself; the CSVs and the flight
+    # report it starts afterwards would still be running into the next test.
+    page.v_csv.set(False)
+    page.v_report.set(False)
     yield page
+    page.v_csv.set(True)
+    page.v_report.set(True)
     monitor.host_entry.delete(0, "end")
     app.flight_dir = None
 

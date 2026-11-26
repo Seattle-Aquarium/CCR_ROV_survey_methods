@@ -40,7 +40,9 @@ class DvlRecorder:
     def __init__(self, *, vehicle_host: str = "192.168.2.2", dvl_host: str = "",
                  snapshot_hz: float = DEFAULT_SNAPSHOT_HZ,
                  flight_id: Callable[[], str] | None = None,
-                 vehicle: bool = True) -> None:
+                 vehicle: bool = True, profile=None) -> None:
+        #: How much each capture writes (`logprofile`); None is everything.
+        self.profile = profile
         self.vehicle_host = vehicle_host or "192.168.2.2"
         self.dvl_host = dvl_host or ""
         self.snapshot_hz = float(snapshot_hz)
@@ -131,9 +133,35 @@ class DvlRecorder:
         cap = DvlCapture(folder=folder, vehicle_host=self.vehicle_host,
                          dvl_override=self.dvl_host, snapshot_hz=self.snapshot_hz,
                          flight_id=self.flight_id, live=self.live,
-                         vehicle=self.vehicle)
+                         vehicle=self.vehicle, profile=self.profile)
         self.capture = cap
         cap.start()
+
+    def set_profile(self, profile, snapshot_hz: float | None = None) -> threading.Event | None:
+        """Change how much is written, from now on.
+
+        A running capture is closed and a new one opened in the same folder
+        under the new profile, so each capture's record names one profile and
+        its files hold one rate throughout.
+        """
+        if snapshot_hz is not None:
+            self.snapshot_hz = float(snapshot_hz)
+        if profile == self.profile:
+            if snapshot_hz is not None:
+                self.set_snapshot_hz(self.snapshot_hz)
+            return None
+        self.profile = profile
+        cap = self.capture
+        if cap is None or not cap.running:
+            return None
+        folder = cap.folder
+
+        def again() -> None:
+            self._stop_current()
+            self.capture = None
+            self._restart(folder)
+
+        return self._submit("Changing the DVL logging", again)
 
     def _stop_current(self) -> None:
         cap = self.capture

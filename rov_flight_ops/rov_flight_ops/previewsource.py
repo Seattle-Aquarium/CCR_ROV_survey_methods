@@ -5,9 +5,9 @@ The preview is a gut check taken with the ROV back on deck: were the transects
 flown, and did the recording catch them? It has to work whether or not the
 logs have been downloaded yet, so it looks in order:
 
-1. **The flight folder's recordings** (logs/mcap, or logs) -- the same
-   telemetry every other tool reads, including an autopilot log someone chose
-   on Flight summary.
+1. **The flight folder's recordings** -- mcaps (logs/mcap) on BlueOS 1.5,
+   tlogs (logs/tlog) on 1.4 and earlier -- the same telemetry every other
+   tool reads, including an autopilot log someone chose on Flight summary.
 2. **An autopilot log in the flight folder** (logs/BIN), when no recording is --
    one downloaded by the BlueOS logs tab, which keeps the vehicle's file time.
 3. **The autopilot's log on the vehicle.** A recording on the Pi carries its
@@ -127,7 +127,9 @@ def preview_store(flight_dir: Path | None, windows: Sequence[tuple[str, float, f
         try:
             store, warns = ensure_telemetry(Path(flight_dir), cfg, windows=plain,
                                             progress=progress, cancel=cancel)
-            return store, list(warns), "the flight folder's recordings"
+            kind = ("tlogs" if any(str(w).startswith("read from the tlog")
+                                   for w in warns) else "recordings")
+            return store, list(warns), f"the flight folder's {kind}"
         except FileNotFoundError as ex:
             notes.append(str(ex))
 
@@ -146,7 +148,8 @@ def preview_store(flight_dir: Path | None, windows: Sequence[tuple[str, float, f
         if source == FOLDER:
             raise FileNotFoundError(
                 "Nothing in the flight folder covers the transects -- no "
-                "recording in logs/mcap and no autopilot log in logs/BIN.")
+                "recording in logs/mcap, no tlog in logs/tlog, and no "
+                "autopilot log in logs/BIN.")
 
     if source == FOLDER and not flight_dir:
         raise FileNotFoundError("Choose a flight folder on Monitoring first.")

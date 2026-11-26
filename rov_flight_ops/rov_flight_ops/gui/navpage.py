@@ -1,35 +1,34 @@
 """
 Navigation: planning and following surveys, and the health of what navigates.
 
-This chapter is about *where*: laying out a survey, following it, and knowing
-whether the position it is drawn against can be believed. Altitude, depth,
-speed, gain and power are one row of plain numbers under the map rather than
-gauges: the map is worth the space more.
+This chapter is about *where*, and about the numbers the pilot flies by:
+altitude, depth, speed, gain and power are plain numbers rather than gauges,
+and they head the right-hand column -- the heads-up display.
 
     +-----------------------------------+----------------------+
-    |                                   |  readiness · profile |
-    |              MAP                  |  sensor health       |
-    |     (plan drawing lives here)     |                      |
-    |                                   |  survey plan:        |
-    +-----------------------------------+  tools, features,    |
-    |  guidance / site / origin strip    |  inspector          |
-    |  altitude depth fwd gain | V A W   |                     |
-    |  UGPS receivers: Rx 0-3 SNR        |                     |
+    |                                   |  ALT  DEPTH FWD GAIN |
+    |                                   |  TC-25    V   A   W  |
+    |              MAP                  +----------------------+
+    |                                   |  UGPS receivers 0-3  |
+    |                                   +----------------------+
+    +-----------------------------------+  navigation readiness|
+    |  site / origin / to site strip    |  profile, health     |
     +-----------------------------------+----------------------+
 
-Two thirds of the width is the map, because the map is the problem -- until
-the operator drags the divider beside it. Two more divide the right-hand
-column (readiness / plan, and the plan's list / inspector); double-clicking
-any of them puts it back, and the settings file remembers where each was
-left. The strip
-beneath it carries what must never need looking for: which line is being
-followed and how far off it the vehicle is, the site, and whether the origin
-is confirmed. Under that, the flight numbers, then one row for the UGPS
-antenna's four receivers --
-each one's signal-to-noise, noise floor and the last minute of it -- read
-straight from the G2 topside, with a line saying whether any receiver
-stands out from the others. Details expand into a drawer over the page;
-the map stays visible behind them.
+Most of the width is the map, until the operator drags the divider beside
+it; double-clicking puts it back, and the settings file remembers where it was
+left. The strip under the map carries what must never need looking for: the
+site, whether the origin is confirmed, and the way back to it. The right-hand
+column is the flight numbers, then one row for the UGPS antenna's four
+receivers -- each one's signal-to-noise, noise floor and the last minute of it,
+read straight from the G2 topside -- and then navigation readiness, which
+takes whatever height is left. Details expand into a drawer over the page; the
+map stays visible behind them.
+
+**The survey plan is on the shelf** (`shelf.py`): drawing lines, boxes and
+grids on the map and following them. Its code and tests are unchanged, and
+``"unshelve": ["survey_plan"]`` in the settings file brings back its card under
+readiness, the guidance cell in the strip, and the drawing tools.
 
 **It works with no vehicle.** The map opens on Pier 59 from a basemap that
 ships with the program, and a plan can be drawn, measured, saved and reopened
@@ -73,10 +72,11 @@ REFRESH_MS = 250
 #: it goes under the map instead.
 NARROW_PX = 1100
 
-#: The map takes about two thirds of the width until the divider beside it is
-#: dragged; the right column is readiness, profile, health and the plan
-#: inspector.
-MAP_SHARE = 0.64
+#: The map takes a little over half the width until the divider beside it is
+#: dragged. The right column is the heads-up display, the UGPS receivers and
+#: readiness: the four flight numbers across it have to fit on the field
+#: laptop (1280 logical pixels wide), which a third of the width did not.
+MAP_SHARE = 0.57
 
 #: Below the threshold the column goes under the map, and the two share the
 #: height evenly until that divider is dragged.
@@ -92,7 +92,7 @@ DEFAULT_CORRIDOR_M = 1.0
 #: keeps enough to be a chart rather than a keyhole -- and never less than
 #: its own tool bar, see `_map_floor` -- and the column enough for the
 #: matrix's sources and marks to read.
-MAP_MIN_PX, SIDE_MIN_PX = 360, 380
+MAP_MIN_PX, SIDE_MIN_PX = 360, 470
 NARROW_MAP_MIN_PX, NARROW_SIDE_MIN_PX = 160, 200
 
 #: The share of the matrix's width the Detail column gets, and the floor
@@ -115,8 +115,25 @@ PLAN_MIN_PX = 245
 
 #: Where each divider was left, in the settings file, as the share of the
 #: space on its left or above it.
-SPLIT_KEYS = {"wide": "nav_map_share", "narrow": "nav_map_share_narrow",
+#:
+#: The map's share is kept under a new name since the heads-up display moved
+#: into the right column: a share saved for the old layout would squeeze it.
+SPLIT_KEYS = {"wide": "nav_map_share_hud", "narrow": "nav_map_share_narrow",
               "side": "nav_readiness_share", "plan": "nav_plan_list_share"}
+
+
+class _ShelvedPlanPanel:
+    """Stands in for the plan panel while the survey plan is on the shelf.
+
+    Everything that tells the panel to redraw keeps working; there is just
+    nothing to redraw.
+    """
+
+    def refresh(self) -> None:
+        pass
+
+    def values(self) -> dict:
+        return {}
 
 
 def _set_label(widget, *, text=None, text_color=None, font=None) -> None:
@@ -179,6 +196,14 @@ class NavigationPage(ctk.CTkFrame):
 
         self._narrow = False
         self._centered_once = False
+
+        from .. import shelf
+        shelved = getattr(app, "shelved", None)
+        #: The survey plan is on the shelf unless the settings file asks for
+        #: it back (`shelf.py`).
+        self.plan_shelved = (bool(shelved("survey_plan")) if callable(shelved)
+                             else not shelf.enabled(getattr(app, "settings", None),
+                                                    "survey_plan"))
 
         self._build_map_column()
         self._build_side_column()
@@ -277,16 +302,6 @@ class NavigationPage(ctk.CTkFrame):
 
         self._build_strip(col, row=3)
 
-        gap = 4 if T.compact() else 6
-        from .flightstrip import FlightNumbers
-        self.numbers = FlightNumbers(col)
-        self.numbers.grid(row=4, column=0, sticky="ew", pady=(gap, 0))
-
-        from .ugpsstrip import ReceiversStrip
-        self.ugps_strip = ReceiversStrip(col, self.app)
-        self.ugps_strip.grid(row=5, column=0, sticky="ew", pady=(gap, 0))
-        self._ugps_ticks = 0
-
     def _build_strip(self, parent, row: int) -> None:
         """The three things that must never need looking for."""
         strip = ctk.CTkFrame(parent, fg_color=T.SURFACE, corner_radius=T.RADIUS,
@@ -297,15 +312,43 @@ class NavigationPage(ctk.CTkFrame):
 
         pady = 4 if T.compact() else 7
         self.strip_guide = _StripCell(strip, "GUIDANCE")
-        self.strip_guide.grid(row=0, column=0, sticky="nsew", padx=8, pady=pady)
         self.strip_site = _StripCell(strip, "SITE / ORIGIN")
-        self.strip_site.grid(row=0, column=1, sticky="nsew", padx=8, pady=pady)
         self.strip_home = _StripCell(strip, "TO SITE")
-        self.strip_home.grid(row=0, column=2, sticky="nsew", padx=8, pady=pady)
+        if self.plan_shelved:
+            # Guidance follows a line of the survey plan; with the plan on
+            # the shelf there is nothing to follow, so the cell is not shown.
+            strip.grid_columnconfigure(2, weight=0, uniform="")
+            self.strip_site.grid(row=0, column=0, sticky="nsew", padx=8, pady=pady)
+            self.strip_home.grid(row=0, column=1, sticky="nsew", padx=8, pady=pady)
+        else:
+            self.strip_guide.grid(row=0, column=0, sticky="nsew", padx=8, pady=pady)
+            self.strip_site.grid(row=0, column=1, sticky="nsew", padx=8, pady=pady)
+            self.strip_home.grid(row=0, column=2, sticky="nsew", padx=8, pady=pady)
 
     def _build_side_column(self) -> None:
-        col = ctk.CTkFrame(self, fg_color="transparent")
+        outer = ctk.CTkFrame(self, fg_color="transparent")
+        outer.grid_columnconfigure(0, weight=1)
+        self.side_col = outer
+        gap = 4 if T.compact() else 6
+
+        # The heads-up display first: the numbers the pilot flies by, at the
+        # top right, where the eye lands coming down from Cockpit's monitor.
+        from .flightstrip import FlightNumbers
+        self.numbers = FlightNumbers(outer, stacked=True)
+        self.numbers.grid(row=0, column=0, sticky="ew")
+
+        # Directly under it, the UGPS antenna's four receivers.
+        from .ugpsstrip import ReceiversStrip
+        self.ugps_strip = ReceiversStrip(outer, self.app, compact=True)
+        self.ugps_strip.grid(row=1, column=0, sticky="ew", pady=(gap, gap))
+        self._ugps_ticks = 0
+
+        col = ctk.CTkFrame(outer, fg_color="transparent")
+        col.grid(row=2, column=0, sticky="nsew")
+        outer.grid_rowconfigure(2, weight=1)
         col.grid_columnconfigure(0, weight=1)
+        #: Readiness, and the survey plan under it when that is off the shelf.
+        self.side_region = col
         # Readiness in row 0 and the plan in row 2, with the divider between
         # them in row 1; `_build_splitters` gives the two their weights.
         # `uniform` matters more than the weights there. Without it Tk hands
@@ -315,7 +358,6 @@ class NavigationPage(ctk.CTkFrame):
         # card ended up one row tall, which is the opposite of the point of
         # taking the flight gauges out of this chapter. In a uniform group the
         # two are sized in proportion to their weights whatever they ask for.
-        self.side_col = col
 
         top = Card(col, "Navigation readiness",
                    "Configured, receiving, valid and fused are four different "
@@ -375,6 +417,10 @@ class NavigationPage(ctk.CTkFrame):
                         font=T.FONT_SMALL, width=110,
                         command=self._toggle_unlock).grid(row=0, column=1)
 
+        if self.plan_shelved:
+            self.plan_card = None
+            self.plan_panel = _ShelvedPlanPanel()
+            return
         plan_card = Card(col, "Survey plan",
                          "Measured lines, rotated boxes and the lanes that "
                          "fill them. Meters, never pixels.")
@@ -435,8 +481,13 @@ class NavigationPage(ctk.CTkFrame):
             minimum=(NARROW_MAP_MIN_PX, NARROW_SIDE_MIN_PX),
             on_change=self._map_repaint.ask,
             on_release=self.split_saver("narrow"))
+        if self.plan_shelved:
+            # Readiness has the column below the receivers to itself.
+            self.split_side = None
+            self.side_region.grid_rowconfigure(0, weight=1)
+            return
         self.split_side = Splitter(
-            self.side_col, axis="y", uniform="navside",
+            self.side_region, axis="y", uniform="navside",
             default=READINESS_SHARE,
             fraction=self.split_share("side", READINESS_SHARE),
             minimum=(READINESS_MIN_PX, PLAN_MIN_PX),
@@ -838,7 +889,7 @@ class NavigationPage(ctk.CTkFrame):
                                    or self.waypoints.folder != Path(folder)):
             self.waypoints = waypoints.WaypointStore(Path(folder))
             saved = Path(folder) / P.FILENAME
-            if saved.is_file() and not self.plan.features:
+            if saved.is_file() and not self.plan.features and not self.plan_shelved:
                 try:
                     self.plan = P.Plan.load(saved)
                     self.plan_path = saved
@@ -866,6 +917,11 @@ class NavigationPage(ctk.CTkFrame):
         self._open_session("live")
         self.collector = NavCollector(host, allow_writes=False,
                                       on_event=self._collector_event)
+        profile = getattr(self.app, "logging_profile", None)
+        if callable(profile):
+            # Standard logging re-reads the parameters every ten minutes
+            # rather than every two: each read is a ranged GET on the tether.
+            self.collector.param_period_s = profile().nav_params_s
         self._sync_profile_to_collector()
         try:
             from .. import blueos
@@ -887,7 +943,9 @@ class NavigationPage(ctk.CTkFrame):
         rec = getattr(self.app, "recorder", None)
         if rec is not None and getattr(rec.status, "flight_id", ""):
             flight_id = rec.status.flight_id
-        self.session = SESS.NavSession(Path(folder) / "logs", flight_id,
+        from .. import logpaths
+        self.session = SESS.NavSession(logpaths.navigation_dir(Path(folder) / "logs"),
+                                       flight_id,
                                        mode=mode)
         self.session.manifest.profiles_version = PR.PROFILES_VERSION
         self.session.manifest.thresholds = {
@@ -1107,7 +1165,9 @@ class NavigationPage(ctk.CTkFrame):
 
     def _render_strip(self, s, now: float) -> None:
         g = self.guidance
-        if self.following and g.valid:
+        if self.plan_shelved:
+            pass
+        elif self.following and g.valid:
             side = "right" if g.cross_track_m >= 0 else "left"
             self.strip_guide.title(
                 f"FOLLOWING {g.plan_name}"

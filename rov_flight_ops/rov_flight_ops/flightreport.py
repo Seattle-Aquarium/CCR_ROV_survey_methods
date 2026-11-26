@@ -62,6 +62,13 @@ CRITICAL, WARNING, NOTE, GOOD = "critical", "warning", "note", "good"
 _ORDER = {CRITICAL: 0, WARNING: 1, NOTE: 2, GOOD: 3}
 
 
+def size_text(n: int) -> str:
+    """A recording's size: GiB for mcaps with video, MB for tlogs without."""
+    if n >= 2 ** 30:
+        return f"{n / 2 ** 30:.1f} GiB"
+    return f"{n / 1e6:.0f} MB"
+
+
 def _hm(when: float) -> str:
     return datetime.fromtimestamp(when, timezone.utc).strftime("%H:%M:%S")
 
@@ -772,7 +779,11 @@ def _read_sensor_health(day: S.FlightDay, report: DayReport) -> None:
     Optional: the extractor is a sibling package and a checkout without it
     still produces a report, minus this section.
     """
-    paths = [r.path for r in day.recordings if r.closed and r.seconds > 60]
+    # Only mcaps: the extractor's health reader does not read tlogs yet. Each
+    # file once -- a tlog stands behind every armed period cut from it.
+    paths = list(dict.fromkeys(r.path for r in day.recordings
+                               if r.closed and r.seconds > 60
+                               and r.path.suffix.lower() == ".mcap"))
     if not paths:
         return
     try:
@@ -1040,7 +1051,7 @@ def _write_headline(report: DayReport) -> None:
     parts = [f"{len(day.recordings)} recording"
              f"{'s' if len(day.recordings) != 1 else ''}",
              _dur(day.recorded_seconds) + " armed",
-             f"{day.bytes_recorded / 2 ** 30:.1f} GiB"]
+             size_text(day.bytes_recorded)]
     failsafes = sum(1 for d in report.disarms if d.cause == "gcs failsafe")
     if failsafes:
         parts.append(f"{failsafes} ground-station failsafe"

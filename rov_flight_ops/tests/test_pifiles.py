@@ -430,10 +430,14 @@ def test_a_folder_emptied_by_the_delete_goes_too_but_never_a_type_root(vehicle, 
 #: `pifiles.py` deletes, to clear old recordings off the Pi. `nav/mav2rest.py`
 #: posts, because switching navigation profile and setting the EKF origin
 #: genuinely have to write -- but it is one file, one function, and one gate
-#: (`_require_writes`), which the next test proves.
+#: (`_require_writes`), which the next test proves. `recordingsetup.py` posts
+#: BlueOS's own "preferred router" setting -- one function, `set_router`, which
+#: refuses unless a current heartbeat confirms the ROV is disarmed -- because a
+#: BlueOS 1.4 vehicle left on a router that writes no tlogs records nothing.
 MAY_WRITE = {
     "pifiles.py": {'method="DELETE"', "_delete_request"},
     "mav2rest.py": {'method="POST"'},
+    "recordingsetup.py": {'method="POST"'},
 }
 
 

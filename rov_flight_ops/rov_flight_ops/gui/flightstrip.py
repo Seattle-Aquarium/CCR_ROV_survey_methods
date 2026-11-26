@@ -1,13 +1,16 @@
 """
-The flight numbers under the Navigation map: big enough to read at a glance.
+The flight numbers on the Navigation tab: big enough to read at a glance.
 
-Three groups on one row. Left, the flying: altitude above the bottom with
-Surftrak's setpoint under it, depth, speed along the heading, and the pilot's
-thruster gain. Middle, the time the transects are written down in: TC-25,
-exactly as the GoPro Labs precision-time page shows it (`tc25`). Right, the
-power: volts, amps and watts at the busbar. Every cell has the same gap to
-its neighbours, so the two groups are spaced alike, and the time sits
-centred between them.
+The pilot's heads-up display, at the top of the right-hand column. Two rows:
+
+* the flying -- altitude above the bottom with Surftrak's setpoint under it,
+  depth, speed along the heading, and the pilot's thruster gain;
+* the time the transects are written down in -- TC-25, exactly as the GoPro
+  Labs precision-time page shows it (`tc25`) -- beside the power at the
+  busbar: volts, amps and watts.
+
+`stacked=False` lays the same cells out in one row of three groups, as they
+were when they sat under the map.
 
 Each number is the collector's own reading, so a stale value is drawn muted
 and a missing one as a dash -- never a zero.
@@ -24,6 +27,8 @@ from . import theme as T
 from .widgets import Label, shown
 
 FONT_VALUE = (T.MONO, 20, "bold")
+#: The flying numbers, a size up when they have a row of their own.
+FONT_VALUE_BIG = (T.MONO, 22, "bold")
 #: The gap either side of each cell, so both groups are spaced alike.
 CELL_PAD = 9
 FONT_HEAD = (T.FAMILY_MEDIUM, 10)
@@ -56,40 +61,79 @@ def show(reading, fmt: str, scale: float = 1.0) -> tuple[str, tuple]:
 FLYING = (("altitude", "ALTITUDE"), ("depth", "DEPTH"),
           ("forward", "FORWARD"), ("gain", "GAIN"))
 POWER = (("volts", "VOLTS"), ("amps", "AMPS"), ("watts", "WATTS"))
+HEADS = dict(FLYING + POWER + (("tc25", "TC-25"),))
 
 
 class FlightNumbers(ctk.CTkFrame):
 
-    def __init__(self, master, *, clock: TC.ClockCheck | None = None, **kw):
+    def __init__(self, master, *, clock: TC.ClockCheck | None = None,
+                 stacked: bool = False, **kw):
         super().__init__(master, fg_color=T.SURFACE, corner_radius=T.RADIUS,
                          border_width=1, border_color=T.BORDER, **kw)
         self.clock = clock or TC.ClockCheck()
+        self.stacked = stacked
         self.cells: dict[str, tuple] = {}
-        # flying | gap | time | gap | power, in one grid.
+        if stacked:
+            self._build_stacked()
+        else:
+            self._build_row()
+        self.after(200, self._tick_clock)
+
+    # -- layout ----------------------------------------------------------------
+
+    def _cell(self, parent, key: str, column: int, font=FONT_VALUE,
+              row: int = 0, pad: int = CELL_PAD) -> None:
+        cell = ctk.CTkFrame(parent, fg_color="transparent")
+        cell.grid(row=row, column=column, sticky="nsew", padx=pad, pady=4)
+        cell.grid_columnconfigure(0, weight=1)
+        Label(cell, text=HEADS[key], font=FONT_HEAD, height=14,
+              text_color=T.TEXT_MUTED).grid(row=0, column=0)
+        value = Label(cell, text="—", font=font, height=30 if font is FONT_VALUE_BIG
+                      else 28, text_color=T.TEXT_MUTED)
+        value.grid(row=1, column=0)
+        sub = Label(cell, text="", font=T.FONT_SMALL, height=14,
+                    text_color=T.TEXT_MUTED)
+        sub.grid(row=2, column=0)
+        self.cells[key] = (value, sub)
+
+    def _rule(self, parent, column: int, row: int = 0) -> None:
+        # height=1: a childless CTkFrame asks for 200 pixels.
+        ctk.CTkFrame(parent, width=1, height=1, fg_color=T.BORDER).grid(
+            row=row, column=column, sticky="ns", pady=8)
+
+    def _build_row(self) -> None:
+        """Flying | gap | time | gap | power, in one grid."""
         layout = [*(k for k, _h in FLYING), None, "tc25", None, *(k for k, _h in POWER)]
-        heads = dict(FLYING + POWER + (("tc25", "TC-25"),))
         for col, key in enumerate(layout):
             if key is None:
                 self.grid_columnconfigure(col, weight=1)
-                # A thin rule in the middle of each gap. height=1: a
-                # childless CTkFrame asks for 200 pixels, which took the
-                # height from the map.
-                ctk.CTkFrame(self, width=1, height=1, fg_color=T.BORDER).grid(
-                    row=0, column=col, sticky="ns", pady=8)
+                self._rule(self, col)
                 continue
-            cell = ctk.CTkFrame(self, fg_color="transparent")
-            cell.grid(row=0, column=col, sticky="nsew", padx=CELL_PAD, pady=4)
-            cell.grid_columnconfigure(0, weight=1)
-            Label(cell, text=heads[key], font=FONT_HEAD, height=14,
-                         text_color=T.TEXT_MUTED).grid(row=0, column=0)
-            value = Label(cell, text="—", font=FONT_VALUE, height=28,
-                                 text_color=T.TEXT_MUTED)
-            value.grid(row=1, column=0)
-            sub = Label(cell, text="", font=T.FONT_SMALL, height=14,
-                               text_color=T.TEXT_MUTED)
-            sub.grid(row=2, column=0)
-            self.cells[key] = (value, sub)
-        self.after(200, self._tick_clock)
+            self._cell(self, key, col)
+
+    def _build_stacked(self) -> None:
+        """Two rows, each its own grid so each can space its own cells.
+
+        The four flying numbers share the width evenly. Underneath, TC-25 --
+        eleven characters -- takes two parts of the width to each power
+        number's one, so the time is never the cell that is cut short.
+        """
+        self.grid_columnconfigure(0, weight=1)
+        top = ctk.CTkFrame(self, fg_color="transparent")
+        top.grid(row=0, column=0, sticky="ew", padx=4, pady=(2, 0))
+        for i, (key, _h) in enumerate(FLYING):
+            top.grid_columnconfigure(i, weight=1, uniform="flying")
+            self._cell(top, key, i, font=FONT_VALUE_BIG, pad=4)
+        ctk.CTkFrame(self, height=1, fg_color=T.BORDER).grid(
+            row=1, column=0, sticky="ew", padx=10)
+        bottom = ctk.CTkFrame(self, fg_color="transparent")
+        bottom.grid(row=2, column=0, sticky="ew", padx=4, pady=(0, 2))
+        bottom.grid_columnconfigure(0, weight=2, uniform="power")
+        self._cell(bottom, "tc25", 0, pad=4)
+        self._rule(bottom, 1)
+        for i, (key, _h) in enumerate(POWER, start=2):
+            bottom.grid_columnconfigure(i, weight=1, uniform="power")
+            self._cell(bottom, key, i, pad=4)
 
     # -- the time, every frame, while on screen ------------------------------
 

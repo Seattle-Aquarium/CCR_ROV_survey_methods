@@ -22,11 +22,26 @@ DEFAULTS = {
     #: The DVL's address. Blank means "the one the BlueOS DVL extension
     #: reports".
     "dvl_host": "",
-    #: Acoustic snapshots (echo profile and spectrum) per second; 0 is off.
+    #: Acoustic snapshots (echo profile and spectrum) per second under
+    #: Intensive logging; Standard logging takes none.
     "dvl_snapshot_hz": 5.0,
+    #: How much to log: "standard" (the vehicle is working) or "intensive"
+    #: (chasing a fault). See logprofile.py.
+    "logging_profile": "standard",
+    #: Shelved parts of the program to bring back (shelf.py), e.g.
+    #: ["flight_summary", "analyze_transects", "survey_plan"].
+    "unshelve": [],
+    #: BlueOS logs -> Download files: make the 1 Hz transect CSVs, sort C3
+    #: imagery by transect, and build the flight report afterwards.
+    "download_transect_csv": True,
+    "download_c3_mode": "all",
+    "download_flight_report": True,
+    #: The tide station for the transect CSVs' Depth_std ("" skips it).
+    "tide_station": "Elliott Bay (9447130)",
     #: Where the dividers between sections were left, as the share of the
     #: space left of or above each. None is the page's own default.
     "nav_map_share": None,
+    "nav_map_share_hud": None,
     "nav_map_share_narrow": None,
     "nav_readiness_share": None,
     "nav_plan_list_share": None,

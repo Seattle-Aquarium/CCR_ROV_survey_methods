@@ -2,9 +2,11 @@
 Everything a flight left behind, gathered and put on one clock.
 
 A survey afternoon writes into `logs/` from four independent recorders that do
-not know about each other: the vehicle's own `.mcap` (one file per armed
-period), the topside 1 Hz row, the 10 Hz network trace, and the parameter and
-version snapshots taken at the flight's edges. Each is written in its own
+not know about each other: the vehicle's own recording -- an `.mcap` per armed
+period on BlueOS 1.5, or a `.tlog` per power-up on 1.4 and earlier, which is
+read here as one recording per armed period inside it -- the topside 1 Hz row,
+the 10 Hz network trace, and the parameter and version snapshots taken at the
+flight's edges. Each is written in its own
 units, on its own cadence, named by its own idea of the flight.
 
 Reading them together by hand is the work this module removes. It does three
@@ -156,9 +158,16 @@ def _runs(times: list[float], flags: list[bool], want: bool,
 
 @dataclass
 class Recording:
-    """One `.mcap`: an armed period, as the vehicle recorded it."""
+    """One armed period, as the vehicle recorded it: an `.mcap`, or one armed
+    stretch of a `.tlog`."""
 
     path: Path
+    #: How the recording is named in the report when its file holds more than
+    #: one -- a tlog runs from power-up to power-down, through every arming.
+    label: str = ""
+    #: "mcap" or "tlog". A tlog carries no video, so its video counts are not
+    #: evidence of anything.
+    kind: str = "mcap"
     size_bytes: int = 0
     start: float = 0.0
     end: float = 0.0
@@ -193,7 +202,7 @@ class Recording:
 
     @property
     def name(self) -> str:
-        return self.path.name
+        return self.label or self.path.name
 
 
 #: Topics worth opening a recording for. Everything else is skipped, which is
@@ -299,6 +308,134 @@ def _read_video(reader, topic: str, out: Recording, stats) -> None:
         if previous is not None and when - previous > 0.5:
             out.video_gaps.append(Span(previous, when, "video"))
         previous = when
+
+
+# --------------------------------------------------------------------------
+#  a tlog: BlueOS before 1.5
+# --------------------------------------------------------------------------
+
+#: An armed stretch shorter than this is a bench arm-and-disarm, not a flight,
+#: and is not reported as a recording of its own.
+TLOG_MIN_ARMED_S = 5.0
+#: A failsafe message is attributed to an armed stretch when it lands this
+#: close to it: the autopilot says why just before it disarms.
+TLOG_TEXT_MARGIN_S = 20.0
+#: How long after the last armed heartbeat the stretch is taken to have ended
+#: when the tlog stops while still armed (power lost, or the router died).
+TLOG_HEARTBEAT_S = 1.0
+
+
+def read_tlog(path: Path) -> list[Recording]:
+    """Every armed period in one `.tlog`, each as a Recording. Never raises.
+
+    BlueOS 1.4's router writes one tlog per power-up, through however many
+    armings the dive had, where BlueOS 1.5 starts a new mcap at each arming.
+    The report reasons about armed periods -- why each one ended -- so a tlog
+    is cut into them here: from the first armed heartbeat to the first
+    disarmed one after it. A stretch the file ends inside, still armed, is
+    reported as not closed, as an mcap the vehicle never closed is: the power
+    went or the router died, and the two look alike from here.
+
+    A tlog that never armed (a bench session) yields nothing, as no mcap would
+    have been recorded for it.
+    """
+    out: list[Recording] = []
+    try:
+        size = path.stat().st_size
+    except OSError:
+        size = 0
+    try:
+        from pymavlink import mavutil
+        conn = mavutil.mavlink_connection(str(path))
+    except Exception as ex:
+        rec = Recording(path=path, kind="tlog", size_bytes=size,
+                        problem=f"could not open the tlog: {type(ex).__name__}: {ex}"[:120])
+        return [rec]
+
+    texts: list[tuple[float, str, str]] = []
+    boots: list[tuple[float, float]] = []
+    gcs_beats: list[tuple[float, str]] = []
+    spans: list[list] = []            # [start, last_armed, end, closed]
+    armed = False
+    first_t = last_t = None
+    try:
+        while True:
+            try:
+                msg = conn.recv_match(type=["HEARTBEAT", "STATUSTEXT", "SYSTEM_TIME"],
+                                      blocking=False)
+            except Exception:
+                break
+            if msg is None:
+                break
+            mt = msg.get_type()
+            if mt == "BAD_DATA":
+                continue
+            t = float(getattr(msg, "_timestamp", 0.0) or 0.0)
+            if not t:
+                continue
+            first_t = t if first_t is None else first_t
+            last_t = t
+            try:
+                src = (msg.get_srcSystem(), msg.get_srcComponent())
+            except Exception:
+                src = (1, 1)
+            if mt == "HEARTBEAT":
+                if src == (1, 1):
+                    now_armed = bool(int(getattr(msg, "base_mode", 0)) & 128)
+                    if now_armed and not armed:
+                        spans.append([t, t, None, True])
+                    elif now_armed:
+                        spans[-1][1] = t
+                    elif armed:
+                        spans[-1][2] = t
+                    armed = now_armed
+                elif src[0] != 1:
+                    # A ground station: Cockpit, QGroundControl, MAVProxy.
+                    gcs_beats.append((t, f"{src[0]}/{src[1]}"))
+            elif src == (1, 1) and mt == "STATUSTEXT":
+                severity = {0: "EMERGENCY", 1: "ALERT", 2: "CRITICAL", 3: "ERROR",
+                            4: "WARNING", 5: "NOTICE", 6: "INFO", 7: "DEBUG"}.get(
+                                int(getattr(msg, "severity", 6)), "")
+                text = getattr(msg, "text", "")
+                if isinstance(text, bytes):
+                    text = text.decode("utf-8", "replace")
+                texts.append((t, severity, str(text).rstrip("\x00").strip()))
+            elif src == (1, 1) and mt == "SYSTEM_TIME":
+                boot = getattr(msg, "time_boot_ms", None)
+                if boot is not None:
+                    boots.append((t, float(boot) / 1000.0))
+    except Exception as ex:                           # pragma: no cover
+        rec = Recording(path=path, kind="tlog", size_bytes=size,
+                        problem=f"{type(ex).__name__}: {str(ex)[:90]}")
+        return [rec]
+
+    for span in spans:
+        if span[2] is None:
+            # Still armed when the file stopped.
+            span[2] = max(span[1] + TLOG_HEARTBEAT_S, last_t or span[1])
+            span[3] = False
+    spans = [s for s in spans if s[2] - s[0] >= TLOG_MIN_ARMED_S or not s[3]]
+
+    for i, (start, last_armed, end, closed) in enumerate(spans):
+        rec = Recording(path=path, kind="tlog", start=start, end=end,
+                        closed=closed, armed_from=start, armed_to=last_armed,
+                        size_bytes=size if i == 0 else 0)
+        rec.label = (f"{path.name} · armed {_utc(start).astimezone():%H:%M:%S}"
+                     if len(spans) > 1 else path.name)
+        lo, hi = start - TLOG_TEXT_MARGIN_S, end + TLOG_TEXT_MARGIN_S
+        rec.statustexts = [x for x in texts if lo <= x[0] <= hi]
+        inside = [b for t, b in boots if start <= t <= end]
+        if inside:
+            rec.boot_s_first, rec.boot_s_last = inside[0], inside[-1]
+        counts: dict[str, int] = {}
+        for t, who in gcs_beats:
+            if start <= t <= end:
+                counts[who] = counts.get(who, 0) + 1
+        if counts:
+            rec.gcs, rec.gcs_heartbeats = max(counts.items(), key=lambda kv: kv[1])
+        rec.messages = sum(1 for t, _s, _x in texts if start <= t <= end)
+        out.append(rec)
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -832,6 +969,8 @@ class FlightDay:
     snapshots: dict[str, Snapshot] = field(default_factory=dict)
     topside_reports: list[Path] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
+    #: Which recorder the vehicle's recordings came from: "mcap", "tlog", "".
+    telemetry_kind: str = ""
 
     # ---- the clock -----------------------------------------------------
 
@@ -912,25 +1051,42 @@ def scan(folder: Path, *, deep: bool = True, progress=None) -> FlightDay:
     # flights have them loose in logs. Both are read, once each.
     mcaps = sorted({*folder.glob("*.mcap"), *(folder / "mcap").glob("*.mcap")},
                    key=lambda p: p.name)
+    from . import logpaths
     for i, path in enumerate(mcaps):
         if progress:
             progress(i / max(1, len(mcaps)) * 0.8,
                      f"Reading {path.name} ({path.stat().st_size / 2 ** 30:.1f} GB)")
         day.recordings.append(read_recording(path, deep=deep))
+    # BlueOS before 1.5 writes tlogs instead (logs/tlog). Read only when there
+    # are no mcaps: a folder with both holds the same flights twice.
+    if not mcaps:
+        tlogs = sorted({*folder.glob("*.tlog"), *(folder / "tlog").glob("*.tlog")},
+                       key=lambda p: p.name)
+        for i, path in enumerate(tlogs):
+            if progress:
+                progress(i / max(1, len(tlogs)) * 0.8,
+                         f"Reading {path.name} ({path.stat().st_size / 2 ** 20:.0f} MB)")
+            if deep:
+                day.recordings.extend(read_tlog(path))
+        day.telemetry_kind = "tlog" if tlogs else ""
+    else:
+        day.telemetry_kind = "mcap"
     day.recordings.sort(key=lambda r: r.start or 0.0)
 
     if progress:
         progress(0.85, "Reading the topside logs")
-    for path in sorted(folder.glob("laptop_monitor_*.csv")):
+    # logs/laptop and logs/network since November 2026; loose in logs before.
+    for path in logpaths.find(folder, logpaths.LAPTOP, "laptop_monitor_*.csv"):
         day.monitors.append(read_monitor(path))
     day.monitors.sort(key=lambda m: m.start)
-    for path in sorted(folder.glob("network_pings_*.csv")):
+    for path in logpaths.find(folder, logpaths.NETWORK, "network_pings_*.csv"):
         day.pings.append(read_pings(path))
     day.pings.sort(key=lambda p: p.start)
-    for path in sorted(folder.glob("network_fast_*.csv")):
+    for path in logpaths.find(folder, logpaths.NETWORK, "network_fast_*.csv"):
         day.traces.append(read_fast(path))
     day.traces.sort(key=lambda t: t.start)
-    day.topside_reports = sorted(folder.glob("network_topside_*.txt"))
+    day.topside_reports = logpaths.find(folder, logpaths.NETWORK,
+                                        "network_topside_*.txt")
 
     if progress:
         progress(0.95, "Reading the parameter snapshots")

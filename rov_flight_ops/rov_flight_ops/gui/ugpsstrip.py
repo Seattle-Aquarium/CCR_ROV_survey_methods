@@ -41,24 +41,42 @@ SPARK_H = 24
 class ReceiversStrip(ctk.CTkFrame):
     """Each UGPS receiver's signal-to-noise, side by side."""
 
-    def __init__(self, master, app, n: int = 4, **kw):
+    def __init__(self, master, app, n: int = 4, *, compact: bool = False, **kw):
         super().__init__(master, fg_color=T.SURFACE, corner_radius=T.RADIUS,
                          border_width=1, border_color=T.BORDER, **kw)
         self.app = app
-        self.grid_columnconfigure(0, weight=5, uniform="ustrip")
-        self.grid_columnconfigure(tuple(range(1, n + 1)), weight=4, uniform="ustrip")
+        #: `compact` puts the verdict on a line of its own above the four
+        #: receivers, for a column too narrow to hold all five side by side.
+        self.compact = compact
+        self._span = n if compact else n + 1
+        if compact:
+            self.grid_columnconfigure(tuple(range(n)), weight=1, uniform="ustrip")
+        else:
+            self.grid_columnconfigure(0, weight=5, uniform="ustrip")
+            self.grid_columnconfigure(tuple(range(1, n + 1)), weight=4,
+                                      uniform="ustrip")
         self._frames: list[ctk.CTkFrame] = []
 
         f = ctk.CTkFrame(self, fg_color="transparent")
-        f.grid(row=0, column=0, sticky="nsew", padx=8, pady=5)
+        if compact:
+            f.grid(row=0, column=0, columnspan=n, sticky="nsew", padx=8, pady=(4, 0))
+        else:
+            f.grid(row=0, column=0, sticky="nsew", padx=8, pady=5)
         f.grid_columnconfigure(0, weight=1)
         self._frames.append(f)
         self.title = Label(f, text="UGPS receivers", font=T.FONT_SMALL,
                                   text_color=T.TEXT_MUTED, anchor="w", height=16)
         self.title.grid(row=0, column=0, sticky="ew")
-        self.verdict = Label(f, text="—", font=T.FONT_BODY, text_color=T.TEXT,
-                             anchor="w", justify="left", wraplength=260)
-        self.verdict.grid(row=1, column=0, sticky="ew")
+        self.verdict = Label(f, text="—", font=T.FONT_SMALL if compact else T.FONT_BODY,
+                             text_color=T.TEXT, anchor="w", justify="left",
+                             wraplength=260)
+        if compact:
+            # Title and verdict on one line: "UGPS receivers  ·  all four agree".
+            f.grid_columnconfigure(0, weight=0)
+            f.grid_columnconfigure(1, weight=1)
+            self.verdict.grid(row=0, column=1, sticky="ew", padx=(10, 0))
+        else:
+            self.verdict.grid(row=1, column=0, sticky="ew")
         # Wrapped to its own column, which on the field laptop is narrower
         # than the fixed 260 it had, so the end of the sentence was cut off.
         fit_wrap(f, self.verdict, margin=4)
@@ -66,14 +84,18 @@ class ReceiversStrip(ctk.CTkFrame):
         self.cells = []
         for i in range(n):
             c = ctk.CTkFrame(self, fg_color="transparent")
-            c.grid(row=0, column=i + 1, sticky="nsew", padx=6, pady=5)
+            if compact:
+                c.grid(row=1, column=i, sticky="nsew", padx=(8 if i == 0 else 4, 4),
+                       pady=(0, 4))
+            else:
+                c.grid(row=0, column=i + 1, sticky="nsew", padx=6, pady=5)
             c.grid_columnconfigure(0, weight=1)
             self._frames.append(c)
             head = Label(c, text=f"Rx {i}", font=T.FONT_SMALL,
                                 text_color=T.TEXT_MUTED, anchor="w", height=16)
             head.grid(row=0, column=0, sticky="ew")
-            value = Label(c, text="—", font=T.FONT_BODY, text_color=T.TEXT,
-                                 anchor="w", height=18)
+            value = Label(c, text="—", font=T.FONT_SMALL if compact else T.FONT_BODY,
+                          text_color=T.TEXT, anchor="w", height=18)
             value.grid(row=1, column=0, sticky="ew")
             # A plain Tk canvas is not scaled with the rest of the window, so
             # its height is scaled here to match the labels around it.
@@ -104,15 +126,23 @@ class ReceiversStrip(ctk.CTkFrame):
         # fills the cells it has.
         for rh, (head, value, spark) in zip(judged.receivers, self.cells, strict=False):
             bad = bool(rh.flags)
-            _set(head, text=f"Rx {rh.index}" + (" · " + _tag(rh.flags[0]) if bad else ""),
+            low_valid = (rh.valid_fraction is not None and rh.valid_fraction < 0.95)
+            tail = (" · " + _tag(rh.flags[0]) if bad else
+                    f" · {rh.valid_fraction:.0%} valid" if self.compact and low_valid
+                    else "")
+            _set(head, text=f"Rx {rh.index}" + tail,
                  text_color=T.WARN if bad else T.TEXT_MUTED)
             if rh.snr_db is None and rh.nsd_db is None:
                 _set(value, text="no solution", text_color=T.TEXT_MUTED)
             else:
-                snr = f"SNR {rh.snr_db:.0f} dB" if rh.snr_db is not None else "SNR —"
-                nsd = f" · noise {rh.nsd_db:.0f}" if rh.nsd_db is not None else ""
+                unit = "" if self.compact else " dB"
+                snr = (f"SNR {rh.snr_db:.0f}{unit}" if rh.snr_db is not None
+                       else "SNR —")
+                word = "nf" if self.compact else "noise"
+                nsd = f" · {word} {rh.nsd_db:.0f}" if rh.nsd_db is not None else ""
+                # Compact: the valid share is in the cell's heading instead.
                 valid = (f" · {rh.valid_fraction:.0%} valid"
-                         if rh.valid_fraction is not None and rh.valid_fraction < 0.95 else "")
+                         if low_valid and not self.compact else "")
                 _set(value, text=snr + nsd + valid, text_color=T.WARN if bad else T.TEXT)
             self._sparkline(spark, rh.trace[-120:], bad)
 
@@ -138,7 +168,7 @@ class ReceiversStrip(ctk.CTkFrame):
         if not self.message.winfo_manager():
             for f in self._frames:
                 f.grid_remove()
-            self.message.grid(row=0, column=0, columnspan=len(self._frames),
+            self.message.grid(row=0, column=0, columnspan=self._span,
                               sticky="ew", padx=10, pady=5)
         _set(self.message, text=text)
 

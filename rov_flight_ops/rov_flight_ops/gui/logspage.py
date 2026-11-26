@@ -10,7 +10,10 @@ Three sections, one job each:
    "Manual selection" below means.
 2. **Download files** -- file types (A) crossed with a time period (B), plus
    anything selected above, copied into the flight folder: logs/mcap,
-   logs/mcap_video, logs/BIN, logs/tlog, and photos/C3.
+   logs/mcap_video, logs/BIN, logs/tlog, and photos/C3. C3 imagery can be
+   filed by transect as it comes down (photos/C3/transects/T1/...), and once
+   it is down the 1 Hz transect CSVs are made and the flight report built, so
+   the day can be read before the vehicle is switched off.
 3. **Clean the Pi** -- the same two choices, deleting from the vehicle instead.
 
 The two actions resolve their choices the same way, and say what they will
@@ -33,6 +36,14 @@ import customtkinter as ctk
 from .. import pifiles as PF
 from . import theme as T
 from .widgets import Card, Label, button, checkbox, entry, fit_wrap, label
+
+#: How C3 imagery is filed, as the Download panel offers it.
+C3_CHOICES = (
+    ("All, plus a copy in each transect folder", PF.C3_ALL),
+    ("Transect folders only (the rest stay on the Pi)", PF.C3_TRANSECTS),
+    ("Transect folders + off_transect", PF.C3_SORTED),
+)
+SKIP_TIDE = "Skip the tide lookup"
 
 #: What can be picked on each panel, in the order a survey day reaches for it.
 #:
@@ -104,12 +115,12 @@ class LogsPage(ctk.CTkFrame):
         self.download = ActionPanel(
             left, self, "2.  Download files",
             "Copies into the flight folder chosen on Monitoring, each type "
-            "into its own folder: logs/mcap, logs/BIN, photos/C3, "
-            "logs/mcap_video, logs/tlog, logs/ugps/pi. "
+            "into its own folder: logs/mcap, logs/tlog, logs/BIN, photos/C3, "
+            "logs/mcap_video, logs/ugps/pi. "
             "Files already there are skipped. "
             "This flight is the usual one, straight after surfacing.",
             "Download files", danger=False, command=self._download,
-            periods=DOWNLOAD_PERIODS)
+            periods=DOWNLOAD_PERIODS, extra=self._build_after)
         self.clean = ActionPanel(
             right, self, "3.  Clean the Pi",
             "Deletes from the vehicle. Refused while the ROV is armed; files "
@@ -119,6 +130,84 @@ class LogsPage(ctk.CTkFrame):
             "been checked in the lab by the time the next one starts.",
             "Delete files", danger=True, command=self._delete,
             periods=CLEAN_PERIODS)
+        self._update_previews()
+        #: Whether the file-type ticks have been touched by hand; until they
+        #: are, they follow what the vehicle records (mcap or tlog).
+        self._kinds_touched = False
+        self._kinds_for = ""
+
+    # ------------------------------------------------------------------
+    #  after downloading: C3 by transect, the CSVs, the report
+    # ------------------------------------------------------------------
+
+    def _build_after(self, body, row: int) -> int:
+        st = self.app.settings
+        label(body, "C3 imagery", font=T.FONT_H2).grid(row=row, column=0, sticky="w")
+        c3 = ctk.CTkFrame(body, fg_color="transparent")
+        c3.grid(row=row + 1, column=0, sticky="w", pady=(4, 10))
+        mode = st.get("download_c3_mode") or PF.C3_ALL
+        self.v_c3 = ctk.StringVar(value=mode if mode in PF.C3_MODES else PF.C3_ALL)
+        for i, (text, value) in enumerate(C3_CHOICES):
+            ctk.CTkRadioButton(c3, text=text, value=value, variable=self.v_c3,
+                               font=T.FONT_SMALL, text_color=T.TEXT,
+                               fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER,
+                               border_color=T.FIELD_BORDER,
+                               command=self._after_changed
+                               ).grid(row=i, column=0, sticky="w", pady=1)
+
+        label(body, "After downloading", font=T.FONT_H2).grid(row=row + 2, column=0,
+                                                             sticky="w")
+        after = ctk.CTkFrame(body, fg_color="transparent")
+        after.grid(row=row + 3, column=0, sticky="ew", pady=(4, 6))
+        after.grid_columnconfigure(1, weight=1)
+        self.v_csv = ctk.BooleanVar(value=bool(st.get("download_transect_csv", True)))
+        checkbox(after, "1 Hz transect CSVs", self.v_csv, self._after_changed
+                 ).grid(row=0, column=0, sticky="w", pady=2)
+        from .. import transectcsv
+        names = transectcsv.stations()
+        chosen = st.get("tide_station") or (names[0] if names else SKIP_TIDE)
+        self.tide = ctk.CTkOptionMenu(
+            after, values=(names or []) + [SKIP_TIDE], width=200,
+            font=T.FONT_SMALL, command=lambda _v: self._after_changed())
+        self.tide.set(chosen if chosen in names + [SKIP_TIDE] else SKIP_TIDE)
+        self.tide.grid(row=0, column=1, sticky="w", padx=(12, 0), pady=2)
+        self.v_report = ctk.BooleanVar(value=bool(st.get("download_flight_report", True)))
+        checkbox(after, "Flight report (opens when built)", self.v_report,
+                 self._after_changed).grid(row=1, column=0, sticky="w", pady=2)
+        button(after, "Build the report now", self._report_now, "ghost",
+               width=170).grid(row=1, column=1, sticky="w", padx=(12, 0), pady=2)
+        return row + 4
+
+    def _after_changed(self) -> None:
+        st = self.app.settings
+        st["download_c3_mode"] = self.v_c3.get()
+        st["download_transect_csv"] = bool(self.v_csv.get())
+        st["download_flight_report"] = bool(self.v_report.get())
+        tide = self.tide.get()
+        st["tide_station"] = "" if tide == SKIP_TIDE else tide
+        self.app.save_settings()
+        self._update_previews()
+
+    def _follow_vehicle(self) -> None:
+        """Tick mcap or tlog by what the vehicle records, until ticked by hand.
+
+        BlueOS 1.5 records mcaps and no tlogs; 1.4 records tlogs and no mcaps.
+        The autopilot's BIN logs come down either way.
+        """
+        setup = getattr(self.app, "recording_setup", None)
+        kind = getattr(setup, "expects", "") if setup is not None else ""
+        if kind not in ("mcap", "tlog") or kind == self._kinds_for:
+            return
+        self._kinds_for = kind
+        other = "mcap" if kind == "tlog" else "tlog"
+        if not self._kinds_touched:
+            self.v_kind[kind].set(True)
+            self.v_kind[other].set(False)
+            self.v_kind["bin"].set(True)
+        panel = self.download
+        if not any(v.get() for v in panel.v_kind.values()):
+            panel.v_kind[kind].set(True)
+            panel.v_kind["bin"].set(True)
         self._update_previews()
 
     # ------------------------------------------------------------------
@@ -229,6 +318,7 @@ class LogsPage(ctk.CTkFrame):
         self._style_tree()
 
     def refresh(self) -> None:
+        self._follow_vehicle()
         if self.inv is not None:
             self._rebuild()
         self._update_previews()
@@ -256,10 +346,12 @@ class LogsPage(ctk.CTkFrame):
         return sim if sim is not None and sim.active else None
 
     def _tick_all(self) -> None:
+        self._kinds_touched = True
         for v in self.v_kind.values():
             v.set(self.v_all.get())
 
     def _tick_one(self) -> None:
+        self._kinds_touched = True
         self.v_all.set(all(v.get() for v in self.v_kind.values()))
 
     def _wheel(self, event):
@@ -645,15 +737,42 @@ class LogsPage(ctk.CTkFrame):
                                retried)
         if choice is None:
             return
-        manifest = PF.load_manifest(flight)
-        todo = [f for f in choice.files
-                if PF.copy_state(f, flight, manifest) not in ("verified", "same size")]
-        if not todo:
+        inv = self.inv
+        windows = self._windows()
+        mode = self.v_c3.get()
+        has_c3 = any(f.category == "c3" for f in choice.files)
+        if has_c3 and mode in (PF.C3_TRANSECTS, PF.C3_SORTED) and not windows:
             messagebox.showinfo(self.app.APP_NAME,
-                                f"All {len(choice.files)} file(s) are already in "
-                                f"the flight folder.")
+                                "Filing C3 imagery by transect needs the transect "
+                                "times — fill them in and save them on the "
+                                "Transects tab first, or choose “All”.")
             return
-        need = sum(f.size for f in todo)
+        files = PF.route_c3(choice.files, mode, windows, inv.skew if inv else None)
+        if has_c3 and mode == PF.C3_TRANSECTS and not any(f.category == "c3" for f in files):
+            messagebox.showinfo(self.app.APP_NAME,
+                                "None of the C3 images fall inside a transect, so "
+                                "none would be downloaded. Check the transect times "
+                                "against the images' times in the list above.")
+            return
+        manifest = PF.load_manifest(flight)
+        todo = PF.pending(files, Path(flight), manifest)
+        after = self._after_steps(windows)
+        if not todo:
+            if after and messagebox.askyesno(
+                    self.app.APP_NAME,
+                    f"All {len(files)} file(s) are already in the flight folder."
+                    f"\n\nRun what comes after the download anyway?\n\n"
+                    + "\n".join(f"• {a}" for a in after)):
+                self._run_after(Path(flight), windows, report=None)
+            elif not after:
+                messagebox.showinfo(self.app.APP_NAME,
+                                    f"All {len(files)} file(s) are already in "
+                                    f"the flight folder.")
+            return
+        fetch = [f for f in todo
+                 if PF.copy_state(f, flight, manifest) not in ("verified", "same size")]
+        need = sum(f.size for f in fetch)
+        c3_line = PF.c3_summary(todo) if has_c3 else ""
         if self._sim is not None:
             # Described, never made: the simulated vehicle has nothing to copy.
             from ..sim import pi as SP
@@ -667,18 +786,22 @@ class LogsPage(ctk.CTkFrame):
             return
         dest = rovfetch.inspect_destination(
             Path(flight), need_bytes=need,
-            largest_file=max((f.size for f in todo), default=0))
+            largest_file=max((f.size for f in fetch), default=0))
         if dest.problems:
             messagebox.showerror(self.app.APP_NAME, "The flight folder's drive is "
                                  "not ready:\n\n• " + "\n• ".join(dest.problems))
             return
-        inv = self.inv
-        skip = len(choice.files) - len(todo)
+        skip = len(files) - len(todo)
+        local = len(todo) - len(fetch)
         if not messagebox.askyesno(
             self.app.APP_NAME,
-            f"Download {len(todo)} file(s), {_gib(need)}, from "
+            f"Download {len(fetch)} file(s), {_gib(need)}, from "
             f"{inv.vehicle or inv.host} into\n\n{flight}\n\n{choice.breakdown()}"
+            + (f"\n\nC3 imagery: {c3_line}" if c3_line else "")
+            + (f"\n\n{local} already here will be copied into transect folders."
+               if local else "")
             + (f"\n\n{skip} already in the flight folder will be skipped." if skip else "")
+            + ("\n\nThen:\n" + "\n".join(f"• {a}" for a in after) if after else "")
             + "\n\nNothing on the vehicle is changed."
         ):
             return
@@ -688,14 +811,85 @@ class LogsPage(ctk.CTkFrame):
                                progress=progress, cancel=cancel,
                                vehicle=inv.vehicle)
 
-        def done(_res):
-            # New recordings are on disk: the Flight summary and Analyze tabs
-            # read the folder's file list, so it is taken again now.
+        def done(res):
+            # New recordings are on disk: the folder's file list is taken
+            # again now, for the preview and anything that reads it.
             self.app.refresh_files()
             self._rebuild()
+            if isinstance(res, PF.TransferReport) and after and not res.failed \
+                    and not any("stopped" in w for w in res.warnings):
+                self.after(200, lambda: self._run_after(Path(flight), windows,
+                                                        report=res))
+            elif after and isinstance(res, PF.TransferReport):
+                self.app._log("Not making the transect CSVs or the flight report: "
+                              "the download did not finish cleanly. Download "
+                              "again, then use Build the report now.")
 
         self.app.submit(work, f"Downloading {len(todo)} file(s) from the vehicle…",
                         on_done=done)
+
+    # ---- after the download ----------------------------------------------
+
+    def _after_steps(self, windows) -> list[str]:
+        steps = []
+        if self.v_csv.get():
+            steps.append("make the 1 Hz transect CSVs (into transects/)" if windows
+                         else "the 1 Hz transect CSVs are skipped: no transects saved")
+        if self.v_report.get():
+            steps.append("build the flight report and open it")
+        return steps
+
+    def _run_after(self, flight: Path, windows, report) -> None:
+        """The transect CSVs, then the flight report, in one background job."""
+        want_csv = bool(self.v_csv.get()) and bool(windows)
+        want_report = bool(self.v_report.get())
+        if not (want_csv or want_report):
+            return
+        tide = self.tide.get()
+        station = "" if tide == SKIP_TIDE else tide
+        try:
+            plan = self.app._plan()
+        except Exception:
+            plan = None
+
+        def work(progress, cancel):
+            return _after_download(flight, plan, station=station,
+                                   csv=want_csv, report=want_report,
+                                   windows=windows, progress=progress,
+                                   cancel=cancel)
+
+        def done(res):
+            if isinstance(res, _After) and res.pdf is not None:
+                self._open(res.pdf)
+
+        what = " and ".join(w for w, on in (("transect CSVs", want_csv),
+                                            ("the flight report", want_report)) if on)
+        self.app.submit(work, f"Making {what}…", on_done=done)
+
+    def _report_now(self) -> None:
+        flight = self.app.flight_dir
+        if not flight:
+            messagebox.showinfo(self.app.APP_NAME,
+                                "Choose a flight folder on Monitoring first.")
+            return
+
+        def work(progress, cancel):
+            return _after_download(Path(flight), None, station="", csv=False,
+                                   report=True, windows=[], progress=progress,
+                                   cancel=cancel)
+
+        def done(res):
+            if isinstance(res, _After) and res.pdf is not None:
+                self._open(res.pdf)
+
+        self.app.submit(work, "Reading the flight for its report…", on_done=done)
+
+    def _open(self, path: Path) -> None:
+        try:
+            import os
+            os.startfile(path)                        # noqa: S606
+        except OSError as ex:
+            self.app._log(f"The flight report is at {path} (could not open it: {ex})")
 
     def _delete(self, retried: bool = False) -> None:
         choice = self._resolve(self.clean, lambda: self._delete(True), retried)
@@ -782,7 +976,7 @@ class ActionPanel:
 
     def __init__(self, parent, page: LogsPage, title: str, subtitle: str,
                  verb: str, *, danger: bool, command,
-                 periods=DOWNLOAD_PERIODS):
+                 periods=DOWNLOAD_PERIODS, extra=None):
         self.page = page
         c = Card(parent, title, subtitle)
         c.grid(row=0, column=0, sticky="nsew")
@@ -799,6 +993,7 @@ class ActionPanel:
             checkbox(kinds, cat.label, v, page._update_previews
                      ).grid(row=i // 3, column=i % 3, sticky="w",
                             padx=(0, 18), pady=2)
+        self.danger = danger
 
         label(c.body, "Time period", font=T.FONT_H2).grid(row=2, column=0,
                                                           sticky="w")
@@ -816,13 +1011,18 @@ class ActionPanel:
                                       column=i % self.PERIODS_PER_LINE,
                                       sticky="w", padx=(0, 18), pady=2)
 
+        row = 4
+        if extra is not None:
+            # Panel-specific choices between the period and the button: the
+            # Download panel's C3 filing and what to do once it is down.
+            row = extra(c.body, row)
         self.note = Label(c.body, text="", font=T.FONT_SMALL,
                                  text_color=T.TEXT_MUTED, anchor="w",
                                  justify="left", wraplength=480)
-        self.note.grid(row=4, column=0, sticky="ew")
+        self.note.grid(row=row, column=0, sticky="ew")
         fit_wrap(c.body, self.note)
         button(c.body, verb, command, "danger" if danger else "primary",
-               width=160).grid(row=5, column=0, sticky="w", pady=(10, 0))
+               width=160).grid(row=row + 1, column=0, sticky="w", pady=(10, 0))
 
     def kinds(self) -> list[str]:
         return [k for k, v in self.v_kind.items() if v.get()]
@@ -863,6 +1063,67 @@ class ActionPanel:
         if choice.note:
             bits.append(choice.note[0].upper() + choice.note[1:] + ".")
         self.note.configure(text="\n".join(bits))
+
+
+class _After:
+    """What happened after a download: the CSVs, the report. Its summary goes
+    to the log at the foot of the window."""
+
+    def __init__(self):
+        self.lines: list[str] = []
+        self.pdf: Path | None = None
+
+    def summary(self) -> str:
+        return "\n".join(self.lines) or "Nothing to do after the download."
+
+
+def _after_download(flight: Path, plan, *, station: str, csv: bool, report: bool,
+                    windows, progress, cancel) -> _After:
+    """The 1 Hz transect CSVs and the flight report, for a flight folder.
+
+    Each step stands alone: a failure in the CSVs is reported and the report
+    is still built, because the report is what tells whether to look again
+    before switching the vehicle off.
+    """
+    out = _After()
+    share = 0.6 if (csv and report) else 1.0
+    if csv and plan is not None:
+        from .. import transectcsv
+        try:
+            out.lines += transectcsv.make(
+                flight, plan, station_name=station,
+                progress=lambda f, m="": progress(f * share, m), cancel=cancel)
+        except transectcsv.Stopped as ex:
+            out.lines.append(f"Transect CSVs stopped {ex}.")
+            return out
+        except Exception as ex:
+            out.lines.append(f"Transect CSVs not made: {ex}")
+        try:
+            out.lines += ["Coverage, with the .BIN logs as the check:"] + [
+                f"   {line}" for line in transectcsv.coverage(flight, windows)]
+        except Exception as ex:
+            out.lines.append(f"(coverage not checked: {ex})")
+    if report:
+        if cancel is not None and cancel.is_set():
+            return out
+        from .. import flightreport, flightscan, tearsheet
+        base = share if csv else 0.0
+        try:
+            day = flightscan.scan(flight, progress=lambda f, m="": progress(
+                base + (1 - base) * 0.9 * f, m))
+            progress(base + (1 - base) * 0.95, "Working out what it means")
+            rep = flightreport.analyze(day)
+            sheet = tearsheet.build(rep)
+            out.pdf = sheet.path
+            out.lines.append(f"Flight report: {rep.headline}")
+            for finding in rep.sorted_findings[:6]:
+                mark = {flightreport.CRITICAL: "!!", flightreport.WARNING: " !",
+                        flightreport.GOOD: " +"}.get(finding.level, "  ")
+                out.lines.append(f"  {mark} {finding.title}")
+            out.lines.append(f"  → {sheet.path}")
+        except Exception as ex:
+            out.lines.append(f"Flight report not built: {type(ex).__name__}: {ex}")
+    return out
 
 
 class _Search:

@@ -40,6 +40,25 @@ def installed(monkeypatch):
     return stub
 
 
+@pytest.fixture(scope="module")
+def analyze(app):
+    """The Analyze transects page, built off the shelf.
+
+    It is not in the window any more (shelf.py, SHELF.md) -- the 1 Hz CSVs
+    come with a download on BlueOS logs -- but it is kept working, so it is
+    built here in a hidden window of its own and tested as before.
+    """
+    from rov_flight_ops.gui.transectpage import TransectPage
+
+    top = ctk.CTkToplevel(app)
+    top.withdraw()
+    page = TransectPage(top, app)
+    page.grid(row=0, column=0, sticky="nsew")
+    app.update()
+    yield page
+    top.destroy()
+
+
 def _pump(app, n=20):
     import time
     for _ in range(n):
@@ -58,11 +77,12 @@ def test_the_tabs_run_in_the_order_of_a_survey_day(app):
     2026, beside Navigation, because it is read during the dive too, and
     Parameters at 2, because it is checked on deck before the dive.
     """
+    # Flight summary and Analyze transects followed BlueOS logs until November
+    # 2026, when they went on the shelf (shelf.py): the report and the 1 Hz
+    # CSVs are made by BlueOS logs after a download now.
     assert app.nav.sections == ["Monitoring", "Parameters", "Navigation", "DVL",
-                                "Transects",
-                                "BlueOS logs", "Flight summary",
-                                "Analyze transects"]
-    assert "analyze" in app.pages
+                                "Transects", "BlueOS logs"]
+    assert "analyze" not in app.pages and "summary" not in app.pages
     assert not any("photo" in k.lower() or "video" in k.lower() for k in app.pages)
 
 
@@ -86,17 +106,17 @@ def test_a_tab_is_identified_by_a_key_rather_than_its_position(app):
             app.nav.select(before)
 
 
-def test_raising_the_page_re_reads_the_plan(app):
+def test_raising_the_page_re_reads_the_plan(app, analyze):
     """The plan is edited on another page, so a page built once at startup
     would still be showing the state from then."""
-    page = app.pages["analyze"]
+    page = analyze
     app._apply_plan(SurveyPlan([Site(
         name="Centennial_Park", project="testing", date="2026-08-26",
         transects=[Transect(name="T1", start_tc="12:19:57", end_tc="12:28:42"),
                    Transect(name="T2", start_tc="12:29:55", end_tc="12:35:15")],
     )]))
 
-    app.nav.select("Analyze transects")
+    page.refresh()                     # what raising its tab does
     _pump(app)
 
     summary = page.plan_summary.cget("text")
@@ -104,7 +124,7 @@ def test_raising_the_page_re_reads_the_plan(app):
     assert "T1" in summary and "T2" in summary
 
 
-def test_it_refuses_without_a_flight_folder(app, monkeypatch, installed):
+def test_it_refuses_without_a_flight_folder(app, analyze, monkeypatch, installed):
     said: list[str] = []
     monkeypatch.setattr("rov_flight_ops.gui.transectpage.messagebox.showinfo",
                         lambda t, m: said.append(m))
@@ -112,12 +132,13 @@ def test_it_refuses_without_a_flight_folder(app, monkeypatch, installed):
                         lambda t, m: said.append(m))
 
     app.flight_dir = None
-    app.pages["analyze"]._run()
+    analyze._run()
 
     assert said and "flight folder" in said[-1].lower()
 
 
-def test_it_refuses_when_the_flight_has_no_mcaps(app, monkeypatch, tmp_path, installed):
+def test_it_refuses_when_the_flight_has_no_mcaps(app, analyze, monkeypatch, tmp_path,
+                                                installed):
     said: list[str] = []
     monkeypatch.setattr("rov_flight_ops.gui.transectpage.messagebox.showinfo",
                         lambda t, m: said.append(m))
@@ -126,13 +147,16 @@ def test_it_refuses_when_the_flight_has_no_mcaps(app, monkeypatch, tmp_path, ins
 
     app.flight_dir = tmp_path
     app.discovery = None
-    app.pages["analyze"]._run()
+    try:
+        analyze._run()
+    finally:
+        app.flight_dir = None
 
     assert said and "mcap" in said[-1].lower()
     assert "not installed" not in said[-1].lower()
 
 
-def test_a_missing_extractor_explains_itself(app, monkeypatch, tmp_path):
+def test_a_missing_extractor_explains_itself(app, analyze, monkeypatch, tmp_path):
     """The extractor is a separate install. Without it the page must say what
     to run, not stop the whole application from starting."""
     said: list[str] = []
@@ -141,23 +165,54 @@ def test_a_missing_extractor_explains_itself(app, monkeypatch, tmp_path):
     monkeypatch.setattr("rov_flight_ops.gui.transectpage._extractor", lambda: None)
 
     app.flight_dir = tmp_path
-    app.pages["analyze"]._run()
+    try:
+        analyze._run()
+    finally:
+        app.flight_dir = None
 
     assert said and "pip install" in said[-1]
 
 
-def test_several_sites_get_the_site_into_the_filename(app):
+def test_several_sites_get_the_site_into_the_filename(app, analyze):
     """Transect names repeat across sites, so one flight with two sites would
     otherwise write T1.csv twice and lose the first."""
-    page = app.pages["analyze"]
+    page = analyze
     app._apply_plan(SurveyPlan([
         Site(name="Alki", project="t", date="2026-08-26",
              transects=[Transect(name="T1", start_tc="10:00:00", end_tc="10:10:00")]),
         Site(name="Centennial", project="t", date="2026-08-26",
              transects=[Transect(name="T1", start_tc="11:00:00", end_tc="11:10:00")]),
     ]))
-    app.nav.select("Analyze transects")
+    page.refresh()
     _pump(app)
 
     summary = page.plan_summary.cget("text")
     assert "Alki" in summary and "Centennial" in summary
+
+
+# --------------------------------------------------------------------------
+#  what replaced the tab: transectcsv, run after a download
+# --------------------------------------------------------------------------
+
+
+def _plan_one():
+    return SurveyPlan([Site(name="Alki", project="t", date="2026-08-26",
+                            transects=[Transect("T1", "10:00:00", "10:10:00")])])
+
+
+def test_the_csvs_say_why_when_the_extractor_is_missing(tmp_path, monkeypatch):
+    from rov_flight_ops import transectcsv
+    monkeypatch.setattr(transectcsv, "extractor", lambda: None)
+    with pytest.raises(RuntimeError, match="pip install"):
+        transectcsv.make(tmp_path, _plan_one())
+
+
+def test_the_csvs_say_why_when_there_is_nothing_to_read(tmp_path, monkeypatch):
+    from rov_flight_ops import transectcsv
+    monkeypatch.setattr(transectcsv, "extractor",
+                        lambda: (SimpleNamespace(), SimpleNamespace(STATIONS=[])))
+    (tmp_path / "logs" / "BIN").mkdir(parents=True)
+    (tmp_path / "logs" / "BIN" / "00000001.BIN").write_bytes(b"x")
+    with pytest.raises(RuntimeError, match="no mcap or tlog") as got:
+        transectcsv.make(tmp_path, _plan_one())
+    assert "BIN" in str(got.value)

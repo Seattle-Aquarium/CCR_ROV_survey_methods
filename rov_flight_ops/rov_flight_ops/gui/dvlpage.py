@@ -634,13 +634,15 @@ class DvlPage(ctk.CTkFrame):
                                                     sticky="w")
         self.snap_pick = _segmented(c.body, list(SNAPSHOT_CHOICES),
                                     self._pick_snapshots)
+        get = getattr(self.app, "dvl_snapshot_hz", None)
         try:
-            hz = float(self.app.settings.get("dvl_snapshot_hz",
-                                             CAP.DEFAULT_SNAPSHOT_HZ))
+            hz = (get() if callable(get) else
+                  float(self.app.settings.get("dvl_snapshot_hz",
+                                              CAP.DEFAULT_SNAPSHOT_HZ)))
         except (TypeError, ValueError):
             hz = CAP.DEFAULT_SNAPSHOT_HZ
         self.snap_pick.set(next((k for k, v in SNAPSHOT_CHOICES.items() if v == hz),
-                                "5 /s"))
+                                "Off" if not hz else "5 /s"))
         self.snap_pick.grid(row=0, column=1, sticky="w")
         self.acoustic = self._make_canvas(c.body, ACOUSTIC_H * 2)
         self.acoustic.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
@@ -649,9 +651,22 @@ class DvlPage(ctk.CTkFrame):
 
     def _pick_snapshots(self, name: str) -> None:
         hz = SNAPSHOT_CHOICES.get(name, 0.0)
-        self.app.settings["dvl_snapshot_hz"] = hz
-        self.app.save_settings()
+        # Remembered as the Intensive rate. On Standard the choice applies to
+        # this capture only, for a look; the profile turns them off again at
+        # the next change.
+        if hz:
+            self.app.settings["dvl_snapshot_hz"] = hz
+            self.app.save_settings()
         self.recorder.set_snapshot_hz(hz)
+
+    def sync_snapshots(self) -> None:
+        """Show the snapshot rate the logging profile has set."""
+        get = getattr(self.app, "dvl_snapshot_hz", None)
+        if not callable(get):
+            return
+        hz = get()
+        self.snap_pick.set(next((k for k, v in SNAPSHOT_CHOICES.items() if v == hz),
+                                "Off" if not hz else "5 /s"))
 
     def _draw_acoustic(self) -> None:
         cv = self.acoustic

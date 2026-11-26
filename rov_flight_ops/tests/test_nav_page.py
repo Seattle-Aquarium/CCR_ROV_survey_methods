@@ -491,6 +491,40 @@ def _nav_page(app):
     return page
 
 
+@pytest.fixture(scope="module")
+def planned(app):
+    """A Navigation page with the survey plan brought back off the shelf.
+
+    The window's own page is built as the field laptop runs it, plan shelved
+    (shelf.py). The plan's code is kept and tested all the same, on a second
+    page built in a hidden window of its own with ``"unshelve":
+    ["survey_plan"]`` as the settings file would give it.
+    """
+    import customtkinter as ctk
+
+    from rov_flight_ops.gui.navpage import NavigationPage
+
+    top = ctk.CTkToplevel(app)
+    top.withdraw()
+    real = app.shelved
+    app.shelved = lambda key: False if key == "survey_plan" else real(key)
+    try:
+        page = NavigationPage(top, app)
+    finally:
+        app.shelved = real
+    page.grid(row=0, column=0, sticky="nsew")
+    top.grid_columnconfigure(0, weight=1)
+    top.grid_rowconfigure(0, weight=1)
+    app.update()
+    assert not page.plan_shelved and page.plan_card is not None
+    yield page
+    try:
+        page.shutdown()
+    except Exception:
+        pass
+    top.destroy()
+
+
 def _demo_plan(page):
     """A plan with one of every kind of feature, adopted by the page.
 
@@ -695,7 +729,7 @@ def _count_configures(widget) -> list:
     return calls
 
 
-def test_refreshing_an_unchanged_plan_panel_reconfigures_nothing(app):
+def test_refreshing_an_unchanged_plan_panel_reconfigures_nothing(app, planned):
     """CustomTkinter redraws a widget -- and, for a frame, every child that
     inherits its background -- on any `configure`, whatever was passed.
 
@@ -704,7 +738,7 @@ def test_refreshing_an_unchanged_plan_panel_reconfigures_nothing(app):
     grids measured 710 ms, against 57 ms once the no-op configures were
     skipped. The ordinary case more than halved too.
     """
-    page = _nav_page(app)
+    page = planned
     restore = _demo_plan(page)
     try:
         page.plan_panel.refresh()
@@ -813,7 +847,7 @@ def test_the_trust_line_is_hidden_until_it_has_something_to_say(app):
         app.update()
 
 
-def test_the_plan_panel_lists_every_kind_of_feature(app):
+def test_the_plan_panel_lists_every_kind_of_feature(app, planned):
     """A panel refresh with features actually on the plan.
 
     Every earlier test refreshed this panel with an empty plan, so the whole
@@ -821,7 +855,7 @@ def test_the_plan_panel_lists_every_kind_of_feature(app):
     never ran, and a wrong module name in it passed six hundred tests. The
     point of this test is to make the list draw real rows.
     """
-    page = _nav_page(app)
+    page = planned
     restore = _demo_plan(page)
     try:
         page.plan_panel.refresh()
@@ -849,10 +883,10 @@ def test_every_feature_kind_the_editor_can_draw_has_a_glyph(app):
     del app
 
 
-def test_selecting_a_feature_fills_the_inspector(app):
+def test_selecting_a_feature_fills_the_inspector(app, planned):
     """The other half of the panel an empty plan never exercised: the
     inspector builds a different set of fields for each kind."""
-    page = _nav_page(app)
+    page = planned
     restore = _demo_plan(page)
     try:
         for f in page.plan.features:
@@ -1182,7 +1216,8 @@ def test_the_map_keeps_the_larger_share_of_the_page(app):
     from rov_flight_ops.gui import navpage as NP
 
     page = _nav_page(app)
-    assert NP.MAP_SHARE >= 0.6, "the map should keep about two thirds"
+    # A little over half since the heads-up display moved into the column.
+    assert NP.MAP_SHARE >= 0.55, "the map should keep the larger share"
     assert page.split_wide.fraction == pytest.approx(NP.MAP_SHARE)
     map_col, side_col = page.grid_columnconfigure(0), page.grid_columnconfigure(2)
     assert int(map_col["weight"]) > int(side_col["weight"]) > 0
@@ -1257,20 +1292,24 @@ def test_the_readiness_matrix_keeps_its_scroll_region(app):
     assert float(region[3]) > 0, "the scroll region has no height"
 
 
-def test_the_side_cards_let_their_bodies_shrink(app):
+def test_the_side_cards_let_their_bodies_shrink(app, planned):
     """Without a weight on the body row a card cuts off whatever does not
     fit, which hid "Allow writes" and the plan inspector."""
     page = _nav_page(app)
-    for card in (page.readiness_card, page.plan_card):
+    for card in (page.readiness_card, planned.readiness_card, planned.plan_card):
         assert int(card.grid_rowconfigure(1)["weight"]) > 0
+    # Shelved, readiness has the column under the receivers to itself.
+    assert page.split_side is None
+    assert int(page.side_region.grid_rowconfigure(0)["weight"]) > 0
 
 
-def test_dragging_a_divider_moves_the_split_and_remembers_it(app, monkeypatch):
+def test_dragging_a_divider_moves_the_split_and_remembers_it(app, planned,
+                                                            monkeypatch):
     """Through the handle's own press, drag and release, with the track
     sizes given rather than measured: a withdrawn window has none."""
     from rov_flight_ops.gui import navpage as NP
 
-    page = _nav_page(app)
+    page = planned
     split = page.split_side
     key = NP.SPLIT_KEYS["side"]
     before_setting = app.settings.get(key)
@@ -1288,8 +1327,8 @@ def test_dragging_a_divider_moves_the_split_and_remembers_it(app, monkeypatch):
         split._drag(E(180))
         split._release(E(180))
         assert split.fraction == pytest.approx(0.6)
-        top = int(page.side_col.grid_rowconfigure(0)["weight"])
-        bottom = int(page.side_col.grid_rowconfigure(2)["weight"])
+        top = int(page.side_region.grid_rowconfigure(0)["weight"])
+        bottom = int(page.side_region.grid_rowconfigure(2)["weight"])
         assert top / (top + bottom) == pytest.approx(0.6, abs=0.002)
         assert app.settings[key] == pytest.approx(0.6) and saved
 

@@ -509,7 +509,8 @@ def discover_replays(flight_dir: Path) -> list[tuple[str, Path, str]]:
     out: list[tuple[str, Path, str]] = []
     d = Path(flight_dir)
     logs = d / "logs"
-    for p in sorted(logs.glob("nav_*.jsonl")) if logs.is_dir() else []:
+    from .. import logpaths
+    for p in logpaths.find(logs, logpaths.NAVIGATION, "nav_*.jsonl") if logs.is_dir() else []:
         out.append((f"Navigation session {p.stem[4:]}", p, "session"))
     trans = d / "transects"
     for p in sorted(trans.glob("*.csv")) if trans.is_dir() else []:

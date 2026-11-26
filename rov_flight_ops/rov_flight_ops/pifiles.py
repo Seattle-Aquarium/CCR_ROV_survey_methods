@@ -50,10 +50,12 @@ C3 imagery      the folder(s) Madrona saves into             photos/C3
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
 import re
+import shutil
 import struct
 import time
 import urllib.error
@@ -169,6 +171,10 @@ class PiFile:
     #: mcap with no summary, whose end is worked out from its size.
     end_estimated: bool = False
     covers: list[str] = field(default_factory=list)
+    #: Where the copy goes, relative to its type's folder, when that is not
+    #: simply `rel` -- C3 imagery sorted into transect folders (`route_c3`).
+    #: The first is where it is downloaded to; the rest are local copies.
+    targets: list[str] = field(default_factory=list)
 
     @property
     def name(self) -> str:
@@ -179,7 +185,13 @@ class PiFile:
         return self.start is not None and self.end is not None
 
     def dest_in(self, flight_dir: Path) -> Path:
-        return Path(flight_dir) / BY_KEY[self.category].dest / Path(*self.rel.split("/"))
+        rel = self.targets[0] if self.targets else self.rel
+        return Path(flight_dir) / BY_KEY[self.category].dest / Path(*rel.split("/"))
+
+    def all_dests(self, flight_dir: Path) -> list[Path]:
+        """Every place this file is to be in the flight folder."""
+        base = Path(flight_dir) / BY_KEY[self.category].dest
+        return [base / Path(*r.split("/")) for r in (self.targets or [self.rel])]
 
     def downloaded_to(self, flight_dir: Path | None) -> bool:
         """A copy of the same size is in the flight folder -- verified or not.
@@ -1127,14 +1139,14 @@ def copy_state(f: PiFile, flight_dir: Path | None,
     """
     if not flight_dir:
         return ""
-    p = f.dest_in(flight_dir)
+    entry = (manifest if manifest is not None else load_manifest(flight_dir)).get(f.path)
+    p = _existing_copy(f, flight_dir, entry)
+    if p is None:
+        return ""
     try:
-        if not p.is_file():
-            return ""
         local = p.stat().st_size
     except OSError:
         return ""
-    entry = (manifest if manifest is not None else load_manifest(flight_dir)).get(f.path)
     if local != f.size:
         # A file still being written is not a mismatch: what came down is a
         # good copy of it as it stood, and the vehicle has simply kept
@@ -1148,6 +1160,212 @@ def copy_state(f: PiFile, flight_dir: Path | None,
             and _same_time(entry.get("modified"), f.modified)):
         return "verified"
     return "same size"
+
+
+def _existing_copy(f: PiFile, flight_dir: Path, entry: dict | None) -> Path | None:
+    """The copy of `f` in the flight folder: where it is meant to go, or --
+    C3 imagery filed into a transect folder -- where the manifest says it
+    went. None if there is none."""
+    candidates = [f.dest_in(flight_dir)]
+    if entry:
+        for rel in [entry.get("local"), *(entry.get("copies") or [])]:
+            if rel:
+                candidates.append(Path(flight_dir) / Path(*str(rel).replace("\\", "/").split("/")))
+    for c in candidates:
+        try:
+            if c.is_file():
+                return c
+        except OSError:
+            continue
+    return None
+
+
+def missing_dests(f: PiFile, flight_dir: Path) -> list[Path]:
+    """The places this file is to be that do not hold it yet."""
+    out = []
+    for d in f.all_dests(flight_dir):
+        try:
+            if not d.is_file() or d.stat().st_size != f.size:
+                out.append(d)
+        except OSError:
+            out.append(d)
+    return out
+
+
+def pending(files: Sequence[PiFile], flight_dir: Path,
+            manifest: dict[str, dict] | None = None) -> list[PiFile]:
+    """The files a download still has work for: not yet in the flight folder,
+    or in it but not yet everywhere their targets ask (a transect copy)."""
+    manifest = manifest if manifest is not None else load_manifest(flight_dir)
+    out = []
+    for f in files:
+        state = copy_state(f, flight_dir, manifest)
+        if state not in ("verified", "same size") or (f.targets
+                                                      and missing_dests(f, flight_dir)):
+            out.append(f)
+    return out
+
+
+# --------------------------------------------------------------------------
+#  C3 imagery, filed by transect
+# --------------------------------------------------------------------------
+
+#: How C3 imagery is filed on download.
+C3_ALL = "all"              # everything as on the Pi, plus copies by transect
+C3_TRANSECTS = "transects"  # only images inside a transect, in its folder
+C3_SORTED = "sorted"        # every image: its transect's folder, or off_transect
+C3_MODES = (C3_ALL, C3_TRANSECTS, C3_SORTED)
+#: Inside photos/C3, as ROV Imagery Processing names its own: transects/T1/,
+#: off_transect/.
+C3_TRANSECTS_DIR = "transects"
+C3_OFF_DIR = "off_transect"
+
+#: Madrona names each image for the moment it was taken, in UTC:
+#: snapshot-2026-11-24-21-19-48-568789.jpg.
+_C3_STAMP = re.compile(r"(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})(?:-(\d{1,6}))?")
+
+#: A vehicle clock further out than this is allowed for when filing imagery.
+#: Closer than this, the estimate of the skew is noisier than the skew.
+C3_SKEW_S = 5.0
+
+
+def c3_is_image(f: PiFile) -> bool:
+    """An image from one of the cameras, rather than the calibration file."""
+    return any(part.lower() in C3_EYES for part in f.rel.split("/")[:-1])
+
+
+def c3_time(f: PiFile) -> float | None:
+    """When a C3 image was taken: the UTC stamp in its name, else its file
+    time. Both are the vehicle's clock."""
+    from datetime import timezone
+    m = _C3_STAMP.search(f.name)
+    if m:
+        try:
+            frac = (m.group(7) or "0").ljust(6, "0")
+            return datetime(*map(int, m.groups()[:6]), int(frac),
+                            tzinfo=timezone.utc).timestamp()
+        except ValueError:
+            pass
+    return f.modified
+
+
+def _transect_folders(windows: Sequence[tuple[str, float, float]]
+                      ) -> list[tuple[str, float, float]]:
+    """Windows with folder-safe, unique names: two sites each with a "T1"
+    get T1 and T1_2 rather than one folder holding both."""
+    out, used = [], {}
+    for name, lo, hi in windows:
+        base = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(name)).strip("_") or "transect"
+        n = used.get(base, 0) + 1
+        used[base] = n
+        out.append((base if n == 1 else f"{base}_{n}", lo, hi))
+    return out
+
+
+def c3_assign(files: Iterable[PiFile], windows: Sequence[tuple[str, float, float]],
+              skew: float | None = None) -> dict[str, str | None]:
+    """The transect folder each C3 image belongs in, by vehicle path; None for
+    an image outside every transect. Pauses do not take imagery out of a
+    transect -- it feeds photogrammetry, where more coverage is more to use."""
+    shift = skew if skew is not None and abs(skew) > C3_SKEW_S else 0.0
+    named = _transect_folders(windows)
+    out: dict[str, str | None] = {}
+    for f in files:
+        if f.category != "c3" or not c3_is_image(f):
+            continue
+        t = c3_time(f)
+        hit = None
+        if t is not None:
+            t -= shift                     # the vehicle's clock, as the laptop's
+            for name, lo, hi in named:
+                if lo <= t <= hi:
+                    hit = name
+                    break
+        out[f.path] = hit
+    return out
+
+
+def route_c3(files: Sequence[PiFile], mode: str,
+             windows: Sequence[tuple[str, float, float]],
+             skew: float | None = None) -> list[PiFile]:
+    """The C3 files to download under `mode`, each told where it goes.
+
+    Returns copies -- the listing's own entries are not changed -- with
+    `targets` set, relative to photos/C3:
+
+    * ``all``       -- every file where it is on the Pi, and each image also
+      in ``transects/<T>/`` when it falls in a transect;
+    * ``transects`` -- only the images that fall in a transect, each in
+      ``transects/<T>/``; the rest stay on the vehicle;
+    * ``sorted``    -- every image, in ``transects/<T>/`` or ``off_transect/``.
+
+    The calibration file goes wherever images of its set went, so every
+    transect folder is complete on its own: calibration, left/, right/,
+    center/. Anything else passes through unchanged.
+    """
+    c3 = [f for f in files if f.category == "c3"]
+    others = [f for f in files if f.category != "c3"]
+    if mode not in C3_MODES or (not windows and mode == C3_ALL):
+        return list(files)
+    assign = c3_assign(c3, windows, skew)
+
+    def session_of(f: PiFile) -> str:
+        """The part of `rel` before the eye folder: "" for a single set."""
+        parts = f.rel.split("/")
+        for i, part in enumerate(parts[:-1]):
+            if part.lower() in C3_EYES:
+                return "/".join(parts[:i])
+        return "/".join(parts[:-1])
+
+    used: dict[str, set[str]] = {}       # session -> transect folders used
+    off_used: set[str] = set()           # sessions with off-transect images
+    out: list[PiFile] = []
+    for f in c3:
+        if not c3_is_image(f):
+            continue
+        name = assign.get(f.path)
+        sess = session_of(f)
+        targets: list[str] = []
+        if mode == C3_ALL:
+            targets.append(f.rel)
+        if name is not None:
+            targets.append(f"{C3_TRANSECTS_DIR}/{name}/{f.rel}")
+            used.setdefault(sess, set()).add(name)
+        elif mode == C3_SORTED:
+            targets.append(f"{C3_OFF_DIR}/{f.rel}")
+            off_used.add(sess)
+        if targets:
+            out.append(dataclasses.replace(f, targets=targets))
+    for f in c3:
+        if c3_is_image(f):
+            continue
+        sess = session_of(f)
+        targets = [f.rel] if mode == C3_ALL else []
+        targets += [f"{C3_TRANSECTS_DIR}/{name}/{f.rel}"
+                    for name in sorted(used.get(sess, set()))]
+        if sess in off_used:
+            targets.append(f"{C3_OFF_DIR}/{f.rel}")
+        if targets:
+            out.append(dataclasses.replace(f, targets=targets))
+    return others + sorted(out, key=lambda f: f.rel)
+
+
+def c3_summary(files: Sequence[PiFile]) -> str:
+    """"T1 345, T2 410, off-transect 552" for routed C3 files."""
+    counts: dict[str, int] = {}
+    for f in files:
+        if f.category != "c3" or not c3_is_image(f):
+            continue
+        for t in f.targets:
+            if t.startswith(C3_TRANSECTS_DIR + "/"):
+                key = t.split("/")[1]
+            elif t.startswith(C3_OFF_DIR + "/"):
+                key = "off-transect"
+            else:
+                key = "as on the Pi"
+            counts[key] = counts.get(key, 0) + 1
+    order = sorted(counts, key=lambda k: (k == "off-transect", k == "as on the Pi", k))
+    return ", ".join(f"{k} {counts[k]:,}" for k in order)
 
 
 def _same_time(a, b) -> bool:
@@ -1179,6 +1397,8 @@ class TransferReport:
     reasons: dict[str, str] = field(default_factory=dict)
     #: Set when a deletion batch stopped part way, and why.
     stopped: str = ""
+    #: Local copies made -- C3 imagery filed into transect folders as well.
+    copied: int = 0
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     log_path: Path | None = None
@@ -1190,6 +1410,8 @@ class TransferReport:
             bits.append(f"{len(self.skipped)} "
                         + ("already in the flight folder" if self.verb == "downloaded"
                            else "left alone"))
+        if self.copied:
+            bits.append(f"{self.copied:,} copied into transect folders")
         if self.failed:
             bits.append(f"{len(self.failed)} FAILED")
         out = [", ".join(bits)]
@@ -1203,6 +1425,42 @@ class TransferReport:
         if self.log_path:
             out.append(f"  record: {self.log_path}")
         return "\n".join(out)
+
+
+def _copy_locally(f: PiFile, flight_dir: Path, manifest: dict, rep) -> int:
+    """Copy an already-downloaded file to any of its targets that lack it.
+
+    The number of copies made. The manifest's entry gains them, so the file
+    is known to be in each place.
+    """
+    if not f.targets:
+        return 0
+    missing = missing_dests(f, flight_dir)
+    if not missing:
+        return 0
+    entry = manifest.get(f.path) or {}
+    src = _existing_copy(f, flight_dir, entry)
+    if src is None:
+        return 0
+    made = []
+    for d in missing:
+        try:
+            d.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, d)
+            made.append(str(d.relative_to(flight_dir)))
+        except OSError as ex:
+            rep.warnings.append(f"{f.rel}: the copy into {d.parent.name} failed ({ex})")
+    if made and entry:
+        entry = {**entry, "copies": sorted(set(entry.get("copies") or []) | set(made))}
+        try:
+            mpath = Path(flight_dir) / MANIFEST
+            with open(mpath, "a", encoding="utf-8") as mh:
+                mh.write(json.dumps(entry) + "\n")
+                _sync(mh)
+            manifest[f.path] = entry
+        except OSError:
+            pass
+    return len(made)
 
 
 def _accept_growth(host: str, token: str, f: PiFile, arrived: int) -> bool:
@@ -1270,10 +1528,17 @@ def download(files: Sequence[PiFile], flight_dir: Path, host: str, token: str, *
         dest = f.dest_in(flight_dir)
         state = copy_state(f, flight_dir, manifest)
         if state in ("verified", "same size"):
-            rep.skipped.append(f)
-            rep.reasons[f.path] = ("already downloaded and verified" if state == "verified"
-                                   else "already there, same size (not verified)")
-            unverified_skips += state == "same size"
+            # Already here. Filed into transect folders this time? Then the
+            # copy here is copied there, rather than fetched again.
+            made = _copy_locally(f, flight_dir, manifest, rep)
+            if made:
+                rep.copied += made
+            else:
+                rep.skipped.append(f)
+                rep.reasons[f.path] = ("already downloaded and verified"
+                                       if state == "verified"
+                                       else "already there, same size (not verified)")
+                unverified_skips += state == "same size"
             done_bytes += f.size
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1320,7 +1585,18 @@ def download(files: Sequence[PiFile], flight_dir: Path, host: str, token: str, *
             if f.modified:
                 os.utime(dest, (f.modified, f.modified))
             rep.done.append(f)
+            copies = []
+            for other in f.all_dests(flight_dir)[1:]:
+                try:
+                    other.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(dest, other)
+                    copies.append(str(other.relative_to(flight_dir)))
+                    rep.copied += 1
+                except OSError as ex:
+                    rep.warnings.append(f"{f.rel}: downloaded, but the copy into "
+                                        f"{other.parent.name} failed ({ex})")
             entry = {"pi_path": f.path, "local": str(dest.relative_to(flight_dir)),
+                     "copies": copies,
                      "category": f.category, "size": arrived,
                      "listed_size": f.size, "was_growing": grew,
                      "modified": f.modified,

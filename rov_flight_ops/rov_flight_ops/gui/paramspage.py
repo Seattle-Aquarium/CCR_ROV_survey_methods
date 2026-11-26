@@ -52,6 +52,24 @@ FONT_VERDICT = (T.FAMILY_SEMIBOLD, 22)
 FONT_GROUP = (T.FAMILY_SEMIBOLD, 12)
 FONT_NAME = (T.MONO, 11)
 FONT_MARK = ("Segoe UI Symbol", 13)
+FONT_COLHEAD = (T.FAMILY_SEMIBOLD, 11)
+
+#: What the two value columns are called. "ROV" is what the vehicle has now,
+#: read live; "GitHub" is the reference file kept in the repository,
+#: `vehicle_parameters/nereo.params`. Said at the top of every table, because
+#: two columns of numbers side by side do not say which is which.
+HEAD_ROV = "ROV (live)"
+HEAD_REFERENCE = "GitHub reference"
+
+
+def column_heads(what: str = "") -> dict:
+    """The header row for a parameter table: which column is which."""
+    return {"key": ("colhead",), "colhead": True,
+            "cells": [("", FONT_COLHEAD, T.TEXT_MUTED),
+                      ("Parameter", FONT_COLHEAD, T.TEXT_MUTED),
+                      (what, FONT_COLHEAD, T.TEXT_MUTED),
+                      (HEAD_ROV, FONT_COLHEAD, T.HEADING),
+                      (HEAD_REFERENCE, FONT_COLHEAD, T.HEADING)]}
 
 #: (glyph, colour) for each state.
 STATE_MARK = {
@@ -132,6 +150,12 @@ class Table(ctk.CTkFrame):
                         lab.grid(row=grid_row, column=i, sticky="ew",
                                  padx=(0, 8))
                         made["cells"].append(lab)
+                    if r.get("colhead"):
+                        grid_row += 1
+                        ctk.CTkFrame(self, height=1, fg_color=T.BORDER).grid(
+                            row=grid_row, column=0,
+                            columnspan=len(self.widths) + 1, sticky="ew",
+                            pady=(1, 2))
                     if r.get("button"):
                         btn = button(self, "Set", None, "ghost", width=48)
                         btn.configure(height=20, font=T.FONT_SMALL)
@@ -197,8 +221,9 @@ class ParamsPage(ctk.CTkFrame):
 
     def _build_key(self, body) -> None:
         c = Card(body, "1.  Key parameters",
-                 "Vehicle, then reference.   ▲ differs   ◆ set per site   "
-                 "= worked out from the others")
+                 f"{HEAD_ROV}: on the vehicle now.   {HEAD_REFERENCE}: "
+                 f"vehicle_parameters/{VEHICLE.lower()}.params.   ▲ differs   "
+                 f"◆ set per site   = worked out from the others")
         c.grid(row=0, column=0, sticky="ew", pady=(0, T.GAP))
         top = ctk.CTkFrame(c.body, fg_color="transparent")
         top.grid(row=0, column=0, sticky="ew")
@@ -404,7 +429,7 @@ class ParamsPage(ctk.CTkFrame):
                 (r.reference_text, FONT_NAME, T.TEXT_MUTED)]
 
     def _paint_key(self, cmp, writable: bool) -> None:
-        halves: list[list] = [[], []]
+        halves: list[list] = [[column_heads()], [column_heads()]]
         for gi, g in enumerate(cmp.groups):
             rows = halves[0 if gi < KEY_SPLIT else 1]
             n = sum(1 for r in g.rows if r.state in (PC.DIFFERS, PC.MISSING))
@@ -436,7 +461,7 @@ class ParamsPage(ctk.CTkFrame):
                 if r.settable and r.name not in self._confirmed]
 
     def _paint_others(self, cmp, writable: bool) -> None:
-        rows = []
+        rows = [column_heads()] if cmp.others else []
         for r in cmp.others:
             cells = self._row_cells(r)
             rows.append({"key": ("o", r.name),

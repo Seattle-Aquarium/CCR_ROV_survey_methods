@@ -8,6 +8,13 @@ It is read-only until you deliberately unlock it. Nothing on this page sends
 the vehicle anything unless you tick **Allow writes to this vehicle** and then
 confirm a specific change.
 
+> **Since November 2026 the survey plan is on the shelf** ([SHELF.md](SHELF.md)):
+> not shown, but kept and tested, and back with `"unshelve": ["survey_plan"]` in
+> the settings file. The right-hand column is now the heads-up display (altitude,
+> depth, forward, gain, TC-25, volts / amps / watts), the UGPS receivers under it,
+> and navigation readiness below. Everything below about the plan and guidance
+> applies when it is brought back.
+
 ---
 
 ## Contents

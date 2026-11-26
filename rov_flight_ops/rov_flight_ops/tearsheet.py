@@ -260,7 +260,7 @@ def _verdict_strip(pen: _Pen, report: R.DayReport, y: float) -> float:
     monitored = day.monitored_seconds or 1.0
     tiles = [
         ("Armed", R._dur(day.recorded_seconds), brand.SALISH),
-        ("Recorded", f"{day.bytes_recorded / 2 ** 30:.1f} GiB", brand.SALISH),
+        ("Recorded", R.size_text(day.bytes_recorded), brand.SALISH),
         ("Failsafe disarms", str(failsafes),
          brand.CORAL if failsafes else brand.ALGAE),
         ("Link available",
@@ -324,7 +324,7 @@ def _timeline(fig, pen: _Pen, report: R.DayReport, rect) -> None:
     if longest is not None and longest.seconds > (t1 - t0) * 0.25:
         ax.text(longest.start + longest.seconds / 2,
                 rows["Recording"] + height + 0.12,
-                f"{longest.size_bytes / 2 ** 30:.1f} GiB · "
+                f"{R.size_text(longest.size_bytes)} · "
                 f"{longest.seconds / 60:.0f} min · uninterrupted",
                 ha="center", va="bottom", size=7, color=brand.STONE,
                 family=pen.f["body"])

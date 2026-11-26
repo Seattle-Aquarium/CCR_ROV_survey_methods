@@ -193,6 +193,9 @@ class NavCollector:
         #: Parameters, read on the slow cadence by an injected reader.
         self.params: dict[str, float] = {}
         self.params_mono: float | None = None
+        #: How often the parameters are re-read (`logprofile`); None is
+        #: `PARAM_PERIOD_S`. Each re-read is a ranged GET over the tether.
+        self.param_period_s: float | None = None
         self._read_params = None
         #: The in-flight parameter read, so two never overlap.
         self._param_thread: threading.Thread | None = None
@@ -372,7 +375,7 @@ class NavCollector:
             self._next["ext"] = now + EXT_PERIOD_S
             self._read_extensions()
         if now >= self._next["param"] and self._read_params is not None:
-            self._next["param"] = now + PARAM_PERIOD_S
+            self._next["param"] = now + (self.param_period_s or PARAM_PERIOD_S)
             self._refresh_params()
         if fast is None and slow is None:
             return

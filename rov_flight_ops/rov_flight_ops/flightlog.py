@@ -163,9 +163,10 @@ def unique_flight_id(folder: Path, when: float | None = None) -> str:
     carries the id. Every file a flight writes is then opened exclusively, so
     even a race cannot replace an earlier record.
     """
+    from . import logpaths
     base = _stamp(when)
     candidate, n = base, 1
-    while any(Path(folder).glob(f"*_{candidate}.*")):
+    while logpaths.id_taken(Path(folder), candidate):
         n += 1
         candidate = f"{base}-{n}"
     return candidate
@@ -334,6 +335,8 @@ class _Session:
         self.start_snap = Snapshot()
         self.threads: dict[str, threading.Thread] = {}
         self.stuck: list[str] = []
+        #: The logging profile this flight was recorded under.
+        self.profile = ""
 
 
 class FlightRecorder:
@@ -362,6 +365,10 @@ class FlightRecorder:
         #: it runs (the application hands over its DVL capture's). Empty is
         #: `nettrace.DVL_DEFAULT_HOST`.
         self.dvl_host = ""
+        #: How much each flight logs (`logprofile`); None is everything, at
+        #: full rate. Read when a flight starts, so a change applies to the
+        #: next flight rather than splitting one.
+        self.profile = None
 
         self.status = Status()
         #: Half an hour, the longest window the Monitoring charts offer.
@@ -628,6 +635,14 @@ class FlightRecorder:
                                           level=logging.WARNING)
             watch.stop.wait(ARM_POLL_S)
 
+    def _health_period(self) -> float:
+        """How often the Pi's load is read during a flight (`logprofile`)."""
+        return HEALTH_POLL_S if self.profile is None else float(self.profile.pi_health_s)
+
+    def _streams_period(self) -> float:
+        return (STREAM_POLL_S if self.profile is None
+                else float(self.profile.video_streams_s))
+
     def _read_pi(self) -> None:
         vehicle = self._vehicle()
         if vehicle is None:
@@ -645,7 +660,7 @@ class FlightRecorder:
         tether reads. Nothing is asked between flights.
         """
         last_disk = last_streams = 0.0
-        while not watch.stop.wait(HEALTH_POLL_S):
+        while not watch.stop.wait(self._health_period()):
             vehicle = self._vehicle()
             if vehicle is None:
                 last_disk = last_streams = 0.0
@@ -659,7 +674,7 @@ class FlightRecorder:
                     space = blueos.read_space(self.host)
                     vehicle.disk_free_gb = (space.free_bytes / 2 ** 30
                                             if space.found else None)
-                if now - last_streams >= STREAM_POLL_S:
+                if now - last_streams >= self._streams_period():
                     last_streams = now
                     streams = blueos.read_video_streams(self.host, timeout=2.0)
                     (vehicle.stream_count, vehicle.stream_udp,
@@ -829,7 +844,12 @@ class FlightRecorder:
         self.status.problem = ""
         now = time.time()
         stamp = unique_flight_id(folder, now)
-        path = folder / f"laptop_monitor_{stamp}.csv"
+        from . import logpaths
+        try:
+            logpaths.laptop_dir(folder).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        path = logpaths.laptop_dir(folder) / f"laptop_monitor_{stamp}.csv"
         self._serial += 1
         session = _Session(self._serial, stamp, folder, Path(self.flight_dir),
                            self.host, manual)
@@ -910,8 +930,13 @@ class FlightRecorder:
         # its own files. Started after the CSV is open and the state is set, so
         # that a station where it cannot start -- no bridge, no ICMP, a folder
         # that refuses a fourth file -- still records the flight.
-        tracer = nettrace.Tracer(host=self.host, folder=folder, flight_id=stamp,
-                                 dvl_host=self.dvl_host)
+        from . import logpaths
+        prof = self.profile
+        rates = ({} if prof is None else
+                 {"period": prof.net_counters_s, "echo_period": prof.net_ping_s})
+        tracer = nettrace.Tracer(host=self.host, folder=logpaths.network_dir(folder),
+                                 flight_id=stamp, dvl_host=self.dvl_host, **rates)
+        session.profile = prof.key if prof is not None else "intensive"
         try:
             if tracer.start():
                 session.tracer = tracer
@@ -1218,7 +1243,7 @@ class FlightRecorder:
             "rows": session.rows,
             "sample_period_s": laptop.DEFAULT_PERIOD_S,
             "disarm_grace_s": DISARM_GRACE_S,
-            "csv": f"laptop_monitor_{stamp}.csv",
+            "csv": f"laptop/laptop_monitor_{stamp}.csv",
             "columns": list(laptop.COLUMNS),
             "units": laptop.UNITS,
         }
@@ -1254,7 +1279,8 @@ class FlightRecorder:
                 network=self._network_summary(session),
                 site=Path(dir_).name if dir_ else "",
                 previous=previous,
-                note=note,
+                note="; ".join(n for n in (note, f"logging profile: {session.profile}")
+                               if n) if session.profile else note,
             )
             flightfile.write(folder, record)
             self._record = record
@@ -1263,8 +1289,11 @@ class FlightRecorder:
             diagnostics.log_exception("writing the flight record", *sys.exc_info())
 
     def _write_network_report(self, session: _Session) -> None:
+        from . import logpaths
         try:
-            (session.folder / f"network_topside_{session.flight_id}.txt").write_text(
+            folder = logpaths.network_dir(session.folder)
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"network_topside_{session.flight_id}.txt").write_text(
                 netdiag.report(session.host), encoding="utf-8")
         except Exception:
             pass

@@ -5,6 +5,8 @@ The going-forward convention is::
 
     <flight>/
         logs/          *.mcap  (or logs/mcap/*.mcap, where downloads land)
+                       *.tlog  (logs/tlog/*.tlog) -- BlueOS before 1.5
+                       *.BIN   (logs/BIN/*.BIN)   -- always, from the autopilot
         photos/
         videos/
             downward/  GoPro MP4s  <- what we composite
@@ -50,6 +52,16 @@ _EXCLUDE_PARTS = ("forward", "composites", "composite", "archive", "gpr",
 #: logs/mcap first: it is where ROV Flight Operations downloads recordings to.
 _MCAP_DIRS = ("logs/mcap", "logs", "log", "", "mcap", "telemetry")
 
+#: Where telemetry logs from BlueOS before 1.5 land. BlueOS 1.5 records mcaps;
+#: 1.4 and earlier have the MAVLink router write .tlog files instead -- the
+#: same MAVLink messages without the video -- and the team flies whichever
+#: release is behaving. Either is a flight's telemetry.
+_TLOG_DIRS = ("logs/tlog", "logs", "log", "", "tlog", "telemetry")
+
+#: The autopilot's own dataflash logs, which are always there whatever BlueOS
+#: recorded: the backup when the router or recorder failed.
+_BIN_DIRS = ("logs/BIN", "logs/bin", "logs")
+
 # GoPro chaptered naming: GX<chapter><fileno>.MP4, e.g. GX014075 -> file 4075 ch 1
 _GOPRO_RE = re.compile(r"^(G[XHOPL])(\d{2})(\d{4})$", re.IGNORECASE)
 
@@ -70,6 +82,10 @@ class Discovery:
     root: Path
     mcaps: list[Path] = field(default_factory=list)
     videos: list[VideoChapter] = field(default_factory=list)
+    #: .tlog telemetry (BlueOS before 1.5), and the autopilot's .BIN logs.
+    tlogs: list[Path] = field(default_factory=list)
+    bins: list[Path] = field(default_factory=list)
+    tlog_dir: Path | None = None
     mcap_dir: Path | None = None
     video_dir: Path | None = None
     logs_dir: Path | None = None
@@ -85,12 +101,30 @@ class Discovery:
     def video_paths(self) -> list[Path]:
         return [v.path for v in self.videos]
 
+    @property
+    def telemetry(self) -> list[Path]:
+        """The flight's MAVLink telemetry: its mcaps if it has any, else its
+        tlogs. A folder holding both is read from the mcaps, which carry the
+        same messages and the video besides."""
+        return list(self.mcaps) if self.mcaps else list(self.tlogs)
+
+    @property
+    def telemetry_kind(self) -> str:
+        """"mcap", "tlog", or "" when the folder has neither."""
+        return "mcap" if self.mcaps else "tlog" if self.tlogs else ""
+
     def summary(self) -> str:
         lines = [f"Flight folder: {self.root}"]
         lines.append(f"  mcap   : {len(self.mcaps)} file(s)"
                      + (f" in {self._rel(self.mcap_dir)}" if self.mcap_dir else ""))
         for m in self.mcaps:
             lines.append(f"           {m.name}  ({m.stat().st_size / 1e9:.2f} GB)")
+        if self.tlogs or not self.mcaps:
+            lines.append(f"  tlog   : {len(self.tlogs)} file(s)"
+                         + (f" in {self._rel(self.tlog_dir)}" if self.tlog_dir else ""))
+            for m in self.tlogs[:8]:
+                lines.append(f"           {m.name}  ({m.stat().st_size / 1e6:.0f} MB)")
+        lines.append(f"  BIN    : {len(self.bins)} autopilot log(s)")
         lines.append(f"  video  : {len(self.videos)} file(s)"
                      + (f" in {self._rel(self.video_dir)}" if self.video_dir else ""))
         for v in self.videos:
@@ -223,6 +257,37 @@ def _find_mcaps(root: Path, disc: Discovery) -> None:
         disc.warnings.append("mcap located by a recursive search")
 
 
+def _find_tlogs(root: Path, disc: Discovery) -> None:
+    for rel in _TLOG_DIRS:
+        d = (root / rel) if rel else root
+        if not d.is_dir():
+            continue
+        hits = sorted(p for p in d.glob("*.tlog") if p.is_file())
+        if hits:
+            disc.tlogs = hits
+            disc.tlog_dir = d
+            return
+    logs = root / "logs"
+    if logs.is_dir():
+        # BlueOS keeps tlogs in dated subfolders; a hand copy may keep them.
+        hits = sorted(p for p in logs.rglob("*.tlog") if p.is_file())
+        if hits:
+            disc.tlogs = hits
+            disc.tlog_dir = hits[0].parent
+
+
+def _find_bins(root: Path, disc: Discovery) -> None:
+    for rel in _BIN_DIRS:
+        d = root / rel
+        if not d.is_dir():
+            continue
+        hits = sorted(p for p in d.iterdir()
+                      if p.is_file() and p.suffix.lower() == ".bin")
+        if hits:
+            disc.bins = hits
+            return
+
+
 def discover(root: str | Path) -> Discovery:
     """Scan a flight folder. Never raises for missing inputs -- the caller
     inspects `ok`, `notes` and `warnings` and shows them to the user."""
@@ -243,10 +308,16 @@ def discover(root: str | Path) -> Discovery:
             break
 
     _find_mcaps(root, disc)
+    _find_tlogs(root, disc)
+    _find_bins(root, disc)
     _find_videos(root, disc)
 
-    if not disc.mcaps:
-        disc.warnings.append("no .mcap telemetry found")
+    if not disc.mcaps and not disc.tlogs:
+        disc.warnings.append("no .mcap or .tlog telemetry found"
+                             + (" -- only the autopilot's .BIN logs" if disc.bins else ""))
+    elif not disc.mcaps:
+        disc.notes.append(f"telemetry is {len(disc.tlogs)} .tlog file(s) "
+                          f"(BlueOS before 1.5), with no video inside them")
     if not disc.videos:
         disc.warnings.append("no downward GoPro video found")
 

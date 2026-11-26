@@ -49,7 +49,11 @@ def telemetry_csv_for(flight_dir: Path, cache_root: Path) -> tuple[Path | None, 
     if over:
         return Path(over["csv"]), f"{Path(over['source']).name} (autopilot log)"
     csv = cache / "telemetry.csv"
-    return (csv, "mcap") if csv.is_file() else (None, "none")
+    if csv.is_file():
+        return csv, "mcap"
+    from .tlog_extract import TLOG_CSV, TLOG_MARKER
+    tl = cache / TLOG_CSV
+    return (tl, "tlog") if tl.is_file() and (cache / TLOG_MARKER).is_file() else (None, "none")
 
 
 def ensure_telemetry(
@@ -61,10 +65,12 @@ def ensure_telemetry(
     force: bool = False,
     cancel=None,
 ) -> tuple[TelemetryStore, list[str]]:
-    """Telemetry for a flight, reading its mcap only if the cache is cold.
+    """Telemetry for a flight, reading its recordings only if the cache is cold.
 
-    Returns (store, warnings). Raises if there is no mcap to read, and
-    `mcap_extract.ExtractionCancelled` if `cancel` is set part way.
+    The recordings are the flight's mcaps (BlueOS 1.5) or, failing those, its
+    tlogs (BlueOS 1.4 and earlier, whose router writes a .tlog instead).
+    Returns (store, warnings). Raises FileNotFoundError if there is neither,
+    and `mcap_extract.ExtractionCancelled` if `cancel` is set part way.
     """
     app = app or AppConfig()
 
@@ -82,10 +88,13 @@ def ensure_telemetry(
         return TelemetryStore.load(over["csv"]), [note]
 
     disc = discovery.discover(flight_dir)
+    if not disc.mcaps and disc.tlogs:
+        return _ensure_from_tlogs(disc.tlogs, cache, windows, progress, force, cancel)
     if not disc.mcaps:
         raise FileNotFoundError(
-            f"No .mcap telemetry found in {flight_dir}. Download the recordings "
-            f"on BlueOS logs, or put them in the flight's logs/mcap folder."
+            f"No .mcap or .tlog telemetry found in {flight_dir}. Download the "
+            f"recordings on BlueOS logs (mcap on BlueOS 1.5, tlog on 1.4), or "
+            f"put them in the flight's logs/mcap or logs/tlog folder."
         )
 
     # Narrow to the recordings that actually cover the work before insisting
@@ -109,6 +118,31 @@ def ensure_telemetry(
     ex = mcap_extract.extract(chosen, cache, progress=progress, force=force,
                               cancel=cancel)
     return TelemetryStore.load(ex.telemetry_csv), warnings + list(ex.warnings)
+
+
+def _ensure_from_tlogs(tlogs, cache: Path, windows, progress, force, cancel
+                       ) -> tuple[TelemetryStore, list[str]]:
+    """The tlog half of `ensure_telemetry`: the same narrowing, the same cache
+    discipline, the same long-format CSV."""
+    from . import tlog_extract
+
+    warnings: list[str] = []
+    chosen = list(tlogs)
+    if windows:
+        chosen, _skipped, warns = tlog_extract.select_for_windows(chosen, windows)
+        warnings.extend(warns)
+        if not chosen:
+            raise FileNotFoundError(
+                "None of the tlogs in logs/tlog overlap the transect times. "
+                "Check the times, or that the right tlog was downloaded.")
+    blocked = discovery.check_local(chosen)
+    if blocked:
+        raise RuntimeError("\n".join(blocked))
+    ex = tlog_extract.extract(chosen, cache, progress=progress, force=force,
+                              cancel=cancel)
+    return (TelemetryStore.load(ex.telemetry_csv),
+            warnings + ["read from the tlog(s): "
+                        + ", ".join(p.name for p in ex.tlogs)] + list(ex.warnings))
 
 
 def plan_windows(plan: SurveyPlan, *, exclude_pauses: bool = False

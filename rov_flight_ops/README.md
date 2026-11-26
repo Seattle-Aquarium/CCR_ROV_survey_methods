@@ -22,8 +22,9 @@ theme, the survey plan, the telemetry reader…) each folder has its own copy.
 Each has its own launcher and its own Python environment, so updating one can
 never break another. Two things are deliberately *not* separate:
 
-* the **transect extractor** in `../mcap_to_csv`, which *Analyze transects*
-  needs and the launcher installs from the repository, and
+* the **transect extractor** in `../mcap_to_csv`, which makes the 1 Hz
+  transect CSVs after a download on *BlueOS logs* and which the launcher
+  installs from the repository, and
 * the **telemetry cache** in `%LOCALAPPDATA%\utc_cache`, shared on purpose (see
   [Settings and cache](#settings-and-cache)).
 
@@ -76,8 +77,8 @@ tidiness it must not lose in diagnosability, so:
 Anything that goes wrong once the window is up is in the diagnostics log
 either way — see [Diagnostics](#diagnostics-and-reporting-a-problem).
 
-The *Analyze transects* tab also uses the transect extractor in
-`../mcap_to_csv`; the launcher installs it, and stops with an error if that
+*BlueOS logs* also uses the transect extractor in `../mcap_to_csv`, for the
+1 Hz transect CSVs; the launcher installs it, and stops with an error if that
 install fails rather than leaving a program that cannot extract transects.
 
 The launcher installs the dependency versions in **`constraints.txt`** — the set
@@ -216,8 +217,9 @@ in purple; everything else, lamps included, looks as it would on a real flight.
 * **Transects** has the lanes flown as transects and draws their dive
   profile; **BlueOS logs** lists a simulated Pi (downloads are described, not
   made; deleting is refused because the simulated ROV is armed).
-* **Flight summary** and **Analyze transects** read recordings already on disk
-  and are not simulated; each says so.
+* **Flight summary** and **Analyze transects** are on the shelf (see
+  [SHELF.md](SHELF.md)); brought back, they read recordings already on disk
+  and are not simulated, and each says so.
 
 **Faults.** Every 45 s: 30 s with one thing wrong on each live tab — and one
 reading in every Monitoring group — then 15 s all green, then the next. The
@@ -235,6 +237,54 @@ watching underneath), the transects, the survey plan and the banner's versions.
 
 ---
 
+## What changed in late November 2026
+
+From a day of trial and error on the field laptop with the BlueOS 1.4 vehicle:
+
+* **tlogs are read wherever mcaps were.** BlueOS 1.5 records mcaps; the team
+  stepped back to 1.4, whose MAVLink router writes `.tlog` files instead. The
+  transect preview, the flight report and the 1 Hz transect CSVs now read
+  either, and the `.BIN` logs — which are always there — are the backup and
+  the check. See [What the vehicle records](#what-the-vehicle-records-mcap-or-tlog).
+* **Monitoring says what the vehicle will record** — its BlueOS version, mcap
+  or tlog, and whether the MAVLink router is one that writes tlogs — and can
+  switch the router, disarmed only.
+* **Logging profiles**: *Standard* while the vehicle works, *Intensive* to
+  chase a fault ([below](#logging-standard-or-intensive)).
+* **Logs are filed in subfolders**: `logs/laptop/`, `logs/network/`,
+  `logs/navigation/`, beside the existing `dvl/` and `ugps/`.
+* **Navigation**: the flight numbers are the heads-up display at the top right,
+  the UGPS receivers under them, navigation readiness below.
+* **Parameters**: each table's columns are headed *ROV (live)* and *GitHub
+  reference*.
+* **BlueOS logs**: C3 imagery can be filed by transect as it downloads; the 1 Hz
+  transect CSVs are made and the flight report built and opened once the
+  download is done — before the vehicle is switched off.
+* **On the shelf** ([SHELF.md](SHELF.md)): the Survey plan, the Flight summary
+  tab and the Analyze transects tab — kept, tested, and one settings line from
+  coming back.
+
+### What the vehicle records: mcap or tlog
+
+| BlueOS | records | where on the Pi | needs |
+|---|---|---|---|
+| 1.5 | an **mcap** per armed period, with video | `/usr/blueos/userdata/recorder` | its recorder |
+| 1.4 and earlier | a **tlog** per power-up, no video | `/ardupilot_logs/logs` | the **MAVLinkRouter** router (MAVProxy also writes tlogs). MAVLink-Server and MAVP2P write none; from 1.4.8 the router's *tlog mode* must not be off |
+| any | the autopilot's **.BIN** dataflash logs | `/ardupilot_logs/firmware/logs` | nothing: the autopilot writes them itself |
+
+BlueOS keeps the router setting across a change of release, so a vehicle
+stepped back from 1.5 (commonly on MAVLink-Server) to 1.4 records **nothing**
+until the router is changed. The first line of *System at a glance* catches
+that (below), and the BlueOS logs tab ticks mcap or tlog to match the vehicle.
+
+A tlog runs from power-up to power-down through every arming, where an mcap is
+one armed period; the flight report cuts each tlog into its armed periods, so
+its disarm analysis reads the same either way. A tlog that ends while still
+armed — the vehicle lost power, or it was copied while still being written — is
+reported as not closed, as an mcap the vehicle never closed is.
+
+---
+
 ## 1  Monitoring
 
 Where the operator sits *before* a flight — what is connected, the flight
@@ -243,7 +293,21 @@ During the flight itself, see [3 Navigation](#3--navigation).
 
 ### 1. System at a glance
 
-Every part that has to work, one line each in two columns, judged from what
+**First line: what this flight will be recorded as.** Read from the vehicle
+every 30 s before a flight (every two minutes during one): its BlueOS version,
+whether that release records mcaps or tlogs, the MAVLink router (and its tlog
+mode where BlueOS has one), and the newest recording of that kind with whether
+it is still growing — *Recording: BlueOS 1.4.6 → records tlogs · router
+MAVLinkRouter · newest 00044-….tlog, growing*. When a 1.4 vehicle's router
+writes no tlogs the line turns red and a **Switch to MAVLinkRouter** button
+appears: it asks first, refuses unless a *current* heartbeat confirms the ROV
+is disarmed, posts BlueOS's own *preferred router* setting (what its MAVLink
+page does), and reads the router back. MAVLink drops for a few seconds while the
+router restarts; Cockpit and QGC reconnect on their own. It is the third module
+allowed to send the vehicle anything but a GET (`recordingsetup.py`), and the
+test that holds that list names it.
+
+Then every part that has to work, one line each in two columns, judged from what
 the program already reads: the vehicle link, the Navigator, the depth sensor,
 the EKF, the DVL, the topside GNSS compass, the UGPS G2 box, its four antenna
 receivers (a mark for each), the U1 locator, the leak sensors, the tether, the topside
@@ -332,10 +396,42 @@ forward:
 | `battery_discharge_w`, `ethernet_connected`, `ethernet_link_speed_mbps` | 0.2 Hz (every 5 s) |
 | `rov_arp_ok` | 0.1 Hz (every 10 s) |
 
-**Faster than 1 Hz:** while a flight records, the tether is also traced at
-**10 Hz** (adapter counters, `logs/network_fast_*.csv`) and **5 Hz** (pings with
-their status codes, `logs/network_pings_*.csv`). Those are written for reading
-afterwards and are not drawn live.
+**The network trace:** while a flight records, the tether is also traced —
+adapter counters (`logs/network/network_fast_*.csv`) and pings with their
+status codes (`logs/network/network_pings_*.csv`) — at 1 Hz each under
+*Standard* logging, 10 Hz and 5 Hz under *Intensive*. Those are written for
+reading afterwards and are not drawn live.
+
+### Logging: Standard or Intensive
+
+The **Logging** line of the *Flight* card. Most of what this program records
+was built to find specific faults — the DVL "drops", the Pi's Ethernet outages,
+video that reached the laptop but not Cockpit. Logging all of it on every
+flight cost disk (a 1.7-hour test on 24 November wrote 532 MB of DVL capture,
+390 MB of it echo snapshots), the tether and the DVL (five echo and five
+spectrum requests a second), the Pi (status polls every two seconds) and the
+laptop. **Standard** (the default) keeps everything a flight's record and its
+report rest on, cheaply; **Intensive** is every recorder at full rate, as it
+was before.
+
+| what | Standard | Intensive |
+|---|---|---|
+| laptop monitor (Live monitoring), flight record, report | 1 Hz, yes | 1 Hz, yes |
+| network: pings / adapter counters | 1 Hz / 1 Hz | 5 Hz / 10 Hz |
+| DVL: every velocity and dead-reckoning report, as CSV | yes | yes |
+| DVL: byte-exact TCP stream and its index | no | yes |
+| DVL: the web GUI's stream (orientation 10 Hz) | no | yes |
+| DVL: echo and spectrum snapshots | off | 5 a second (the DVL tab's choice) |
+| DVL: status / extension polls; raw HTTP replies | 10 s; no | 2 s; yes |
+| UGPS: each receiver, filtered / raw acoustic and HTTP | 1 Hz / no | 4 Hz / yes |
+| Pi load / video streams polled during a flight | 15 s / 2 min | 5 s / 30 s |
+| Navigation's parameter re-read (a ranged GET on the tether) | 10 min | 2 min |
+
+The DVL and UGPS captures switch at once — each closes its files and opens a
+new capture under the new profile, so a capture's record names one profile.
+The flight recorder and network trace switch at the next flight, so one flight
+is never logged at two rates; its record notes the profile. The whole table is
+in `logprofile.py`.
 
 The chart windows are 2, 10 and 30 minutes; the history kept for drawing now
 covers the full 30.
@@ -397,8 +493,8 @@ vehicle's* writes the parameters as they are now into the flight folder's
 
 ## 3  Navigation
 
-Where the survey is planned and flown: a live map, the plan drawn on it, and
-the navigation diagnostics. This is the page the operator sits in front of for
+Where the survey is flown: a live map, the heads-up display, and the
+navigation diagnostics. This is the page the operator sits in front of for
 the whole dive — Cockpit is on the monitor above it and has the forward camera,
 and on a survey flown 0.8 m off the bottom in low visibility the numbers here
 matter more to the pilot than the picture does.
@@ -410,10 +506,11 @@ pier alike. (Outside the brand palette on purpose: they have to be found
 instantly.) What a stretch of the ROV's track rested on is in its pattern —
 see NAVIGATION.md.
 
-Under the map, one row of plain numbers big enough to read at a glance, in
-three groups: **altitude** above the bottom with Surftrak's setpoint under it
-(*no lock* when the DVL has lost the bottom), **depth**, **forward** speed
-along the heading and the pilot's **gain**; in the middle **TC-25**, the time
+**The heads-up display heads the right-hand column**: plain numbers big
+enough to read at a glance, in two rows — **altitude** above the bottom with
+Surftrak's setpoint under it (*no lock* when the DVL has lost the bottom),
+**depth**, **forward** speed along the heading and the pilot's **gain**; then
+**TC-25**, the time
 the transects are written in; and **volts, amps, watts**. A stale value is
 drawn muted; a missing one is a dash, never a zero.
 
@@ -439,15 +536,11 @@ source, the compatibility matrix and a bench checklist. In outline:
   Past a layer's top zoom the view is enlarged rather than blanked, and says
   so; with no tiles at all it falls back to a meter grid rather than to
   nothing;
-* an **interactive survey plan**: measured lines and polylines ("30.0 m at
-  125°T", either endpoint held), rectangles at any rotation with live L × W and
-  area, survey grids whose lanes are clipped to the box with a documented
-  edge-offset rule, circles and polygons — all in meters taken from the
-  geometry, never from pixels, with undo, snapping and GeoJSON export;
-* **live guidance** along a selected line or lane: cross-track relative to the
-  line's own direction of travel rather than the bow, along-track progress as a
-  projection rather than distance flown, and no arrival claimed from a position
-  that is not current;
+* *(on the shelf — [SHELF.md](SHELF.md))* an **interactive survey plan**:
+  measured lines and polylines, rotated rectangles, survey grids, circles and
+  polygons in meters, with undo, snapping and GeoJSON export, and **live
+  guidance** along a selected line or lane. Shelved, its card, the drawing tools
+  and the strip's guidance cell are not shown;
 * a **navigation readiness** panel whose sensor matrix answers four separate
   questions per source — *configured*, *receiving*, *valid* and **fused** —
   because a source can be the first three and not the fourth, which is exactly
@@ -462,7 +555,7 @@ source, the compatibility matrix and a bench checklist. In outline:
   and refused while the vehicle is armed;
 * **EKF origin** setup, which is what makes a DVL-only dive have coordinates at
   all;
-* a **UGPS receivers** row under the map: each of the G2 antenna's four
+* a **UGPS receivers** row directly under the heads-up display: each of the G2 antenna's four
   receivers' signal-to-noise and noise floor over the last minute, with a
   sparkline, and a line saying whether any receiver stands out from the other
   three (low SNR, noisy, or dropping out). It is read straight from the G2
@@ -585,8 +678,8 @@ before anything is downloaded.** *Read from*:
 
 * **Automatic** (default) — the flight folder if it has what is needed,
   otherwise the vehicle.
-* **Flight folder** — the recordings in `logs/mcap` (or `logs`), or failing
-  those an autopilot log in `logs/BIN`.
+* **Flight folder** — the recordings: mcaps in `logs/mcap` (BlueOS 1.5) or
+  tlogs in `logs/tlog` (1.4), or failing those an autopilot log in `logs/BIN`.
 * **Vehicle** — the autopilot's own dataflash log (`.BIN`) straight off the Pi.
 
 Why the `.BIN` and not the mcap from the vehicle: the mcaps on the Pi carry
@@ -612,10 +705,9 @@ off it.
 
 Tick the file types, then **Search for files**:
 
-The types are in the order a survey day reaches for them — mcap and BIN come
-down after every flight without anyone thinking about it, C3 imagery and video
-are the next most likely, and tlog is last because the BlueOS releases we fly
-no longer write one at all:
+The types are in the order a survey day reaches for them. Until a type is
+ticked by hand, the ticks follow the vehicle: **tlog and BIN** on BlueOS 1.4,
+**mcap and BIN** on 1.5 (read on Monitoring):
 
 | type | on the vehicle (BlueOS File Browser path) | downloads to |
 |---|---|---|
@@ -623,7 +715,7 @@ no longer write one at all:
 | **BIN** — the autopilot's dataflash logs | `/ardupilot_logs/firmware/logs/*.BIN` | `logs/BIN/` |
 | **C3 imagery** — MarineSitu C3 via Madrona | the folder chosen in Madrona (see below) | `photos/C3/` (left/, right/, center/, calibration) |
 | **video** — the forward camera, extracted | `…/recorder/<recording>/*.mp4` | `logs/mcap_video/<recording>/` |
-| **tlog** — older BlueOS releases only | `/ardupilot_logs/logs/**/*.tlog` | `logs/tlog/` |
+| **tlog** — BlueOS 1.4 and earlier | `/ardupilot_logs/logs/**/*.tlog` | `logs/tlog/` |
 
 **video** is the same stream that is also inside the mcap. It is called just
 *video* here because on this page it is a file type to tick, and "mcap video"
@@ -730,8 +822,37 @@ recorded — vehicle path, size, time and SHA-256 — in
 there and the same size are skipped, and a skipped file that was not verified
 is reported as such. The drive is checked first (free space; a FAT32 drive
 refused for files of 4 GiB or more). Nothing on the vehicle is changed. After a
-download the flight folder is re-read, so Flight summary and Analyze transects
-see the new recordings straight away.
+download the flight folder is re-read, so the preview sees the new recordings
+straight away.
+
+**C3 imagery, by transect.** Each image is timed by the UTC stamp Madrona puts
+in its name (`snapshot-2026-11-24-21-19-48-568789.jpg`), against the transects
+saved on the Transects tab (pauses do not take imagery out of a transect —
+photogrammetry wants the coverage). Three ways to file it:
+
+| C3 imagery | what comes down | where |
+|---|---|---|
+| *All, plus a copy in each transect folder* (default) | everything | `photos/C3/` as on the Pi, and each image of a transect also in `photos/C3/transects/T1/`… |
+| *Transect folders only* | only images inside a transect; the rest stay on the Pi | `photos/C3/transects/T1/`… |
+| *Transect folders + off_transect* | everything | `photos/C3/transects/T1/`…, the rest in `photos/C3/off_transect/` |
+
+Each transect folder is complete on its own: the calibration file, `left/`,
+`right/`, `center/`. An image already downloaded is copied, not fetched again,
+and the download record notes every copy, so the list still calls it
+*verified* wherever it was filed.
+
+**After downloading** — once every file is down and none failed, in one
+background job:
+
+* **1 Hz transect CSVs** (`transects/T1.csv`…, and a map), from the mcaps or
+  tlogs, with the tide station chosen beside the box (*Skip the tide lookup*
+  leaves `Depth_std` blank). The log then says, per transect, how much of it the
+  recordings cover and whether a `.BIN` covers it too — a transect the
+  recordings missed but a BIN has is the case the BIN exists for.
+* **Flight report** — the same PDF *Read the day* built, into the flight's
+  `logs/`, opened when it is done so it can be read before disconnecting. Its
+  headline and worst findings go to the log. **Build the report now** builds it
+  without downloading.
 
 **Clean the Pi** deletes from the vehicle, and it cannot be undone. It is guarded:
 
@@ -771,13 +892,13 @@ module issues read-only GETs, and a test fails if a write appears anywhere else.
 
 ---
 
-## 7  Flight summary
+## The flight report
 
-**Read the day** builds the flight report (PDF) from everything in the flight's
-`logs`; **Recordings / What the check found / Autopilot logs / Transects** are
-UTC's *Recording health* — damage checks, repaired copies, and using a `.BIN`
-for telemetry when an mcap failed. It finds recordings in `logs/mcap` as well as
-`logs`.
+Built after a download on BlueOS logs (or by **Build the report now** there),
+from everything in the flight's `logs`: the vehicle's recordings — mcaps, or
+tlogs cut into one recording per armed period — the topside monitor, the
+network trace and the flight records. *Flight summary*, the tab that used to
+hold it, is on the shelf with its recording-health tools ([SHELF.md](SHELF.md)).
 
 How a recording's ending is described is limited to what the logs show:
 
@@ -791,10 +912,12 @@ How a recording's ending is described is limited to what the logs show:
 * **unexplained** — anything else, including a recording the vehicle never
   closed, where an interrupted recorder and a disarm look alike.
 
-## 8  Analyze transects
+## The 1 Hz transect CSVs
 
-Unchanged from UTC for now: per-transect CSVs (with tide-corrected depth) and a
-map via the transect extractor, and a sensor-health report.
+Made after a download on BlueOS logs (`transectcsv.py`): per-transect CSVs (with
+tide-corrected depth) and a map via the transect extractor. *Analyze transects*,
+the tab that used to make them, is on the shelf with its sensor-health report
+([SHELF.md](SHELF.md)).
 
 **Fallback: dead reckoning from the vehicle's own origin.** `DVLlat`/`DVLlon`
 are normally seeded from the dive's first GPS or EKF fix. When a dive has
@@ -826,14 +949,25 @@ vehicle's SD card.
         mcap/                    recordings downloaded from the Pi
         mcap_video/<recording>/  the forward camera, extracted by BlueOS
         BIN/                     autopilot dataflash logs
-        tlog/                    telemetry logs (older BlueOS)
-        laptop_monitor_*.csv     the topside, 1 Hz        } written by the
-        network_fast_*.csv       adapter counters, 10 Hz  } flight recorder
-        network_pings_*.csv      pings, 5 Hz              } during each flight
-        network_topside_*.txt    the network at arming    }
-        flight_*.json            parameters, versions, video streams and what changed
-        pi_downloads.jsonl       every download: source, size, time, SHA-256
+        tlog/                    telemetry logs (BlueOS 1.4 and earlier)
+        flight_*.json            parameters, versions, video streams and what
+                                 changed, the logging profile: each flight's index
+        operator_marks.txt       what the operator noted, as it happened
+        pi_downloads.jsonl       every download: source, size, time, SHA-256,
+                                 and every copy into a transect folder
         pi_cleanup_*.txt         what Clean the Pi approved, deleted and kept
+        flight_report_*.pdf      the flight report, built after a download
+        laptop/
+            laptop_monitor_*.csv the topside, 1 Hz, written during each flight
+        network/
+            network_fast_*.csv   adapter counters  } the network trace, during
+            network_pings_*.csv  pings              } each flight (1 Hz each on
+            network_events_*.txt transitions        } Standard logging; 10 Hz
+            network_trace_*.json its record         } and 5 Hz on Intensive)
+            network_topside_*.txt the network at arming
+            network_check_*.txt  Monitoring → Check the network → Save
+        navigation/
+            nav_<id>.json/.jsonl the Navigation tab's session log
         dvl/
             dvl_<id>_*           one DVL capture, from folder chosen to program
                                  closed: the raw streams, a CSV per report type,
@@ -847,9 +981,16 @@ vehicle's SD card.
                                  (specifications/ugps_log_schema.md)
             pi/<date>/           the WL UGPS External extension's own logs,
                                  from BlueOS logs → UGPS logs
+    transects/                   the 1 Hz transect CSVs and their map
     photos/
         C3/                      C3 imagery from the Pi (left/, right/, center/, calibration)
+            transects/T1/ ...    the same, filed by transect (calibration, left/,
+                                 right/, center/ in each)
+            off_transect/        images outside every transect, if asked for
 ```
+
+Before November 2026 the laptop, network and navigation files sat loose in
+`logs/`; flights filed that way are read exactly as before (`logpaths.py`).
 
 Flight files are named by flight ID — `laptop_monitor_2026-09-16_104512.csv` —
 and older flights named to the minute (`…_1045.csv`) are still read and linked.
@@ -936,7 +1077,14 @@ the tests; each wants one look at the real thing:
 - [ ] **C3 folder** — does the search find Madrona's folder? If not, type it in
       (File Browser path) and confirm left/right/center + calibration list.
 - [ ] **mcap video** — are the extracted MP4s in `recorder/<recording>/`?
-- [ ] **tlog** — expected absent on current BlueOS (the list says so); fine.
+- [ ] **tlog / router** — on BlueOS 1.4, Monitoring's first line should read
+      *records tlogs · router MAVLinkRouter · newest …tlog, growing*. Set the
+      router to MAVLink-Server in BlueOS once, disarmed, and confirm the line
+      turns red and *Switch to MAVLinkRouter* puts it back (MAVLink drops for a
+      few seconds); a new tlog should appear under `/ardupilot_logs/logs`.
+- [ ] **After downloading** — download *This flight* with C3 imagery and the
+      transects saved: `photos/C3/transects/T1/` holds calibration + left/right/
+      center, `transects/T1.csv` is written, and the flight report opens.
 - [ ] **Clean the Pi** — delete one old, already-downloaded file; confirm it is
       gone in BlueOS's File Browser and the record file is written. Then arm the
       vehicle and confirm the delete is refused.
@@ -986,7 +1134,7 @@ rov_flight_ops/
                              invariants, diagnosis guide, provenance, bench checklist
     rov_flight_ops/          the package
         gui/
-            app.py           the window and its eight tabs
+            app.py           the window and its six tabs (two more on the shelf)
             shell.py         banner fold, tabs (parked off-screen when hidden), the footer
             widgets.py       cards, one-window labels, resize grips, site/transect editors
             theme.py         colours, type, and the compact / comfortable density
@@ -1006,8 +1154,8 @@ rov_flight_ops/
             dvlpage.py       DVL tab: stream health, the beams, echo and spectrum, live charts
             transectsetup.py Transects tab
             logspage.py      BlueOS logs tab
-            summarypage.py, healthpage.py   Flight summary
-            transectpage.py  Analyze transects
+            summarypage.py, healthpage.py   Flight summary (on the shelf)
+            transectpage.py  Analyze transects (on the shelf)
         nav/                 Navigation, everything that is not a widget
             model.py         the typed reading -- unknown is never zero
             mav2rest.py      live MAVLink, and why an HTTP 200 proves nothing
@@ -1042,6 +1190,12 @@ rov_flight_ops/
         diagnostics.py       app.log, faults.log, stall watchdog (same file as imagery's copy)
         previewsource.py     where the transect preview's depth comes from
         telemetry_cache.py   the telemetry reader (the flight-ops part of UTC's pipeline)
+        recordingsetup.py    what BlueOS will record (mcap or tlog), the router check and switch
+        tlog_extract.py      tlogs into the same telemetry CSV as an mcap
+        transectcsv.py       the 1 Hz transect CSVs, after a download
+        logprofile.py        Standard and Intensive logging
+        logpaths.py          laptop/, network/, navigation/ inside logs/
+        shelf.py             what is built but not shown (SHELF.md)
         blueos.py, flightlog.py, laptop.py, netdiag.py, nettrace.py, ...
     tests/
 ```

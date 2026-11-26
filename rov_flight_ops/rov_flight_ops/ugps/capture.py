@@ -226,7 +226,10 @@ class UgpsCapture:
     flight folder is set."""
 
     def __init__(self, host: str = g2.DEFAULT_HOST, *, flight_id=None,
-                 timeout: float = TIMEOUT_S) -> None:
+                 timeout: float = TIMEOUT_S, profile=None) -> None:
+        #: How much is written (`logprofile`); None is everything.
+        self.profile = profile
+        self._profile_changed = False
         self.flight_id = flight_id or (lambda: "")
         self.timeout = timeout
         self._lock = threading.Lock()
@@ -273,6 +276,24 @@ class UgpsCapture:
             self._stop.clear()
             self._thread = threading.Thread(target=self._run, daemon=True, name="ugps")
             self._thread.start()
+
+    def set_profile(self, profile) -> None:
+        """Change how much is logged. A capture being written is closed and a
+        new one opened in the same folder, so each record names one profile."""
+        with self._lock:
+            if profile == self.profile:
+                return
+            self.profile = profile
+            self._profile_changed = True
+        self._wake.set()
+
+    def _acoustic_period(self) -> float:
+        p = self.profile
+        return ACOUSTIC_PERIOD_S if p is None else float(p.ugps_acoustic_s)
+
+    def _raw(self) -> bool:
+        """Is the raw acoustic solution read, and every reply kept verbatim?"""
+        return self.profile is None or bool(self.profile.ugps_raw)
 
     def use_folder(self, folder: Path | None) -> None:
         """Write into `folder` (a flight's logs/ugps) from now on; None stops writing."""
@@ -321,6 +342,8 @@ class UgpsCapture:
                     changed = self._folder_changed
                     folder = self._want_folder
                     self._folder_changed = False
+                    reprofiled = self._profile_changed
+                    self._profile_changed = False
                 if session is None or host != self.host:
                     if session is not None:
                         session.close()
@@ -331,6 +354,11 @@ class UgpsCapture:
                                              user_agent="rov_flight_ops UGPS capture")
                     self._down, self._retry_at = False, 0.0
                     due = dict.fromkeys(due, 0.0)
+                if reprofiled and self.folder is not None and not changed:
+                    # Same folder, new capture under the new profile.
+                    self._close_files()
+                    self.folder = None
+                    changed, folder = True, self._want_folder
                 if changed:
                     self._switch_folder(folder)
                     due["slow"] = due["record"] = 0.0
@@ -382,8 +410,11 @@ class UgpsCapture:
                     return
         if now >= due["acoustic"]:
             # Kept on its cadence rather than drifting by each read's length.
-            due["acoustic"] = max(due["acoustic"] + ACOUSTIC_PERIOD_S, now)
+            due["acoustic"] = max(due["acoustic"] + self._acoustic_period(), now)
+            raw = self._raw()
             for source, path in g2.ACOUSTIC_PATHS.items():
+                if source != "filtered" and not raw:
+                    continue
                 if not self._poll_row(session, "acoustic", source, path, g2.parse_acoustic):
                     return
 
@@ -588,6 +619,8 @@ class UgpsCapture:
         headers = {"acoustic": ACOUSTIC_COLUMNS, "position": POSITION_COLUMNS,
                    "status": STATUS_COLUMNS, "http_raw": None, "events": None}
         for key, (suffix, _) in FILES.items():
+            if key == "http_raw" and not self._raw():
+                continue                 # Standard logging keeps no raw replies
             self._sinks[key] = _Sink(folder / f"{stem}{suffix}", key, headers[key],
                                      self._set_problem)
         self._receivers = [_ReceiverStats() for _ in range(g2.N_RECEIVERS)]
@@ -651,8 +684,11 @@ class UgpsCapture:
             "config_at_start": self._config_at_start,
             "config_at_end": self._config,
             "receivers_config": self._receivers_config,
-            "periods_s": {"acoustic": ACOUSTIC_PERIOD_S, "position": POSITION_PERIOD_S,
+            "periods_s": {"acoustic": self._acoustic_period(),
+                          "position": POSITION_PERIOD_S,
                           "status": STATUS_PERIOD_S, "slow": SLOW_PERIOD_S},
+            "logging_profile": self.profile.key if self.profile else "intensive",
+            "raw_acoustic": self._raw(),
             "receivers": {f"r{i}": s.describe() for i, s in enumerate(self._receivers)},
             "polls": self._polls,
             "files": {k: s.describe() for k, s in self._sinks.items()},

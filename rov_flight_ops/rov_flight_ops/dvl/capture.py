@@ -249,7 +249,7 @@ class _Sink:
     """One output file and its counts. Belongs to the thread that made it."""
 
     def __init__(self, capture: DvlCapture, key: str, *, binary: bool = False,
-                 header=None) -> None:
+                 header=None, enabled: bool = True) -> None:
         self.capture = capture
         self.key = key
         self.path: Path | None = None
@@ -262,7 +262,9 @@ class _Sink:
         self._flushed = time.monotonic()
         self._synced = time.monotonic()
         folder = capture.folder
-        if folder is None:
+        # Not written under this capture's logging profile: no file at all,
+        # and every write is a quiet no-op, exactly as with no folder.
+        if folder is None or not enabled:
             return
         self.path = folder / f"{capture.stem}{FILES[key][0]}"
         try:
@@ -397,7 +399,12 @@ class DvlCapture:
                  flight_id: Callable[[], str] | None = None,
                  live: LiveState | None = None,
                  vehicle: bool = True,
-                 tcp_port: int = P.TCP_PORT) -> None:
+                 tcp_port: int = P.TCP_PORT,
+                 profile=None) -> None:
+        from .. import logprofile
+        #: How much is written (`logprofile`). Everything, unless told
+        #: otherwise: the application passes the operator's choice.
+        self.profile = profile or logprofile.PROFILES[logprofile.INTENSIVE]
         self.folder = Path(folder) if folder else None
         self.vehicle_host = vehicle_host or "192.168.2.2"
         self.snapshot_hz = float(snapshot_hz)
@@ -496,13 +503,19 @@ class DvlCapture:
         self.snapshot_rates.append({"from_utc": webapi.utc(self.started),
                                     "hz": self.snapshot_hz})
         self.event("capture started",
-                   (f"writing {self.folder}" if self.folder else
+                   (f"writing {self.folder} ({self.profile.label} logging)"
+                    if self.folder else
                     "live view only — no flight folder, nothing is written"))
         self._check_disk()
         self.write_manifest(final=False)
-        targets = [(self._tcp_loop, "dvl-tcp"), (self._ws_loop, "dvl-ws"),
-                   (self._status_loop, "dvl-status"),
+        targets = [(self._tcp_loop, "dvl-tcp"), (self._status_loop, "dvl-status"),
                    (self._acoustic_loop, "dvl-acoustic")]
+        if self.profile.dvl_web_stream:
+            targets.insert(1, (self._ws_loop, "dvl-ws"))
+        else:
+            # Not opened at all: the web GUI's stream is orientation at 10 Hz
+            # and three fields the TCP reports lack, read for the drop hunt.
+            self.live.update(ws_error=f"off ({self.profile.label} logging)")
         if self._vehicle:
             targets.append((self._vehicle_loop, "dvl-vehicle"))
         for target, name in targets:
@@ -545,6 +558,16 @@ class DvlCapture:
     @property
     def running(self) -> bool:
         return bool(self.threads) and not self.stop_event.is_set()
+
+    def status_period_s(self) -> float:
+        """How often the DVL's status is read: the profile's, or full rate."""
+        p = self.profile.dvl_status_s
+        return STATUS_PERIOD_S if p is None else float(p)
+
+    def vehicle_period_s(self) -> float:
+        """How often the extension and mavlink2rest are read on the Pi."""
+        p = self.profile.dvl_vehicle_s
+        return VEHICLE_PERIOD_S if p is None else float(p)
 
     def _guarded(self, target, name: str) -> None:
         try:
@@ -716,6 +739,7 @@ class DvlCapture:
             "config_at_end": self.config_last,
             "time_at_start": self.time_first,
             "snapshot_rates": list(self.snapshot_rates),
+            "logging_profile": self.profile.key,
             "disk_free_bytes": self.disk_free,
             "files": files,
             "lines_by_kind": dict(self.kinds),
@@ -768,8 +792,10 @@ class DvlCapture:
 
     def _tcp_loop(self) -> None:
         sinks = {
-            "raw": _Sink(self, "tcp_raw", binary=True),
-            "index": _Sink(self, "tcp_index", header=INDEX_COLUMNS),
+            "raw": _Sink(self, "tcp_raw", binary=True,
+                         enabled=self.profile.dvl_raw_stream),
+            "index": _Sink(self, "tcp_index", header=INDEX_COLUMNS,
+                           enabled=self.profile.dvl_raw_stream),
             "velocity": _Sink(self, "velocity", header=VELOCITY_COLUMNS),
             "position": _Sink(self, "deadreckoning", header=POSITION_COLUMNS),
             "commands": _Sink(self, "commands", header=COMMAND_COLUMNS),
@@ -1210,7 +1236,7 @@ class DvlCapture:
     # ------------------------------------------------------------------
 
     def _status_loop(self) -> None:
-        sinks = {"raw": _Sink(self, "http_raw"),
+        sinks = {"raw": _Sink(self, "http_raw", enabled=self.profile.dvl_raw_http),
                  "status": _Sink(self, "status", header=STATUS_COLUMNS)}
         session: webapi.Session | None = None
         seq = 0
@@ -1308,7 +1334,7 @@ class DvlCapture:
                 if time.monotonic() >= next_manifest:
                     next_manifest = time.monotonic() + MANIFEST_EVERY_S
                     self.write_manifest(final=False)
-                self.stop_event.wait(max(0.2, STATUS_PERIOD_S
+                self.stop_event.wait(max(0.2, self.status_period_s()
                                          - (time.monotonic() - began)))
         finally:
             if session is not None:
@@ -1487,7 +1513,7 @@ class DvlCapture:
 
     def _vehicle_loop(self) -> None:
         from ..nav.mav2rest import NEVER_SENT
-        sinks = {"raw": _Sink(self, "vehicle_raw"),
+        sinks = {"raw": _Sink(self, "vehicle_raw", enabled=self.profile.dvl_raw_http),
                  "mavlink": _Sink(self, "mavlink", header=MAVLINK_COLUMNS)}
         ext_session: webapi.Session | None = None
         ext_next = 0.0
@@ -1582,7 +1608,7 @@ class DvlCapture:
                 self.live.merge("mavlink", {"_down": vehicle_down or ""})
                 for sink in sinks.values():
                     sink.tick()
-                self.stop_event.wait(max(0.2, VEHICLE_PERIOD_S
+                self.stop_event.wait(max(0.2, self.vehicle_period_s()
                                          - (time.monotonic() - began)))
         finally:
             if ext_session is not None:
